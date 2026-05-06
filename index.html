@@ -223,6 +223,7 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 
 <div id="modalRoot"></div>
 
+<script src="data.js"></script>
 <script>
 // =====================================================================
 // MOCK DATA — replace with SharePoint API calls later
@@ -282,373 +283,71 @@ function slaStatus(t) {
 const STATUSES = ['New', 'Tx Verified', 'In Progress', 'Ready to Ship', 'Shipped', 'Delivered', 'Canceled'];
 const STATUS_BADGE = { 'New': 'badge-new', 'Tx Verified': 'badge-verified', 'In Progress': 'badge-progress', 'Ready to Ship': 'badge-ready', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
 
-// Seeded from actual transfer sheets (last week of data from Lancaster, VB, Tucson, Seminole/FL)
-// All transfers route patient-pharmacy → Erie (fill sterile) → back to origin or direct to patient
+// Helper to build item entries
 function mkItem(id, drug, qty, rxNumber, doctor, doctorAddr, verified=false, notes='') {
-  return { id, drug, qty, rxNumber, receiptAttached: true, doctorName: doctor, doctorAddr, doctorPhone: '814-555-' + String(1000+id).slice(-4), doctorDEA: 'B'+String(doctor).substring(0,1)+String(1000000+id), txFormVerified: verified, notes };
+  return { id, drug, qty, rxNumber, receiptAttached: true, doctorName: doctor, doctorAddr, doctorPhone: '', doctorDEA: '', txFormVerified: verified, notes };
 }
 
-let TRANSFERS = [
-  // ===== LANCASTER (week of April 14 — from Lancaster Patient Status) =====
-  { id: 1001, patientName: 'Trescavage, Robbie', patientDOB: '1968-05-12', patientAllergies: 'NKA',
-    originLocation: 'Lancaster', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '1234 Main St', shipAddr2: '', shipCity: 'Lancaster', shipState: 'PA', shipZip: '17602',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
-    txEmailedDate: '2026-04-09', dateReceivedAtErie: '2026-04-10',
-    patientStatus: 'Order Shipped', coldItem: true,
-    anticipatedShipDate: '2026-04-14', dateShipped: '2026-04-14',
-    trackingNumber: '4727 7934 5886', paid: 'HealNow', dateReceivedByPatient: null,
-    status: 'Shipped', submittedBy: 'Lancaster Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-09T10:15:00',
-    pkSheet: { name: 'PK-Trescavage-2026-04-09.pdf', size: 184320, type: 'application/pdf' },
-    formula: { name: 'Formula-Sema-Month5.pdf', size: 96512, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10001, 'Semaglutide MDV — REFILL Month 5', '2ml MDV', 'RX-881201', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
-    comments: [ { id: 20001, itemId: null, author: 'Erie Sterile', ts: '2026-04-14T11:00:00', body: 'Shipped via FedEx priority with ice pack.' } ]
-  },
-  { id: 1002, patientName: 'Troutman, James', patientDOB: '1955-09-03', patientAllergies: 'Lidocaine',
-    originLocation: 'Lancaster', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '1234 Main St', shipAddr2: '', shipCity: 'Lancaster', shipState: 'PA', shipZip: '17602',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-04-09', dateReceivedAtErie: '2026-04-13',
-    patientStatus: 'Order Processed', coldItem: true,
-    anticipatedShipDate: '2026-04-16', dateShipped: null,
-    trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
-    status: 'In Progress', submittedBy: 'Lancaster Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-09T09:30:00',
-    pkSheet: { name: 'PK-Troutman-2026-04-09.pdf', size: 156890, type: 'application/pdf' },
-    formula: { name: 'Formula-TripleMix.pdf', size: 112040, type: 'application/pdf' },
-    hardCopy: { name: 'HC-Troutman.pdf', size: 88100, type: 'application/pdf' },
-    items: [ mkItem(10002, 'Triple Mix', '2mls + 10 N/S', 'RX-881230', 'Dr. Reynolds', '412 Wellness Way, Erie PA 16505', false, 'Verify doctor address against hard copy — new prescriber') ],
-    comments: [ { id: 20002, itemId: 10002, author: 'Erie Sterile', ts: '2026-04-13T14:22:00', body: 'New prescriber on this one — can Lancaster confirm address matches the hard copy?' } ]
-  },
-  { id: 1003, patientName: 'Zook, George', patientDOB: '1971-02-20', patientAllergies: 'Sulfa',
-    originLocation: 'Lancaster', fillLocation: 'Erie', shipTo: 'Delivery-Lancaster', deliveryCharge: '3',
-    shipAddr1: '78 Hometown Rd', shipAddr2: '', shipCity: 'Lancaster', shipState: 'PA', shipZip: '17603',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-04-09', dateReceivedAtErie: '2026-04-13',
-    patientStatus: 'Order Shipped', coldItem: true,
-    anticipatedShipDate: '2026-04-14', dateShipped: '2026-04-14',
-    trackingNumber: 'Local delivery', paid: 'HealNow', dateReceivedByPatient: null,
-    status: 'Shipped', submittedBy: 'Lancaster Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-09T11:00:00',
-    pkSheet: { name: 'PK-Zook.pdf', size: 143200, type: 'application/pdf' },
-    formula: { name: 'Formula-TripleMix-Refill.pdf', size: 98430, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10003, 'Refill Triple Mix', '5ML', 'RX-881245', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
-    comments: []
-  },
-  { id: 1004, patientName: 'Hosler, Jennifer', patientDOB: '1984-07-14', patientAllergies: 'NKA',
-    originLocation: 'Lancaster', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '1234 Main St', shipAddr2: '', shipCity: 'Lancaster', shipState: 'PA', shipZip: '17602',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-04-09', dateReceivedAtErie: '2026-04-10',
-    patientStatus: 'Order Shipped', coldItem: true,
-    anticipatedShipDate: '2026-04-14', dateShipped: '2026-04-14',
-    trackingNumber: '4727 7934 5886', paid: 'HealNow', dateReceivedByPatient: null,
-    status: 'Shipped', submittedBy: 'Lancaster Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-09T12:30:00',
-    pkSheet: { name: 'PK-Hosler.pdf', size: 152110, type: 'application/pdf' },
-    formula: { name: 'Formula-Sema-M5.pdf', size: 96512, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10004, 'Semaglutide MDV — REFILL Month 5', '2ml MDV', 'RX-881260', 'Dr. Kim', '88 Health Dr, Pittsburgh PA 15213', true) ],
-    comments: []
-  },
+let TRANSFERS = (typeof IMPORT_DATA !== 'undefined' ? IMPORT_DATA : []).map(d => ({
+  id: d.id,
+  patientName: d.patientName, patientDOB: '', patientAllergies: 'NKA',
+  originLocation: d.originLocation, fillLocation: d.fillLocation,
+  shipTo: d.shipTo, deliveryCharge: '',
+  shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
+  billing: (d.paid === 'HealNow' || d.paid === 'Healnow') ? 'HealNow' : (d.paid === 'Credit Card' || d.paid === 'CC') ? 'CreditCard' : (d.paid === 'Pay at Store' || d.paid === 'Pay In Store') ? 'PayInStore' : 'HealNow',
+  ccOnFileInPaladin: false,
+  semaDrAuthorized: d.semaDrAuthorized || 'NA',
+  txEmailedDate: d.txEmailedDate, dateReceivedAtErie: d.dateReceivedAtErie,
+  patientStatus: d.patientStatus || 'Pending', coldItem: d.coldItem,
+  anticipatedShipDate: d.anticipatedShipDate, dateShipped: d.dateShipped,
+  trackingNumber: d.trackingNumber || '', paid: d.paid || 'Pending',
+  dateReceivedByPatient: d.dateReceivedByPatient,
+  status: d.status,
+  submittedBy: d.originLocation + ' Tech', assignedTo: d.dateReceivedAtErie ? 'Erie Sterile' : null,
+  createdAt: d.createdAt,
+  pkSheet: null, formula: null, hardCopy: null,
+  items: [mkItem(d.id * 10, d.drug || '', d.qty || '', '', '', '', d.status === 'Delivered' || d.status === 'Shipped')],
+  comments: []
+}));
 
-  // ===== VIRGINIA BEACH (week of April 21) =====
-  { id: 1005, patientName: 'Shaffer, Sarah', patientDOB: '1978-11-22', patientAllergies: 'NKA',
-    originLocation: 'Virginia Beach', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '2020 Atlantic Ave', shipAddr2: '', shipCity: 'Virginia Beach', shipState: 'VA', shipZip: '23451',
-    billing: 'CreditCard', ccOnFileInPaladin: true, semaDrAuthorized: 'Yes',
-    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
-    patientStatus: 'Pending', coldItem: true,
-    anticipatedShipDate: '2026-04-21', dateShipped: null,
-    trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
-    status: 'New', submittedBy: 'VB Tech', assignedTo: null,
-    createdAt: '2026-04-15T09:00:00',
-    pkSheet: { name: 'PK-Shaffer.pdf', size: 178900, type: 'application/pdf' },
-    formula: { name: 'Formula-Sema-M2.pdf', size: 88740, type: 'application/pdf' },
-    hardCopy: { name: 'HC-Shaffer.pdf', size: 76100, type: 'application/pdf' },
-    items: [ mkItem(10005, 'Sema Month 2 (NRX)', '1ml', 'RX-900310', 'Dr. Rivera', '22 Wellness Blvd, Erie PA 16504', false) ],
-    comments: []
-  },
-  { id: 1006, patientName: 'Villaluz, Michangelo', patientDOB: '1989-06-15', patientAllergies: 'NKA',
-    originLocation: 'Virginia Beach', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '2020 Atlantic Ave', shipAddr2: '', shipCity: 'Virginia Beach', shipState: 'VA', shipZip: '23451',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
-    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
-    patientStatus: 'Pending', coldItem: true,
-    anticipatedShipDate: '2026-04-21', dateShipped: null,
-    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
-    status: 'Shipped', submittedBy: 'VB Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-15T09:15:00',
-    dateShipped_overriddenForDemo: true,
-    pkSheet: { name: 'PK-Villaluz.pdf', size: 166400, type: 'application/pdf' },
-    formula: { name: 'Formula-Tirz-M4.pdf', size: 102330, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10006, 'Tirzepatide Month 4 (NRX)', '4ml', 'RX-900311', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
-    comments: []
-  },
-  { id: 1007, patientName: 'Miles, Gina', patientDOB: '1962-03-04', patientAllergies: 'Penicillin',
-    originLocation: 'Virginia Beach', fillLocation: 'Erie', shipTo: 'Patient', deliveryCharge: '',
-    shipAddr1: '45 Oceanview Dr', shipAddr2: '', shipCity: 'Virginia Beach', shipState: 'VA', shipZip: '23452',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
-    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
-    patientStatus: 'Pending', coldItem: true,
-    anticipatedShipDate: '2026-04-21', dateShipped: null,
-    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
-    status: 'Shipped', submittedBy: 'VB Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-15T09:40:00',
-    pkSheet: { name: 'PK-Miles.pdf', size: 172500, type: 'application/pdf' },
-    formula: { name: 'Formula-Sema-M5.pdf', size: 96512, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10007, 'Sema Month 5 (NRX)', '2ml MDV', 'RX-900312', 'Dr. Kim', '88 Health Dr, Pittsburgh PA 15213', true) ],
-    comments: []
-  },
-  { id: 1008, patientName: 'Brickhouse, Carly', patientDOB: '1991-01-28', patientAllergies: 'NKA',
-    originLocation: 'Virginia Beach', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '2020 Atlantic Ave', shipAddr2: '', shipCity: 'Virginia Beach', shipState: 'VA', shipZip: '23451',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
-    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
-    patientStatus: 'Pending', coldItem: true,
-    anticipatedShipDate: '2026-04-21', dateShipped: null,
-    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
-    status: 'New', submittedBy: 'VB Tech', assignedTo: null,
-    createdAt: '2026-04-15T09:55:00',
-    pkSheet: { name: 'PK-Brickhouse.pdf', size: 164200, type: 'application/pdf' },
-    formula: { name: 'Formula-Tirz-M2.pdf', size: 89210, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10008, 'Tirzepatide Month 2 (NRX)', '2ml', 'RX-900313', 'Dr. Rivera', '22 Wellness Blvd, Erie PA 16504', false) ],
-    comments: []
-  },
-
-  // ===== TUCSON (week of April 1) =====
-  { id: 1009, patientName: 'Brevaire, Scott', patientDOB: '1965-12-02', patientAllergies: 'NKA',
-    originLocation: 'Tucson', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '500 Speedway Blvd', shipAddr2: '', shipCity: 'Tucson', shipState: 'AZ', shipZip: '85712',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-03-30', dateReceivedAtErie: '2026-03-30',
-    patientStatus: 'Order Shipped', coldItem: true,
-    anticipatedShipDate: '2026-04-01', dateShipped: '2026-04-01',
-    trackingNumber: '4727 7934 4250', paid: 'HealNow', dateReceivedByPatient: '2026-04-04',
-    status: 'Delivered', submittedBy: 'Tucson Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-03-30T10:00:00',
-    pkSheet: { name: 'PK-Brevaire.pdf', size: 165400, type: 'application/pdf' },
-    formula: { name: 'Formula-Tirz.pdf', size: 98320, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10009, 'Tirzepatide', '4x0.5ml', 'RX-850110', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
-    comments: []
-  },
-  { id: 1010, patientName: 'Switzer, Deborah', patientDOB: '1973-04-11', patientAllergies: 'NKA',
-    originLocation: 'Tucson', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '500 Speedway Blvd', shipAddr2: '', shipCity: 'Tucson', shipState: 'AZ', shipZip: '85712',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-03-30', dateReceivedAtErie: '2026-03-30',
-    patientStatus: 'Order Shipped', coldItem: true,
-    anticipatedShipDate: '2026-04-01', dateShipped: '2026-04-01',
-    trackingNumber: '4727 7934 4250', paid: 'HealNow', dateReceivedByPatient: '2026-04-04',
-    status: 'Delivered', submittedBy: 'Tucson Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-03-30T10:05:00',
-    pkSheet: { name: 'PK-Switzer.pdf', size: 158900, type: 'application/pdf' },
-    formula: { name: 'Formula-Tirz-Refill.pdf', size: 94100, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10010, 'Tirzepatide Refill', '4x0.5ml', '2550096', 'Dr. Kim', '88 Health Dr, Pittsburgh PA 15213', true) ],
-    comments: []
-  },
-  { id: 1011, patientName: 'Haugaard, Jennifer', patientDOB: '1982-08-19', patientAllergies: 'NKA',
-    originLocation: 'Tucson', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '500 Speedway Blvd', shipAddr2: '', shipCity: 'Tucson', shipState: 'AZ', shipZip: '85712',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-03-30', dateReceivedAtErie: '2026-03-30',
-    patientStatus: 'Order Shipped', coldItem: true,
-    anticipatedShipDate: '2026-04-01', dateShipped: '2026-04-01',
-    trackingNumber: '4727 7934 4250', paid: 'HealNow', dateReceivedByPatient: '2026-04-04',
-    status: 'Delivered', submittedBy: 'Tucson Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-03-30T10:10:00',
-    pkSheet: { name: 'PK-Haugaard.pdf', size: 162300, type: 'application/pdf' },
-    formula: { name: 'Formula-Sema-MDV-Refill.pdf', size: 91200, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10011, 'Sema MDV Refill', '2x2ml', '2549308', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
-    comments: []
-  },
-  { id: 1012, patientName: 'Krys, Gloria', patientDOB: '1960-10-05', patientAllergies: 'NKA',
-    originLocation: 'Tucson', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '500 Speedway Blvd', shipAddr2: '', shipCity: 'Tucson', shipState: 'AZ', shipZip: '85712',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-04-13', dateReceivedAtErie: '2026-04-14',
-    patientStatus: 'Order Processed', coldItem: true,
-    anticipatedShipDate: '2026-04-20', dateShipped: null,
-    trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
-    status: 'Tx Verified', submittedBy: 'Tucson Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-13T11:20:00',
-    pkSheet: { name: 'PK-Krys.pdf', size: 156000, type: 'application/pdf' },
-    formula: { name: 'Formula-Tirz-Refill.pdf', size: 94100, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10012, 'Tirzepatide Refill', '4x1ml', '2557088', 'Dr. Reynolds', '412 Wellness Way, Erie PA 16505', true) ],
-    comments: []
-  },
-
-  // ===== SEMINOLE / FLORIDA (week of April 20) =====
-  { id: 1013, patientName: 'Hoolehan, Matt', patientDOB: '1979-07-07', patientAllergies: 'NKA',
-    originLocation: 'Seminole', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '7000 113th St', shipAddr2: '', shipCity: 'Seminole', shipState: 'FL', shipZip: '33772',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
-    patientStatus: 'Order Processed', coldItem: true,
-    anticipatedShipDate: '2026-04-20', dateShipped: null,
-    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
-    status: 'Shipped', submittedBy: 'Seminole Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-15T08:30:00',
-    pkSheet: { name: 'PK-Hoolehan.pdf', size: 170200, type: 'application/pdf' },
-    formula: { name: 'Formula-Sema.pdf', size: 88900, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10013, 'Semaglutide', '2ml MDV', 'RX-877301', 'Dr. Kim', '88 Health Dr, Pittsburgh PA 15213', true) ],
-    comments: []
-  },
-  { id: 1014, patientName: 'Dorantes, Jennifer', patientDOB: '1987-02-14', patientAllergies: 'Sulfa',
-    originLocation: 'Seminole', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
-    shipAddr1: '7000 113th St', shipAddr2: '', shipCity: 'Seminole', shipState: 'FL', shipZip: '33772',
-    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
-    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
-    patientStatus: 'Order Processed', coldItem: true,
-    anticipatedShipDate: '2026-04-20', dateShipped: null,
-    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
-    status: 'Shipped', submittedBy: 'Seminole Tech', assignedTo: 'Erie Sterile',
-    createdAt: '2026-04-15T08:45:00',
-    pkSheet: { name: 'PK-Dorantes.pdf', size: 168900, type: 'application/pdf' },
-    formula: { name: 'Formula-Tirz.pdf', size: 98320, type: 'application/pdf' },
-    hardCopy: { name: 'HC-Dorantes.pdf', size: 72400, type: 'application/pdf' },
-    items: [ mkItem(10014, 'Tirzepatide', '2ml', 'RX-877302', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
-    comments: []
-  },
-  { id: 1015, patientName: 'Icely, William', patientDOB: '1952-05-30', patientAllergies: 'NKA',
-    originLocation: 'Seminole', fillLocation: 'Erie', shipTo: 'Patient', deliveryCharge: '',
-    shipAddr1: '88 Palm Way', shipAddr2: 'Unit 12', shipCity: 'St. Petersburg', shipState: 'FL', shipZip: '33701',
-    billing: 'CreditCard', ccOnFileInPaladin: true, semaDrAuthorized: 'NA',
-    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
-    patientStatus: 'Order Processed', coldItem: true,
-    anticipatedShipDate: '2026-04-20', dateShipped: null,
-    trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
-    status: 'New', submittedBy: 'Seminole Tech', assignedTo: null,
-    createdAt: '2026-04-15T09:10:00',
-    pkSheet: { name: 'PK-Icely.pdf', size: 161500, type: 'application/pdf' },
-    formula: { name: 'Formula-Sema.pdf', size: 88900, type: 'application/pdf' },
-    hardCopy: null,
-    items: [ mkItem(10015, 'Semaglutide', '2ml MDV', 'RX-877303', 'Dr. Reynolds', '412 Wellness Way, Erie PA 16505', false, 'Ship directly to patient in St. Pete') ],
-    comments: []
-  },
-
-  // ===== Original demo examples =====
-  {
-    id: 1, title: 'Atwater, Laura — Dec 1',
-    patientName: 'Atwater, Laura', patientDOB: '1982-04-12', patientAllergies: 'NKA',
-    originLocation: 'Lancaster', fillLocation: 'Erie',
-    shipTo: 'Patient', deliveryCharge: null,
-    shipAddr1: '123 Palm Way', shipAddr2: '', shipCity: 'Naples', shipState: 'FL', shipZip: '34102',
-    billing: 'HealNow', ccOnFileInPaladin: false,
-    semaDrAuthorized: 'Yes',
-    txEmailedDate: '2025-11-25', dateReceivedAtErie: '2025-11-26',
-    patientStatus: 'Order Processed', coldItem: true,
-    anticipatedShipDate: '2025-12-01', dateShipped: '2025-12-01',
-    trackingNumber: '4727 7933 2371', paid: 'HealNow',
-    dateReceivedByPatient: '2025-12-03',
-    status: 'Delivered',
-    submittedBy: 'Carmen', assignedTo: 'Erie Sterile',
-    createdAt: '2025-11-25T14:30:00',
-    items: [
-      { id: 11, drug: 'Semaglutide 2.5mg/ml', qty: '2ml vial', rxNumber: 'RX-881234', receiptAttached: true, doctorName: 'Dr. Patel', doctorAddr: '555 Med Plaza, Erie PA 16501', doctorPhone: '814-555-0110', doctorDEA: 'BP1234567', txFormVerified: true, notes: '' }
-    ],
-    comments: [
-      { id: 101, itemId: null, author: 'Carmen', ts: '2025-11-25T14:35:00', body: 'Tx sent to Erie, waiting on dr authorization confirmation.' },
-      { id: 102, itemId: 11, author: 'Erie Sterile', ts: '2025-11-26T09:12:00', body: 'Authorization received. Filling today.' }
-    ]
-  },
-  {
-    id: 2, title: 'Ciraci, Toni — Dec 1',
-    patientName: 'Ciraci, Toni', patientDOB: '1975-08-02', patientAllergies: 'Sulfa',
-    originLocation: 'Lancaster', fillLocation: 'Erie',
-    shipTo: 'Patient', deliveryCharge: null,
-    shipAddr1: '9 Ocean Ave', shipAddr2: 'Apt 4', shipCity: 'Jacksonville', shipState: 'FL', shipZip: '32202',
-    billing: 'CreditCard', ccOnFileInPaladin: true,
-    semaDrAuthorized: 'NA',
-    txEmailedDate: null, dateReceivedAtErie: '2025-11-25',
-    patientStatus: 'Order Processed', coldItem: true,
-    anticipatedShipDate: '2025-12-01', dateShipped: null,
-    trackingNumber: '', paid: 'Pending',
-    dateReceivedByPatient: null,
-    status: 'In Progress',
-    submittedBy: 'Jennifer', assignedTo: 'Erie Sterile',
-    createdAt: '2025-11-25T10:00:00',
-    items: [
-      { id: 21, drug: 'Testosterone Cyp 200mg/ml', qty: '10ml', rxNumber: 'RX-882001', receiptAttached: true, doctorName: 'Dr. Kim', doctorAddr: '88 Health Dr, Pittsburgh PA 15213', doctorPhone: '412-555-0144', doctorDEA: 'BK2334456', txFormVerified: false, notes: 'Double check DEA on hard copy' }
-    ],
-    comments: [
-      { id: 201, itemId: 21, author: 'Erie Sterile', ts: '2025-11-26T08:30:00', body: 'Printed PK transfer form. Need someone at Lancaster to confirm doctor address matches hard copy before we fill.' }
-    ]
-  },
-  {
-    id: 3, title: 'New submission — pending',
-    patientName: 'Smith, Angela', patientDOB: '1990-02-15', patientAllergies: 'Penicillin',
-    originLocation: 'Warren', fillLocation: 'Erie',
-    shipTo: 'Pharmacy', deliveryCharge: null,
-    shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
-    billing: 'PayInStore', ccOnFileInPaladin: false,
-    semaDrAuthorized: 'Yes',
-    txEmailedDate: '2026-04-14', dateReceivedAtErie: null,
-    patientStatus: 'Pending', coldItem: false,
-    anticipatedShipDate: '2026-04-18', dateShipped: null,
-    trackingNumber: '', paid: 'Pending',
-    dateReceivedByPatient: null,
-    status: 'New',
-    submittedBy: 'Warren Tech', assignedTo: null,
-    createdAt: '2026-04-14T11:00:00',
-    items: [
-      { id: 31, drug: 'Progesterone 100mg cap', qty: '#90', rxNumber: 'RX-900112', receiptAttached: false, doctorName: 'Dr. Rivera', doctorAddr: '22 Wellness Blvd, Erie PA 16504', doctorPhone: '814-555-0190', doctorDEA: '', txFormVerified: false, notes: '' }
-    ],
-    comments: []
-  }
-];
-
-let SHIPMENTS = [
-  {
-    id: 501, fromLocation: 'Erie', toLocation: 'Patient', destinationType: 'Patient',
-    carrier: 'FedEx', trackingNumber: '4727 7933 2371', labelGenerated: true,
-    status: 'Delivered', shipDate: '2025-12-01', deliveredDate: '2025-12-03', receivedDate: '2025-12-03', receivedBy: 'Patient signature',
-    transferIds: [1], createdAt: '2025-11-30T16:00:00', createdBy: 'Erie Sterile'
-  },
-  {
-    id: 502, fromLocation: 'Erie', toLocation: 'Lancaster', destinationType: 'Pharmacy',
-    carrier: 'FedEx', trackingNumber: '4727 7934 5886', labelGenerated: true,
-    status: 'In Transit', shipDate: '2026-04-14', deliveredDate: null, receivedDate: null, receivedBy: null,
-    transferIds: [1001, 1003, 1004], createdAt: '2026-04-14T15:30:00', createdBy: 'Erie Sterile',
+// Auto-generate shipments from unique tracking numbers in transfer data
+let SHIPMENTS = (() => {
+  const trackMap = {};
+  TRANSFERS.forEach(t => {
+    if (!t.trackingNumber) return;
+    // Some tracking fields have multiple numbers separated by + or &
+    const nums = t.trackingNumber.split(/\s*[+&;]\s*/);
+    nums.forEach(tn => {
+      tn = tn.trim();
+      if (!tn || tn.length < 5) return;
+      if (!trackMap[tn]) trackMap[tn] = { transfers: [], origin: t.originLocation, shipped: t.dateShipped, delivered: t.dateReceivedByPatient };
+      trackMap[tn].transfers.push(t.id);
+    });
+  });
+  let sid = 500;
+  return Object.entries(trackMap).map(([tn, info]) => ({
+    id: ++sid,
+    fromLocation: 'Erie',
+    toLocation: info.origin,
+    destinationType: 'Pharmacy',
+    carrier: 'FedEx',
+    trackingNumber: tn,
+    labelGenerated: true,
+    status: info.delivered ? 'Received' : info.shipped ? 'Delivered' : 'Pending',
+    shipDate: info.shipped,
+    deliveredDate: info.delivered || info.shipped,
+    receivedDate: info.delivered,
+    receivedBy: info.delivered ? info.origin + ' Tech' : null,
+    transferIds: info.transfers,
+    createdAt: (info.shipped || '2026-01-01') + 'T00:00:00',
+    createdBy: 'Erie Sterile',
     unpacked: {}
-  },
-  {
-    id: 503, fromLocation: 'Erie', toLocation: 'Tucson', destinationType: 'Pharmacy',
-    carrier: 'FedEx', trackingNumber: '4727 7934 4250', labelGenerated: true,
-    status: 'Received', shipDate: '2026-04-01', deliveredDate: '2026-04-04', receivedDate: '2026-04-04', receivedBy: 'Tucson Tech',
-    transferIds: [1009, 1010, 1011], createdAt: '2026-03-31T16:00:00', createdBy: 'Erie Sterile',
-    unpacked: { 10009: true, 10010: true, 10011: true }
-  },
-  // EXAMPLE: Delivered to Virginia Beach, ready for unpacking — switch to VB Tech user to try the receive flow
-  {
-    id: 504, fromLocation: 'Erie', toLocation: 'Virginia Beach', destinationType: 'Pharmacy',
-    carrier: 'FedEx', trackingNumber: '7712 8801 2266', labelGenerated: true,
-    status: 'Delivered', shipDate: '2026-04-13', deliveredDate: '2026-04-15', receivedDate: null, receivedBy: null,
-    transferIds: [1006, 1007], createdAt: '2026-04-13T14:00:00', createdBy: 'Erie Sterile',
-    unpacked: {}, damagePhotos: []
-  },
-  // EXAMPLE: In Transit to Seminole — switch to Seminole Tech user to try "Arrived at my pharmacy"
-  {
-    id: 505, fromLocation: 'Erie', toLocation: 'Seminole', destinationType: 'Pharmacy',
-    carrier: 'FedEx', trackingNumber: '7712 9944 3311', labelGenerated: true,
-    status: 'In Transit', shipDate: '2026-04-14', deliveredDate: null, receivedDate: null, receivedBy: null,
-    transferIds: [1013, 1014], createdAt: '2026-04-14T15:00:00', createdBy: 'Erie Sterile',
-    unpacked: {}, damagePhotos: []
-  }
-];
+  }));
+})();
 
-let _nextId = 1000;
+// end of auto-generated shipments
+
+let _nextId = 20000;
 const nextId = () => ++_nextId;
 
 // =====================================================================
