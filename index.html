@@ -1,0 +1,1762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PI Transfer Tracker</title>
+<link rel="icon" href="favicon.png" />
+<style>
+:root {
+  --primary: #2a6ebb; --primary-dark: #233f76; --primary-darker: #172a4f;
+  --primary-light: #50a0d6; --primary-lighter: #8bc2e4; --primary-bg: #cfdbed;
+  --accent: #303c9d; --sky: #309bdb;
+  --success: #16a34a; --success-bg: #f0fdf4;
+  --warning: #d97706; --warning-bg: #fffbeb;
+  --danger: #dc2626; --danger-bg: #fef2f2;
+  --info: #0891b2; --info-bg: #ecfeff;
+  --gray-50: #f8fafc; --gray-100: #f1f5f9; --gray-200: #e2e8f0; --gray-300: #cbd5e1;
+  --gray-400: #94a3b8; --gray-500: #64748b; --gray-600: #475569; --gray-700: #334155;
+  --gray-800: #1e293b; --gray-900: #0f172a;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
+  --shadow-md: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--gray-50); color: var(--gray-800); font-size: 14px; line-height: 1.5; }
+
+/* Navbar */
+.navbar { position: sticky; top: 0; z-index: 100; background: linear-gradient(135deg, var(--primary-darker), var(--primary-dark)); height: 64px; box-shadow: 0 2px 8px rgba(23,42,79,.3); display: flex; align-items: center; padding: 0 24px; color: white; }
+.navbar .logo { height: 40px; filter: brightness(1.1); margin-right: 16px; }
+.navbar .brand { display: flex; flex-direction: column; line-height: 1.2; }
+.navbar .brand-title { font-weight: 600; font-size: 15px; }
+.navbar .brand-sub { font-size: 12px; opacity: .85; }
+.navbar .spacer { flex: 1; }
+.navbar .user { font-size: 13px; opacity: .9; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; background: white; padding: 0 24px; border-bottom: 1px solid var(--gray-200); box-shadow: var(--shadow); }
+.tab { padding: 14px 18px; border: none; background: none; font-size: 14px; color: var(--gray-600); cursor: pointer; border-bottom: 3px solid transparent; font-weight: 500; }
+.tab:hover { color: var(--primary); }
+.tab.active { color: var(--sky); border-bottom-color: var(--sky); }
+
+/* Layout */
+.container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.page-title { font-size: 22px; font-weight: 600; color: var(--gray-900); }
+
+/* Buttons */
+.btn { padding: 8px 16px; border: 1px solid transparent; border-radius: var(--radius); font-size: 14px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all .15s; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-secondary { background: white; color: var(--gray-700); border-color: var(--gray-300); }
+.btn-secondary:hover { background: var(--gray-50); }
+.btn-danger { background: var(--danger); color: white; }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* Cards */
+.card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px; }
+.card-header { padding: 14px 18px; border-bottom: 1px solid var(--gray-200); display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.card-body { padding: 18px; }
+
+/* Filters */
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+.filters input, .filters select { padding: 7px 10px; border: 1px solid var(--gray-300); border-radius: var(--radius); font-size: 13px; background: white; }
+
+/* Table */
+table { width: 100%; background: white; border-collapse: collapse; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+thead { background: var(--gray-100); }
+th { text-align: left; padding: 10px 12px; font-size: 12px; font-weight: 600; color: var(--gray-600); text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--gray-200); }
+td { padding: 12px; border-bottom: 1px solid var(--gray-100); font-size: 13px; }
+tbody tr { cursor: pointer; transition: background .1s; }
+tbody tr:hover { background: var(--primary-bg); }
+
+/* Status badges */
+.badge { display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.badge-new { background: var(--info-bg); color: var(--info); }
+.badge-verified { background: var(--primary-bg); color: var(--primary-dark); }
+.badge-progress { background: var(--warning-bg); color: var(--warning); }
+.badge-ready { background: #fef3c7; color: #92400e; }
+.badge-shipped { background: var(--success-bg); color: var(--success); }
+.badge-delivered { background: #dbeafe; color: #1e40af; }
+.badge-canceled { background: var(--gray-200); color: var(--gray-600); }
+.badge-cold { background: var(--info-bg); color: var(--info); margin-left: 4px; }
+
+/* Form */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+.form-grid.single { grid-template-columns: 1fr; }
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-group.full { grid-column: 1 / -1; }
+.form-group label { font-size: 12px; font-weight: 600; color: var(--gray-700); text-transform: uppercase; letter-spacing: .03em; }
+.form-group input, .form-group select, .form-group textarea { padding: 9px 10px; border: 1px solid var(--gray-300); border-radius: var(--radius); font-size: 14px; font-family: inherit; background: white; }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(42,110,187,.15); }
+.form-group textarea { resize: vertical; min-height: 70px; }
+.form-group .hint { font-size: 11px; color: var(--gray-500); }
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.checkbox-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--primary); }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.5); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; }
+.modal { background: white; border-radius: 12px; max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 40px rgba(0,0,0,.2); }
+.modal-header { padding: 18px 22px; border-bottom: 1px solid var(--gray-200); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: white; z-index: 2; }
+.modal-title { font-size: 18px; font-weight: 600; }
+.modal-close { background: none; border: none; font-size: 24px; color: var(--gray-500); cursor: pointer; line-height: 1; }
+.modal-body { padding: 22px; }
+.modal-footer { padding: 16px 22px; border-top: 1px solid var(--gray-200); display: flex; justify-content: flex-end; gap: 8px; position: sticky; bottom: 0; background: white; }
+
+/* Sections */
+.section { margin-top: 20px; }
+.section-title { font-size: 13px; font-weight: 600; color: var(--gray-600); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--primary-bg); }
+
+/* Items list */
+.item-row { background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; }
+.item-row.unverified { border-left: 4px solid var(--warning); }
+.item-row.verified { border-left: 4px solid var(--success); }
+.item-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.item-title { font-weight: 600; color: var(--gray-800); }
+.item-sub { font-size: 12px; color: var(--gray-500); }
+
+/* Comments */
+.comment { background: var(--gray-50); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px; }
+.comment-meta { display: flex; gap: 10px; font-size: 12px; color: var(--gray-500); margin-bottom: 4px; }
+.comment-author { font-weight: 600; color: var(--primary-dark); }
+.comment-body { font-size: 13px; color: var(--gray-800); }
+.comment-scope { display: inline-block; background: var(--primary-bg); color: var(--primary-dark); font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 600; }
+
+/* Empty state */
+.empty { text-align: center; padding: 50px 20px; color: var(--gray-500); }
+.empty h3 { color: var(--gray-700); margin-bottom: 6px; }
+
+/* Status select inline */
+select.status-select { font-size: 12px; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--gray-300); }
+
+.pill-warn { background: var(--warning-bg); color: var(--warning); padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.pill-danger { background: var(--danger-bg); color: var(--danger); padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+
+/* SLA indicators */
+.sla-ok { color: var(--success); }
+.sla-warn { color: var(--warning); font-weight: 600; }
+.sla-breach { color: var(--danger); font-weight: 700; }
+tr.row-sla-breach { background: var(--danger-bg) !important; }
+tr.row-sla-warn { background: var(--warning-bg) !important; }
+
+/* Global search */
+.global-search { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25); color: white; padding: 7px 12px; border-radius: 6px; font-size: 13px; width: 240px; }
+.global-search::placeholder { color: rgba(255,255,255,.7); }
+.global-search:focus { outline: none; background: rgba(255,255,255,.25); }
+.global-results { position: absolute; top: 58px; right: 200px; background: white; color: var(--gray-800); border-radius: var(--radius); box-shadow: var(--shadow-md); max-height: 400px; overflow-y: auto; width: 380px; z-index: 150; border: 1px solid var(--gray-200); }
+.global-result { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--gray-100); font-size: 13px; }
+.global-result:hover { background: var(--primary-bg); }
+.global-result .meta { font-size: 11px; color: var(--gray-500); }
+
+/* User switcher */
+.user-switcher { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25); color: white; padding: 6px 10px; border-radius: 6px; font-size: 12px; margin-right: 10px; cursor: pointer; }
+.user-switcher option { color: var(--gray-800); }
+
+/* KPI card */
+.kpi-card { background: white; border-radius: var(--radius); border: 1px solid var(--gray-200); padding: 16px; box-shadow: var(--shadow); }
+.kpi-label { font-size: 11px; color: var(--gray-500); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.kpi-value { font-size: 26px; font-weight: 700; color: var(--primary-dark); }
+.kpi-sub { font-size: 11px; color: var(--gray-500); margin-top: 4px; }
+
+/* Photo thumbnails */
+.photo-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.photo-thumb { width: 72px; height: 72px; border-radius: 6px; border: 1px solid var(--gray-300); background-size: cover; background-position: center; position: relative; }
+.photo-thumb .rm { position: absolute; top: -6px; right: -6px; background: var(--danger); color: white; border-radius: 50%; width: 18px; height: 18px; border: none; font-size: 11px; cursor: pointer; line-height: 1; }
+
+/* Mobile */
+@media (max-width: 900px) {
+  .navbar { padding: 0 12px; flex-wrap: wrap; height: auto; min-height: 64px; }
+  .navbar .logo { height: 32px; }
+  .navbar .brand-title { font-size: 13px; }
+  .navbar .brand-sub { font-size: 11px; }
+  .navbar .global-search { width: 100%; margin-top: 8px; order: 10; }
+  .navbar .user-switcher { font-size: 11px; }
+  .tabs { overflow-x: auto; padding: 0 8px; }
+  .tab { padding: 12px 12px; font-size: 13px; white-space: nowrap; }
+  .container { padding: 12px; }
+  .page-title { font-size: 18px; }
+  .form-grid { grid-template-columns: 1fr; }
+  table { display: block; overflow-x: auto; white-space: nowrap; }
+  .modal { max-height: 95vh; }
+  .modal-body { padding: 14px; }
+}
+
+/* Barcode scan input */
+.scan-bar { display: flex; gap: 8px; align-items: center; background: var(--primary-bg); padding: 10px 14px; border-radius: var(--radius); margin-bottom: 14px; }
+.scan-bar input { flex: 1; padding: 9px 12px; border: 1px solid var(--primary-light); border-radius: 6px; font-size: 14px; font-family: monospace; }
+.scan-bar .label { font-weight: 600; color: var(--primary-dark); font-size: 13px; }
+</style>
+</head>
+<body>
+<nav class="navbar" style="position:relative">
+  <img src="logo.png" alt="PI" class="logo" />
+  <div class="brand">
+    <div class="brand-title">Pharmacy Innovations</div>
+    <div class="brand-sub">Inter-Pharmacy Transfer Tracker</div>
+  </div>
+  <div class="spacer"></div>
+  <input type="text" class="global-search" id="globalSearch" placeholder="🔎 Search any patient / Rx / tracking / doctor..." />
+  <div id="globalResults" class="global-results" style="display:none"></div>
+  <select class="user-switcher" id="userSwitcher" title="Switch user (demo)"></select>
+  <div class="user" id="userInfo"></div>
+</nav>
+
+<div class="tabs">
+  <button class="tab active" data-tab="transfers">Transfers</button>
+  <button class="tab" data-tab="new">+ New Transfer</button>
+  <button class="tab" data-tab="pharmreview">Pharmacist Review <span id="reviewBadge" style="background:var(--warning);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
+  <button class="tab" data-tab="shipments">Shipments <span id="incomingBadge" style="background:var(--warning);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
+  <button class="tab" data-tab="sla">SLA Alerts <span id="slaBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
+  <button class="tab" data-tab="stats">Reports</button>
+  <button class="tab" data-tab="admin" data-admin-only>Admin</button>
+</div>
+
+<div class="container">
+  <div id="view-transfers"></div>
+  <div id="view-new" style="display:none"></div>
+  <div id="view-pharmreview" style="display:none"></div>
+  <div id="view-shipments" style="display:none"></div>
+  <div id="view-sla" style="display:none"></div>
+  <div id="view-stats" style="display:none"></div>
+  <div id="view-admin" style="display:none"></div>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+// =====================================================================
+// MOCK DATA — replace with SharePoint API calls later
+// =====================================================================
+const LOCATIONS = ['Erie', 'Lancaster', 'Greenville', 'Houston', 'Tucson', 'Flower Mound', 'Denton', 'Corinth', 'Jamestown', 'Virginia Beach', 'Seminole'];
+
+// Demo users — in production these come from MSAL / Azure AD + SharePoint group membership
+let USERS = [
+  { name: 'Ashley Brown', email: 'abrown@pharmacyinnovations.net', location: 'Erie', role: 'admin' },
+  { name: 'Erie Sterile Tech', email: 'sterile@pharmacyinnovations.net', location: 'Erie', role: 'tech' },
+  { name: 'Lancaster Tech', email: 'lancaster@pharmacyinnovations.net', location: 'Lancaster', role: 'tech' },
+  { name: 'VB Tech', email: 'vb@pharmacyinnovations.net', location: 'Virginia Beach', role: 'tech' },
+  { name: 'Tucson Tech', email: 'tucson@pharmacyinnovations.net', location: 'Tucson', role: 'tech' },
+  { name: 'Seminole Tech', email: 'seminole@pharmacyinnovations.net', location: 'Seminole', role: 'tech' },
+  { name: 'Carmen (Manager)', email: 'carmen@pharmacyinnovations.net', location: 'Lancaster', role: 'manager' }
+];
+let CURRENT_USER = USERS[0]; // defaults to admin for demo
+
+// SLA rules (hours allowed per status before breach)
+let SLA_RULES = { 'New': 24, 'Tx Verified': 48, 'In Progress': 72, 'Ready to Ship': 24 };
+
+// Formula library — reusable formulas scoped to the originating location
+let FORMULAS = [
+  { id: 701, name: 'Semaglutide MDV — Month 5 Refill', location: 'Lancaster', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/sema-m5.pdf', fileName: 'sema-m5.pdf', createdBy: 'Lancaster Tech', createdAt: '2026-01-10T10:00:00' },
+  { id: 702, name: 'Tirzepatide Month 4', location: 'Lancaster', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/tirz-m4.pdf', fileName: 'tirz-m4.pdf', createdBy: 'Lancaster Tech', createdAt: '2026-01-10T10:05:00' },
+  { id: 703, name: 'Triple Mix Standard', location: 'Lancaster', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/triple-mix.pdf', fileName: 'triple-mix.pdf', createdBy: 'Lancaster Tech', createdAt: '2026-02-01T09:00:00' },
+  { id: 704, name: 'Semaglutide — NRX Month 2', location: 'Virginia Beach', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/vb-sema-m2.pdf', fileName: 'vb-sema-m2.pdf', createdBy: 'VB Tech', createdAt: '2026-02-15T11:00:00' },
+  { id: 705, name: 'Tirzepatide — NRX Month 2-4', location: 'Virginia Beach', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/vb-tirz.pdf', fileName: 'vb-tirz.pdf', createdBy: 'VB Tech', createdAt: '2026-02-15T11:05:00' },
+  { id: 706, name: 'Tirzepatide Standard', location: 'Tucson', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/az-tirz.pdf', fileName: 'az-tirz.pdf', createdBy: 'Tucson Tech', createdAt: '2026-02-20T14:00:00' },
+  { id: 707, name: 'Semaglutide MDV Standard', location: 'Tucson', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/az-sema-mdv.pdf', fileName: 'az-sema-mdv.pdf', createdBy: 'Tucson Tech', createdAt: '2026-02-20T14:05:00' },
+  { id: 708, name: 'Semaglutide Standard', location: 'Seminole', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/fl-sema.pdf', fileName: 'fl-sema.pdf', createdBy: 'Seminole Tech', createdAt: '2026-03-01T10:00:00' },
+  { id: 709, name: 'Tirzepatide Standard', location: 'Seminole', link: 'https://pharmacyinnovationsnet.sharepoint.com/formulas/fl-tirz.pdf', fileName: 'fl-tirz.pdf', createdBy: 'Seminole Tech', createdAt: '2026-03-01T10:05:00' }
+];
+// Location-based visibility: admins see everything; everyone else sees only
+// transfers/shipments where their location is origin, fill, or destination.
+function canSeeTransfer(t) {
+  if (CURRENT_USER.role === 'admin') return true;
+  return t.originLocation === CURRENT_USER.location || t.fillLocation === CURRENT_USER.location;
+}
+function canSeeShipment(s) {
+  if (CURRENT_USER.role === 'admin') return true;
+  return s.fromLocation === CURRENT_USER.location || s.toLocation === CURRENT_USER.location;
+}
+function visibleTransfers() { return TRANSFERS.filter(canSeeTransfer); }
+function visibleShipments() { return SHIPMENTS.filter(canSeeShipment); }
+
+function slaStatus(t) {
+  const hoursLimit = SLA_RULES[t.status];
+  if (!hoursLimit) return { state: 'none', hoursOver: 0 };
+  const lastChange = new Date(t.createdAt);
+  const hoursIn = (Date.now() - lastChange.getTime()) / 3600000;
+  if (hoursIn > hoursLimit) return { state: 'breach', hoursOver: hoursIn - hoursLimit };
+  if (hoursIn > hoursLimit * 0.75) return { state: 'warn', hoursOver: 0 };
+  return { state: 'ok', hoursOver: 0 };
+}
+
+const STATUSES = ['New', 'Tx Verified', 'In Progress', 'Ready to Ship', 'Shipped', 'Delivered', 'Canceled'];
+const STATUS_BADGE = { 'New': 'badge-new', 'Tx Verified': 'badge-verified', 'In Progress': 'badge-progress', 'Ready to Ship': 'badge-ready', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
+
+// Seeded from actual transfer sheets (last week of data from Lancaster, VB, Tucson, Seminole/FL)
+// All transfers route patient-pharmacy → Erie (fill sterile) → back to origin or direct to patient
+function mkItem(id, drug, qty, rxNumber, doctor, doctorAddr, verified=false, notes='') {
+  return { id, drug, qty, rxNumber, receiptAttached: true, doctorName: doctor, doctorAddr, doctorPhone: '814-555-' + String(1000+id).slice(-4), doctorDEA: 'B'+String(doctor).substring(0,1)+String(1000000+id), txFormVerified: verified, notes };
+}
+
+let TRANSFERS = [
+  // ===== LANCASTER (week of April 14 — from Lancaster Patient Status) =====
+  { id: 1001, patientName: 'Trescavage, Robbie', patientDOB: '1968-05-12', patientAllergies: 'NKA',
+    originLocation: 'Lancaster', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '1234 Main St', shipAddr2: '', shipCity: 'Lancaster', shipState: 'PA', shipZip: '17602',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
+    txEmailedDate: '2026-04-09', dateReceivedAtErie: '2026-04-10',
+    patientStatus: 'Order Shipped', coldItem: true,
+    anticipatedShipDate: '2026-04-14', dateShipped: '2026-04-14',
+    trackingNumber: '4727 7934 5886', paid: 'HealNow', dateReceivedByPatient: null,
+    status: 'Shipped', submittedBy: 'Lancaster Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-09T10:15:00',
+    pkSheet: { name: 'PK-Trescavage-2026-04-09.pdf', size: 184320, type: 'application/pdf' },
+    formula: { name: 'Formula-Sema-Month5.pdf', size: 96512, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10001, 'Semaglutide MDV — REFILL Month 5', '2ml MDV', 'RX-881201', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
+    comments: [ { id: 20001, itemId: null, author: 'Erie Sterile', ts: '2026-04-14T11:00:00', body: 'Shipped via FedEx priority with ice pack.' } ]
+  },
+  { id: 1002, patientName: 'Troutman, James', patientDOB: '1955-09-03', patientAllergies: 'Lidocaine',
+    originLocation: 'Lancaster', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '1234 Main St', shipAddr2: '', shipCity: 'Lancaster', shipState: 'PA', shipZip: '17602',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-04-09', dateReceivedAtErie: '2026-04-13',
+    patientStatus: 'Order Processed', coldItem: true,
+    anticipatedShipDate: '2026-04-16', dateShipped: null,
+    trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
+    status: 'In Progress', submittedBy: 'Lancaster Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-09T09:30:00',
+    pkSheet: { name: 'PK-Troutman-2026-04-09.pdf', size: 156890, type: 'application/pdf' },
+    formula: { name: 'Formula-TripleMix.pdf', size: 112040, type: 'application/pdf' },
+    hardCopy: { name: 'HC-Troutman.pdf', size: 88100, type: 'application/pdf' },
+    items: [ mkItem(10002, 'Triple Mix', '2mls + 10 N/S', 'RX-881230', 'Dr. Reynolds', '412 Wellness Way, Erie PA 16505', false, 'Verify doctor address against hard copy — new prescriber') ],
+    comments: [ { id: 20002, itemId: 10002, author: 'Erie Sterile', ts: '2026-04-13T14:22:00', body: 'New prescriber on this one — can Lancaster confirm address matches the hard copy?' } ]
+  },
+  { id: 1003, patientName: 'Zook, George', patientDOB: '1971-02-20', patientAllergies: 'Sulfa',
+    originLocation: 'Lancaster', fillLocation: 'Erie', shipTo: 'Delivery-Lancaster', deliveryCharge: '3',
+    shipAddr1: '78 Hometown Rd', shipAddr2: '', shipCity: 'Lancaster', shipState: 'PA', shipZip: '17603',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-04-09', dateReceivedAtErie: '2026-04-13',
+    patientStatus: 'Order Shipped', coldItem: true,
+    anticipatedShipDate: '2026-04-14', dateShipped: '2026-04-14',
+    trackingNumber: 'Local delivery', paid: 'HealNow', dateReceivedByPatient: null,
+    status: 'Shipped', submittedBy: 'Lancaster Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-09T11:00:00',
+    pkSheet: { name: 'PK-Zook.pdf', size: 143200, type: 'application/pdf' },
+    formula: { name: 'Formula-TripleMix-Refill.pdf', size: 98430, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10003, 'Refill Triple Mix', '5ML', 'RX-881245', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
+    comments: []
+  },
+  { id: 1004, patientName: 'Hosler, Jennifer', patientDOB: '1984-07-14', patientAllergies: 'NKA',
+    originLocation: 'Lancaster', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '1234 Main St', shipAddr2: '', shipCity: 'Lancaster', shipState: 'PA', shipZip: '17602',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-04-09', dateReceivedAtErie: '2026-04-10',
+    patientStatus: 'Order Shipped', coldItem: true,
+    anticipatedShipDate: '2026-04-14', dateShipped: '2026-04-14',
+    trackingNumber: '4727 7934 5886', paid: 'HealNow', dateReceivedByPatient: null,
+    status: 'Shipped', submittedBy: 'Lancaster Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-09T12:30:00',
+    pkSheet: { name: 'PK-Hosler.pdf', size: 152110, type: 'application/pdf' },
+    formula: { name: 'Formula-Sema-M5.pdf', size: 96512, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10004, 'Semaglutide MDV — REFILL Month 5', '2ml MDV', 'RX-881260', 'Dr. Kim', '88 Health Dr, Pittsburgh PA 15213', true) ],
+    comments: []
+  },
+
+  // ===== VIRGINIA BEACH (week of April 21) =====
+  { id: 1005, patientName: 'Shaffer, Sarah', patientDOB: '1978-11-22', patientAllergies: 'NKA',
+    originLocation: 'Virginia Beach', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '2020 Atlantic Ave', shipAddr2: '', shipCity: 'Virginia Beach', shipState: 'VA', shipZip: '23451',
+    billing: 'CreditCard', ccOnFileInPaladin: true, semaDrAuthorized: 'Yes',
+    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
+    patientStatus: 'Pending', coldItem: true,
+    anticipatedShipDate: '2026-04-21', dateShipped: null,
+    trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
+    status: 'New', submittedBy: 'VB Tech', assignedTo: null,
+    createdAt: '2026-04-15T09:00:00',
+    pkSheet: { name: 'PK-Shaffer.pdf', size: 178900, type: 'application/pdf' },
+    formula: { name: 'Formula-Sema-M2.pdf', size: 88740, type: 'application/pdf' },
+    hardCopy: { name: 'HC-Shaffer.pdf', size: 76100, type: 'application/pdf' },
+    items: [ mkItem(10005, 'Sema Month 2 (NRX)', '1ml', 'RX-900310', 'Dr. Rivera', '22 Wellness Blvd, Erie PA 16504', false) ],
+    comments: []
+  },
+  { id: 1006, patientName: 'Villaluz, Michangelo', patientDOB: '1989-06-15', patientAllergies: 'NKA',
+    originLocation: 'Virginia Beach', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '2020 Atlantic Ave', shipAddr2: '', shipCity: 'Virginia Beach', shipState: 'VA', shipZip: '23451',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
+    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
+    patientStatus: 'Pending', coldItem: true,
+    anticipatedShipDate: '2026-04-21', dateShipped: null,
+    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
+    status: 'Shipped', submittedBy: 'VB Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-15T09:15:00',
+    dateShipped_overriddenForDemo: true,
+    pkSheet: { name: 'PK-Villaluz.pdf', size: 166400, type: 'application/pdf' },
+    formula: { name: 'Formula-Tirz-M4.pdf', size: 102330, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10006, 'Tirzepatide Month 4 (NRX)', '4ml', 'RX-900311', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
+    comments: []
+  },
+  { id: 1007, patientName: 'Miles, Gina', patientDOB: '1962-03-04', patientAllergies: 'Penicillin',
+    originLocation: 'Virginia Beach', fillLocation: 'Erie', shipTo: 'Patient', deliveryCharge: '',
+    shipAddr1: '45 Oceanview Dr', shipAddr2: '', shipCity: 'Virginia Beach', shipState: 'VA', shipZip: '23452',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
+    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
+    patientStatus: 'Pending', coldItem: true,
+    anticipatedShipDate: '2026-04-21', dateShipped: null,
+    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
+    status: 'Shipped', submittedBy: 'VB Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-15T09:40:00',
+    pkSheet: { name: 'PK-Miles.pdf', size: 172500, type: 'application/pdf' },
+    formula: { name: 'Formula-Sema-M5.pdf', size: 96512, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10007, 'Sema Month 5 (NRX)', '2ml MDV', 'RX-900312', 'Dr. Kim', '88 Health Dr, Pittsburgh PA 15213', true) ],
+    comments: []
+  },
+  { id: 1008, patientName: 'Brickhouse, Carly', patientDOB: '1991-01-28', patientAllergies: 'NKA',
+    originLocation: 'Virginia Beach', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '2020 Atlantic Ave', shipAddr2: '', shipCity: 'Virginia Beach', shipState: 'VA', shipZip: '23451',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
+    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
+    patientStatus: 'Pending', coldItem: true,
+    anticipatedShipDate: '2026-04-21', dateShipped: null,
+    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
+    status: 'New', submittedBy: 'VB Tech', assignedTo: null,
+    createdAt: '2026-04-15T09:55:00',
+    pkSheet: { name: 'PK-Brickhouse.pdf', size: 164200, type: 'application/pdf' },
+    formula: { name: 'Formula-Tirz-M2.pdf', size: 89210, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10008, 'Tirzepatide Month 2 (NRX)', '2ml', 'RX-900313', 'Dr. Rivera', '22 Wellness Blvd, Erie PA 16504', false) ],
+    comments: []
+  },
+
+  // ===== TUCSON (week of April 1) =====
+  { id: 1009, patientName: 'Brevaire, Scott', patientDOB: '1965-12-02', patientAllergies: 'NKA',
+    originLocation: 'Tucson', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '500 Speedway Blvd', shipAddr2: '', shipCity: 'Tucson', shipState: 'AZ', shipZip: '85712',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-03-30', dateReceivedAtErie: '2026-03-30',
+    patientStatus: 'Order Shipped', coldItem: true,
+    anticipatedShipDate: '2026-04-01', dateShipped: '2026-04-01',
+    trackingNumber: '4727 7934 4250', paid: 'HealNow', dateReceivedByPatient: '2026-04-04',
+    status: 'Delivered', submittedBy: 'Tucson Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-03-30T10:00:00',
+    pkSheet: { name: 'PK-Brevaire.pdf', size: 165400, type: 'application/pdf' },
+    formula: { name: 'Formula-Tirz.pdf', size: 98320, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10009, 'Tirzepatide', '4x0.5ml', 'RX-850110', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
+    comments: []
+  },
+  { id: 1010, patientName: 'Switzer, Deborah', patientDOB: '1973-04-11', patientAllergies: 'NKA',
+    originLocation: 'Tucson', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '500 Speedway Blvd', shipAddr2: '', shipCity: 'Tucson', shipState: 'AZ', shipZip: '85712',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-03-30', dateReceivedAtErie: '2026-03-30',
+    patientStatus: 'Order Shipped', coldItem: true,
+    anticipatedShipDate: '2026-04-01', dateShipped: '2026-04-01',
+    trackingNumber: '4727 7934 4250', paid: 'HealNow', dateReceivedByPatient: '2026-04-04',
+    status: 'Delivered', submittedBy: 'Tucson Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-03-30T10:05:00',
+    pkSheet: { name: 'PK-Switzer.pdf', size: 158900, type: 'application/pdf' },
+    formula: { name: 'Formula-Tirz-Refill.pdf', size: 94100, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10010, 'Tirzepatide Refill', '4x0.5ml', '2550096', 'Dr. Kim', '88 Health Dr, Pittsburgh PA 15213', true) ],
+    comments: []
+  },
+  { id: 1011, patientName: 'Haugaard, Jennifer', patientDOB: '1982-08-19', patientAllergies: 'NKA',
+    originLocation: 'Tucson', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '500 Speedway Blvd', shipAddr2: '', shipCity: 'Tucson', shipState: 'AZ', shipZip: '85712',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-03-30', dateReceivedAtErie: '2026-03-30',
+    patientStatus: 'Order Shipped', coldItem: true,
+    anticipatedShipDate: '2026-04-01', dateShipped: '2026-04-01',
+    trackingNumber: '4727 7934 4250', paid: 'HealNow', dateReceivedByPatient: '2026-04-04',
+    status: 'Delivered', submittedBy: 'Tucson Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-03-30T10:10:00',
+    pkSheet: { name: 'PK-Haugaard.pdf', size: 162300, type: 'application/pdf' },
+    formula: { name: 'Formula-Sema-MDV-Refill.pdf', size: 91200, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10011, 'Sema MDV Refill', '2x2ml', '2549308', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
+    comments: []
+  },
+  { id: 1012, patientName: 'Krys, Gloria', patientDOB: '1960-10-05', patientAllergies: 'NKA',
+    originLocation: 'Tucson', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '500 Speedway Blvd', shipAddr2: '', shipCity: 'Tucson', shipState: 'AZ', shipZip: '85712',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-04-13', dateReceivedAtErie: '2026-04-14',
+    patientStatus: 'Order Processed', coldItem: true,
+    anticipatedShipDate: '2026-04-20', dateShipped: null,
+    trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
+    status: 'Tx Verified', submittedBy: 'Tucson Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-13T11:20:00',
+    pkSheet: { name: 'PK-Krys.pdf', size: 156000, type: 'application/pdf' },
+    formula: { name: 'Formula-Tirz-Refill.pdf', size: 94100, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10012, 'Tirzepatide Refill', '4x1ml', '2557088', 'Dr. Reynolds', '412 Wellness Way, Erie PA 16505', true) ],
+    comments: []
+  },
+
+  // ===== SEMINOLE / FLORIDA (week of April 20) =====
+  { id: 1013, patientName: 'Hoolehan, Matt', patientDOB: '1979-07-07', patientAllergies: 'NKA',
+    originLocation: 'Seminole', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '7000 113th St', shipAddr2: '', shipCity: 'Seminole', shipState: 'FL', shipZip: '33772',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
+    patientStatus: 'Order Processed', coldItem: true,
+    anticipatedShipDate: '2026-04-20', dateShipped: null,
+    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
+    status: 'Shipped', submittedBy: 'Seminole Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-15T08:30:00',
+    pkSheet: { name: 'PK-Hoolehan.pdf', size: 170200, type: 'application/pdf' },
+    formula: { name: 'Formula-Sema.pdf', size: 88900, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10013, 'Semaglutide', '2ml MDV', 'RX-877301', 'Dr. Kim', '88 Health Dr, Pittsburgh PA 15213', true) ],
+    comments: []
+  },
+  { id: 1014, patientName: 'Dorantes, Jennifer', patientDOB: '1987-02-14', patientAllergies: 'Sulfa',
+    originLocation: 'Seminole', fillLocation: 'Erie', shipTo: 'Pharmacy', deliveryCharge: '',
+    shipAddr1: '7000 113th St', shipAddr2: '', shipCity: 'Seminole', shipState: 'FL', shipZip: '33772',
+    billing: 'HealNow', ccOnFileInPaladin: false, semaDrAuthorized: 'Yes',
+    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
+    patientStatus: 'Order Processed', coldItem: true,
+    anticipatedShipDate: '2026-04-20', dateShipped: null,
+    trackingNumber: '', paid: 'HealNow', dateReceivedByPatient: null,
+    status: 'Shipped', submittedBy: 'Seminole Tech', assignedTo: 'Erie Sterile',
+    createdAt: '2026-04-15T08:45:00',
+    pkSheet: { name: 'PK-Dorantes.pdf', size: 168900, type: 'application/pdf' },
+    formula: { name: 'Formula-Tirz.pdf', size: 98320, type: 'application/pdf' },
+    hardCopy: { name: 'HC-Dorantes.pdf', size: 72400, type: 'application/pdf' },
+    items: [ mkItem(10014, 'Tirzepatide', '2ml', 'RX-877302', 'Dr. Patel', '555 Med Plaza, Erie PA 16501', true) ],
+    comments: []
+  },
+  { id: 1015, patientName: 'Icely, William', patientDOB: '1952-05-30', patientAllergies: 'NKA',
+    originLocation: 'Seminole', fillLocation: 'Erie', shipTo: 'Patient', deliveryCharge: '',
+    shipAddr1: '88 Palm Way', shipAddr2: 'Unit 12', shipCity: 'St. Petersburg', shipState: 'FL', shipZip: '33701',
+    billing: 'CreditCard', ccOnFileInPaladin: true, semaDrAuthorized: 'NA',
+    txEmailedDate: '2026-04-15', dateReceivedAtErie: '2026-04-15',
+    patientStatus: 'Order Processed', coldItem: true,
+    anticipatedShipDate: '2026-04-20', dateShipped: null,
+    trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
+    status: 'New', submittedBy: 'Seminole Tech', assignedTo: null,
+    createdAt: '2026-04-15T09:10:00',
+    pkSheet: { name: 'PK-Icely.pdf', size: 161500, type: 'application/pdf' },
+    formula: { name: 'Formula-Sema.pdf', size: 88900, type: 'application/pdf' },
+    hardCopy: null,
+    items: [ mkItem(10015, 'Semaglutide', '2ml MDV', 'RX-877303', 'Dr. Reynolds', '412 Wellness Way, Erie PA 16505', false, 'Ship directly to patient in St. Pete') ],
+    comments: []
+  },
+
+  // ===== Original demo examples =====
+  {
+    id: 1, title: 'Atwater, Laura — Dec 1',
+    patientName: 'Atwater, Laura', patientDOB: '1982-04-12', patientAllergies: 'NKA',
+    originLocation: 'Lancaster', fillLocation: 'Erie',
+    shipTo: 'Patient', deliveryCharge: null,
+    shipAddr1: '123 Palm Way', shipAddr2: '', shipCity: 'Naples', shipState: 'FL', shipZip: '34102',
+    billing: 'HealNow', ccOnFileInPaladin: false,
+    semaDrAuthorized: 'Yes',
+    txEmailedDate: '2025-11-25', dateReceivedAtErie: '2025-11-26',
+    patientStatus: 'Order Processed', coldItem: true,
+    anticipatedShipDate: '2025-12-01', dateShipped: '2025-12-01',
+    trackingNumber: '4727 7933 2371', paid: 'HealNow',
+    dateReceivedByPatient: '2025-12-03',
+    status: 'Delivered',
+    submittedBy: 'Carmen', assignedTo: 'Erie Sterile',
+    createdAt: '2025-11-25T14:30:00',
+    items: [
+      { id: 11, drug: 'Semaglutide 2.5mg/ml', qty: '2ml vial', rxNumber: 'RX-881234', receiptAttached: true, doctorName: 'Dr. Patel', doctorAddr: '555 Med Plaza, Erie PA 16501', doctorPhone: '814-555-0110', doctorDEA: 'BP1234567', txFormVerified: true, notes: '' }
+    ],
+    comments: [
+      { id: 101, itemId: null, author: 'Carmen', ts: '2025-11-25T14:35:00', body: 'Tx sent to Erie, waiting on dr authorization confirmation.' },
+      { id: 102, itemId: 11, author: 'Erie Sterile', ts: '2025-11-26T09:12:00', body: 'Authorization received. Filling today.' }
+    ]
+  },
+  {
+    id: 2, title: 'Ciraci, Toni — Dec 1',
+    patientName: 'Ciraci, Toni', patientDOB: '1975-08-02', patientAllergies: 'Sulfa',
+    originLocation: 'Lancaster', fillLocation: 'Erie',
+    shipTo: 'Patient', deliveryCharge: null,
+    shipAddr1: '9 Ocean Ave', shipAddr2: 'Apt 4', shipCity: 'Jacksonville', shipState: 'FL', shipZip: '32202',
+    billing: 'CreditCard', ccOnFileInPaladin: true,
+    semaDrAuthorized: 'NA',
+    txEmailedDate: null, dateReceivedAtErie: '2025-11-25',
+    patientStatus: 'Order Processed', coldItem: true,
+    anticipatedShipDate: '2025-12-01', dateShipped: null,
+    trackingNumber: '', paid: 'Pending',
+    dateReceivedByPatient: null,
+    status: 'In Progress',
+    submittedBy: 'Jennifer', assignedTo: 'Erie Sterile',
+    createdAt: '2025-11-25T10:00:00',
+    items: [
+      { id: 21, drug: 'Testosterone Cyp 200mg/ml', qty: '10ml', rxNumber: 'RX-882001', receiptAttached: true, doctorName: 'Dr. Kim', doctorAddr: '88 Health Dr, Pittsburgh PA 15213', doctorPhone: '412-555-0144', doctorDEA: 'BK2334456', txFormVerified: false, notes: 'Double check DEA on hard copy' }
+    ],
+    comments: [
+      { id: 201, itemId: 21, author: 'Erie Sterile', ts: '2025-11-26T08:30:00', body: 'Printed PK transfer form. Need someone at Lancaster to confirm doctor address matches hard copy before we fill.' }
+    ]
+  },
+  {
+    id: 3, title: 'New submission — pending',
+    patientName: 'Smith, Angela', patientDOB: '1990-02-15', patientAllergies: 'Penicillin',
+    originLocation: 'Warren', fillLocation: 'Erie',
+    shipTo: 'Pharmacy', deliveryCharge: null,
+    shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
+    billing: 'PayInStore', ccOnFileInPaladin: false,
+    semaDrAuthorized: 'Yes',
+    txEmailedDate: '2026-04-14', dateReceivedAtErie: null,
+    patientStatus: 'Pending', coldItem: false,
+    anticipatedShipDate: '2026-04-18', dateShipped: null,
+    trackingNumber: '', paid: 'Pending',
+    dateReceivedByPatient: null,
+    status: 'New',
+    submittedBy: 'Warren Tech', assignedTo: null,
+    createdAt: '2026-04-14T11:00:00',
+    items: [
+      { id: 31, drug: 'Progesterone 100mg cap', qty: '#90', rxNumber: 'RX-900112', receiptAttached: false, doctorName: 'Dr. Rivera', doctorAddr: '22 Wellness Blvd, Erie PA 16504', doctorPhone: '814-555-0190', doctorDEA: '', txFormVerified: false, notes: '' }
+    ],
+    comments: []
+  }
+];
+
+let SHIPMENTS = [
+  {
+    id: 501, fromLocation: 'Erie', toLocation: 'Patient', destinationType: 'Patient',
+    carrier: 'FedEx', trackingNumber: '4727 7933 2371', labelGenerated: true,
+    status: 'Delivered', shipDate: '2025-12-01', deliveredDate: '2025-12-03', receivedDate: '2025-12-03', receivedBy: 'Patient signature',
+    transferIds: [1], createdAt: '2025-11-30T16:00:00', createdBy: 'Erie Sterile'
+  },
+  {
+    id: 502, fromLocation: 'Erie', toLocation: 'Lancaster', destinationType: 'Pharmacy',
+    carrier: 'FedEx', trackingNumber: '4727 7934 5886', labelGenerated: true,
+    status: 'In Transit', shipDate: '2026-04-14', deliveredDate: null, receivedDate: null, receivedBy: null,
+    transferIds: [1001, 1003, 1004], createdAt: '2026-04-14T15:30:00', createdBy: 'Erie Sterile',
+    unpacked: {}
+  },
+  {
+    id: 503, fromLocation: 'Erie', toLocation: 'Tucson', destinationType: 'Pharmacy',
+    carrier: 'FedEx', trackingNumber: '4727 7934 4250', labelGenerated: true,
+    status: 'Received', shipDate: '2026-04-01', deliveredDate: '2026-04-04', receivedDate: '2026-04-04', receivedBy: 'Tucson Tech',
+    transferIds: [1009, 1010, 1011], createdAt: '2026-03-31T16:00:00', createdBy: 'Erie Sterile',
+    unpacked: { 10009: true, 10010: true, 10011: true }
+  },
+  // EXAMPLE: Delivered to Virginia Beach, ready for unpacking — switch to VB Tech user to try the receive flow
+  {
+    id: 504, fromLocation: 'Erie', toLocation: 'Virginia Beach', destinationType: 'Pharmacy',
+    carrier: 'FedEx', trackingNumber: '7712 8801 2266', labelGenerated: true,
+    status: 'Delivered', shipDate: '2026-04-13', deliveredDate: '2026-04-15', receivedDate: null, receivedBy: null,
+    transferIds: [1006, 1007], createdAt: '2026-04-13T14:00:00', createdBy: 'Erie Sterile',
+    unpacked: {}, damagePhotos: []
+  },
+  // EXAMPLE: In Transit to Seminole — switch to Seminole Tech user to try "Arrived at my pharmacy"
+  {
+    id: 505, fromLocation: 'Erie', toLocation: 'Seminole', destinationType: 'Pharmacy',
+    carrier: 'FedEx', trackingNumber: '7712 9944 3311', labelGenerated: true,
+    status: 'In Transit', shipDate: '2026-04-14', deliveredDate: null, receivedDate: null, receivedBy: null,
+    transferIds: [1013, 1014], createdAt: '2026-04-14T15:00:00', createdBy: 'Erie Sterile',
+    unpacked: {}, damagePhotos: []
+  }
+];
+
+let _nextId = 1000;
+const nextId = () => ++_nextId;
+
+// =====================================================================
+// State + routing
+// =====================================================================
+const state = { tab: 'transfers', filterStatus: '', filterOrigin: '', filterFill: '', search: '', openTransferId: null };
+
+function bindTabs() {
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.onclick = () => {
+      state.tab = btn.dataset.tab;
+      document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('[id^=view-]').forEach(v => v.style.display = 'none');
+      document.getElementById('view-' + state.tab).style.display = '';
+      render();
+    };
+  });
+}
+bindTabs();
+
+function applyRoleVisibility() {
+  document.querySelectorAll('[data-admin-only]').forEach(el => el.style.display = (CURRENT_USER.role === 'admin') ? '' : 'none');
+}
+
+// User switcher (demo)
+function populateUserSwitcher() {
+  const sel = document.getElementById('userSwitcher');
+  sel.innerHTML = USERS.map((u,i) => `<option value="${i}" ${u===CURRENT_USER?'selected':''}>${escapeHtml(u.name)} (${u.role}, ${u.location})</option>`).join('');
+  sel.onchange = () => { CURRENT_USER = USERS[+sel.value]; document.getElementById('userInfo').textContent = `${CURRENT_USER.name} · ${CURRENT_USER.location}`; applyRoleVisibility(); render(); };
+  document.getElementById('userInfo').textContent = `${CURRENT_USER.name} · ${CURRENT_USER.location}`;
+}
+
+// Global search
+function bindGlobalSearch() {
+  const input = document.getElementById('globalSearch');
+  const box = document.getElementById('globalResults');
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { box.style.display = 'none'; return; }
+    const hits = [];
+    visibleTransfers().forEach(t => {
+      const hay = [t.patientName, t.trackingNumber, t.originLocation, t.fillLocation, t.shipCity, ...t.items.map(i => i.drug+' '+i.rxNumber+' '+i.doctorName+' '+i.doctorAddr)].join(' ').toLowerCase();
+      if (hay.includes(q)) hits.push({ type: 'transfer', t });
+    });
+    visibleShipments().forEach(s => { if ((s.trackingNumber||'').toLowerCase().includes(q)) hits.push({ type: 'shipment', s }); });
+    if (!hits.length) { box.innerHTML = '<div class="global-result"><em>No matches</em></div>'; box.style.display = ''; return; }
+    box.innerHTML = hits.slice(0,20).map(h => h.type==='transfer'
+      ? `<div class="global-result" data-t="${h.t.id}"><strong>${escapeHtml(h.t.patientName)}</strong> <span class="badge ${STATUS_BADGE[h.t.status]}">${h.t.status}</span><div class="meta">${escapeHtml(h.t.originLocation)} → ${escapeHtml(h.t.fillLocation)} · ${h.t.items.length} Rx · ${escapeHtml(h.t.trackingNumber||'no tracking')}</div></div>`
+      : `<div class="global-result" data-s="${h.s.id}"><strong>Shipment ${escapeHtml(h.s.trackingNumber)}</strong><div class="meta">${escapeHtml(h.s.fromLocation)} → ${escapeHtml(h.s.toLocation)} · ${h.s.status}</div></div>`
+    ).join('');
+    box.style.display = '';
+    box.querySelectorAll('[data-t]').forEach(el => el.onclick = () => { box.style.display='none'; input.value=''; openTransfer(+el.dataset.t); });
+    box.querySelectorAll('[data-s]').forEach(el => el.onclick = () => { box.style.display='none'; input.value=''; openShipment(+el.dataset.s); });
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('.global-search') && !e.target.closest('.global-results')) box.style.display = 'none'; });
+}
+
+// =====================================================================
+// Render functions
+// =====================================================================
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtDate(s) { if (!s) return '—'; const d = new Date(s); if (isNaN(d)) return s; return d.toLocaleDateString(); }
+
+function render() {
+  if (state.tab === 'transfers') renderTransfers();
+  else if (state.tab === 'new') renderNewForm();
+  else if (state.tab === 'pharmreview') renderPharmReview();
+  else if (state.tab === 'shipments') renderShipments();
+  else if (state.tab === 'sla') renderSLA();
+  else if (state.tab === 'stats') renderStats();
+  else if (state.tab === 'admin') renderAdmin();
+  updateIncomingBadge();
+  updateSLABadge();
+  applyRoleVisibility();
+}
+
+function updateIncomingBadge() {
+  const count = SHIPMENTS.filter(s => s.toLocation === CURRENT_USER.location && s.status !== 'Received').length;
+  const b = document.getElementById('incomingBadge');
+  if (b) { if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; } }
+  const rb = document.getElementById('reviewBadge');
+  if (rb) {
+    const n = TRANSFERS.filter(t => (CURRENT_USER.role === 'admin' || t.fillLocation === CURRENT_USER.location) && t.items.some(i => !i.txFormVerified) && !['Delivered','Canceled','Shipped'].includes(t.status)).length;
+    if (n > 0) { rb.textContent = n; rb.style.display = 'inline-block'; } else { rb.style.display = 'none'; }
+  }
+}
+function updateSLABadge() {
+  const count = visibleTransfers().filter(t => slaStatus(t).state === 'breach').length;
+  const b = document.getElementById('slaBadge');
+  if (!b) return;
+  if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; }
+}
+
+function renderTransfers() {
+  const root = document.getElementById('view-transfers');
+  const filtered = visibleTransfers().filter(t => {
+    if (state.filterStatus && t.status !== state.filterStatus) return false;
+    if (state.filterOrigin && t.originLocation !== state.filterOrigin) return false;
+    if (state.filterFill && t.fillLocation !== state.filterFill) return false;
+    if (state.search) {
+      const q = state.search.toLowerCase();
+      const hay = (t.patientName + ' ' + t.trackingNumber + ' ' + t.items.map(i=>i.drug+' '+i.rxNumber).join(' ')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  root.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">All Transfers <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${filtered.length})</span></div>
+    </div>
+    <div class="filters">
+      <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:260px" />
+      <select id="f-status"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===state.filterStatus?'selected':''}>${s}</option>`).join('')}</select>
+      <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
+      <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
+    </div>
+    ${filtered.length === 0 ? `<div class="empty"><h3>No transfers match</h3><p>Try clearing filters.</p></div>` : `
+    <table>
+      <thead><tr>
+        <th>Patient</th><th>From → Fill</th><th>Ship To</th><th>Items</th><th>Status</th><th>SLA</th>
+        <th>Tx Emailed</th><th>Ship Date</th><th>Tracking</th><th>Submitted</th>
+      </tr></thead>
+      <tbody>
+        ${filtered.map(t => {
+          const unver = t.items.filter(i => !i.txFormVerified).length;
+          const sla = slaStatus(t);
+          const rowClass = sla.state === 'breach' ? 'row-sla-breach' : (sla.state === 'warn' ? 'row-sla-warn' : '');
+          const slaCell = sla.state === 'breach' ? `<span class="pill-danger">⚠ Overdue ${Math.round(sla.hoursOver)}h</span>` : sla.state === 'warn' ? `<span class="pill-warn">Near SLA</span>` : sla.state === 'ok' ? `<span class="sla-ok">On track</span>` : '<span class="item-sub">—</span>';
+          return `<tr class="${rowClass}" data-id="${t.id}">
+            <td><strong>${escapeHtml(t.patientName)}</strong>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div></td>
+            <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+            <td>${escapeHtml(t.shipTo)}${t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:''}</td>
+            <td>${t.items.length}${unver?` <span class="pill-warn">${unver} unverified</span>`:''}</td>
+            <td><span class="badge ${STATUS_BADGE[t.status]}">${escapeHtml(t.status)}</span></td>
+            <td>${slaCell}</td>
+            <td>${fmtDate(t.txEmailedDate)}</td>
+            <td>${fmtDate(t.dateShipped)}</td>
+            <td>${escapeHtml(t.trackingNumber||'—')}</td>
+            <td>${escapeHtml(t.submittedBy)}<div class="item-sub">${fmtDate(t.createdAt)}</div></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`}
+  `;
+  document.getElementById('f-search').addEventListener('input', e => { state.search = e.target.value; renderTransfers(); });
+  document.getElementById('f-status').addEventListener('change', e => { state.filterStatus = e.target.value; renderTransfers(); });
+  document.getElementById('f-origin').addEventListener('change', e => { state.filterOrigin = e.target.value; renderTransfers(); });
+  document.getElementById('f-fill').addEventListener('change', e => { state.filterFill = e.target.value; renderTransfers(); });
+  root.querySelectorAll('tbody tr').forEach(tr => tr.addEventListener('click', () => openTransfer(+tr.dataset.id)));
+}
+
+function renderStats() {
+  const root = document.getElementById('view-stats');
+  const scope = visibleTransfers();
+  const byStatus = {}; STATUSES.forEach(s => byStatus[s] = 0);
+  scope.forEach(t => byStatus[t.status] = (byStatus[t.status]||0)+1);
+
+  // Volume by origin
+  const byOrigin = {};
+  scope.forEach(t => byOrigin[t.originLocation] = (byOrigin[t.originLocation]||0)+1);
+
+  // Avg cycle times for shipped/delivered
+  const cycles = scope.filter(t => t.dateShipped && t.txEmailedDate).map(t => (new Date(t.dateShipped) - new Date(t.txEmailedDate)) / 86400000);
+  const avgCycle = cycles.length ? (cycles.reduce((a,b)=>a+b,0)/cycles.length).toFixed(1) : '—';
+
+  // Avg turnaround: Tx Emailed → Delivered (end-to-end)
+  const tats = scope.filter(t => t.txEmailedDate && t.dateReceivedByPatient).map(t => ({
+    days: (new Date(t.dateReceivedByPatient) - new Date(t.txEmailedDate)) / 86400000,
+    origin: t.originLocation
+  }));
+  const avgTAT = tats.length ? (tats.reduce((a,b)=>a+b.days,0)/tats.length).toFixed(1) : '—';
+  const tatByOrigin = {};
+  tats.forEach(x => { (tatByOrigin[x.origin] ||= []).push(x.days); });
+
+  // On-time %
+  const shipped = scope.filter(t => t.dateShipped && t.anticipatedShipDate);
+  const onTime = shipped.filter(t => new Date(t.dateShipped) <= new Date(t.anticipatedShipDate)).length;
+  const onTimePct = shipped.length ? Math.round(100 * onTime / shipped.length) : 0;
+
+  // SLA breaches
+  const breaches = scope.filter(t => slaStatus(t).state === 'breach').length;
+
+  // Cold chain
+  const coldCount = scope.filter(t => t.coldItem).length;
+
+  root.innerHTML = `
+    <div class="page-header"><div class="page-title">Reports</div></div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+      <div class="kpi-card"><div class="kpi-label">Total Transfers${CURRENT_USER.role==='admin'?'':' (your location)'}</div><div class="kpi-value">${scope.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">In Flight</div><div class="kpi-value">${scope.filter(t=>!['Delivered','Canceled'].includes(t.status)).length}</div><div class="kpi-sub">not yet delivered</div></div>
+      <div class="kpi-card"><div class="kpi-label">Avg Cycle Time</div><div class="kpi-value">${avgCycle}<span style="font-size:14px"> days</span></div><div class="kpi-sub">Tx email → ship</div></div>
+      <div class="kpi-card"><div class="kpi-label">Avg Turnaround</div><div class="kpi-value">${avgTAT}<span style="font-size:14px"> days</span></div><div class="kpi-sub">Tx email → delivered (${tats.length} samples)</div></div>
+      <div class="kpi-card"><div class="kpi-label">On-Time Ship Rate</div><div class="kpi-value">${onTimePct}%</div><div class="kpi-sub">${onTime}/${shipped.length} shipped on or before anticipated date</div></div>
+      <div class="kpi-card"><div class="kpi-label">SLA Breaches</div><div class="kpi-value" style="color:${breaches?'var(--danger)':'var(--success)'}">${breaches}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Cold Chain Items</div><div class="kpi-value">${coldCount}</div></div>
+    </div>
+
+    <div class="card"><div class="card-header">Volume by Status</div><div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        ${STATUSES.map(s => `<div style="padding:10px;background:var(--gray-50);border-radius:6px"><div class="kpi-label">${s}</div><div style="font-size:20px;font-weight:700;color:var(--primary-dark)">${byStatus[s]||0}</div></div>`).join('')}
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-header">Avg Turnaround by Origin Location</div><div class="card-body">
+      ${Object.keys(tatByOrigin).length === 0 ? '<div class="item-sub">Not enough delivered transfers yet.</div>' : `
+      <table style="box-shadow:none"><thead><tr><th>Location</th><th>Avg Turnaround (days)</th><th>Samples</th></tr></thead><tbody>
+        ${Object.entries(tatByOrigin).sort((a,b)=>a[1].reduce((s,n)=>s+n,0)/a[1].length - b[1].reduce((s,n)=>s+n,0)/b[1].length).map(([loc, arr]) => `<tr><td><strong>${escapeHtml(loc)}</strong></td><td>${(arr.reduce((s,n)=>s+n,0)/arr.length).toFixed(1)}</td><td>${arr.length}</td></tr>`).join('')}
+      </tbody></table>`}
+    </div></div>
+
+    <div class="card"><div class="card-header">Volume by Origin Location</div><div class="card-body">
+      <table style="box-shadow:none"><thead><tr><th>Location</th><th>Transfers</th><th>Bar</th></tr></thead><tbody>
+        ${Object.entries(byOrigin).sort((a,b)=>b[1]-a[1]).map(([loc,n]) => { const pct = scope.length ? 100*n/scope.length : 0; return `<tr><td><strong>${escapeHtml(loc)}</strong></td><td>${n}</td><td><div style="background:var(--primary-bg);height:16px;border-radius:3px;width:${pct*3}%;max-width:300px"></div></td></tr>`; }).join('')}
+      </tbody></table>
+    </div></div>
+
+    <div class="card"><div class="card-header">Unverified items (hard-copy check pending)</div><div class="card-body">
+      ${(() => {
+        const items = [];
+        scope.forEach(t => t.items.filter(i=>!i.txFormVerified && !['Delivered','Canceled'].includes(t.status)).forEach(i => items.push({t,i})));
+        if (!items.length) return '<div class="empty"><h3>All clear</h3></div>';
+        return items.map(({t,i}) => `<div class="item-row unverified"><div class="item-head"><div><strong>${escapeHtml(i.drug)}</strong> <span class="item-sub">· ${escapeHtml(t.patientName)} · Rx ${escapeHtml(i.rxNumber||'—')}</span></div><button class="btn btn-secondary btn-sm" data-open="${t.id}">Open</button></div><div class="item-sub">Dr. ${escapeHtml(i.doctorName||'—')} · ${escapeHtml(i.doctorAddr||'—')}</div></div>`).join('');
+      })()}
+    </div></div>
+
+    <div style="margin-top:16px;text-align:right">
+      <button class="btn btn-secondary" id="exportCsv">Export CSV</button>
+    </div>
+  `;
+  root.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openTransfer(+b.dataset.open)));
+  document.getElementById('exportCsv').onclick = () => {
+    const rows = [['ID','Patient','Origin','Fill','ShipTo','Status','TxEmailed','AntShip','Shipped','Tracking','Received']];
+    scope.forEach(t => rows.push([t.id,t.patientName,t.originLocation,t.fillLocation,t.shipTo,t.status,t.txEmailedDate||'',t.anticipatedShipDate||'',t.dateShipped||'',t.trackingNumber||'',t.dateReceivedByPatient||'']));
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'transfers.csv'; a.click();
+  };
+}
+
+// =====================================================================
+// SLA Alerts tab
+// =====================================================================
+function renderSLA() {
+  const root = document.getElementById('view-sla');
+  const issues = visibleTransfers().map(t => ({ t, sla: slaStatus(t) })).filter(x => x.sla.state === 'breach' || x.sla.state === 'warn').sort((a,b) => (a.sla.state==='breach'?0:1) - (b.sla.state==='breach'?0:1));
+  root.innerHTML = `
+    <div class="page-header"><div class="page-title">SLA Alerts <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${issues.length})</span></div></div>
+    <p style="color:var(--gray-600);margin-bottom:14px">Transfers that have sat in their current status longer than allowed. SLA rules: New 24h · Tx Verified 48h · In Progress 72h · Ready to Ship 24h. In production, breaches auto-notify the assigned user via Teams.</p>
+    ${issues.length === 0 ? `<div class="empty"><h3>🎉 All transfers within SLA</h3></div>` : `
+      <table><thead><tr><th>SLA</th><th>Patient</th><th>Status</th><th>Status Age</th><th>Origin</th><th>Assigned</th></tr></thead><tbody>
+        ${issues.map(({t,sla}) => {
+          const hoursIn = Math.round((Date.now() - new Date(t.createdAt).getTime()) / 3600000);
+          return `<tr class="row-sla-${sla.state}" data-id="${t.id}">
+            <td>${sla.state==='breach'?`<span class="pill-danger">⚠ Breach</span>`:`<span class="pill-warn">Near SLA</span>`}</td>
+            <td><strong>${escapeHtml(t.patientName)}</strong></td>
+            <td><span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span></td>
+            <td>${hoursIn}h (limit ${SLA_RULES[t.status]||'—'}h)</td>
+            <td>${escapeHtml(t.originLocation)}</td>
+            <td>${escapeHtml(t.assignedTo||'Unassigned')}</td>
+          </tr>`;
+        }).join('')}
+      </tbody></table>`}
+  `;
+  root.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openTransfer(+tr.dataset.id));
+}
+
+// =====================================================================
+// Admin tab
+// =====================================================================
+function renderAdmin() {
+  const root = document.getElementById('view-admin');
+  if (CURRENT_USER.role !== 'admin') { root.innerHTML = '<div class="empty"><h3>Admins only</h3><p>Switch to an admin user to view this tab.</p></div>'; return; }
+  root.innerHTML = `
+    <div class="page-header"><div class="page-title">Admin</div></div>
+    <div class="card"><div class="card-header">Users & Roles <button class="btn btn-primary btn-sm" id="addUserBtn">+ Add User</button></div><div class="card-body">
+      <table style="box-shadow:none"><thead><tr><th>Name</th><th>Email</th><th>Location</th><th>Role</th><th></th></tr></thead><tbody>
+        ${USERS.map((u,i) => `<tr>
+          <td><strong>${escapeHtml(u.name)}</strong></td>
+          <td>${escapeHtml(u.email)}</td>
+          <td><select data-ui="${i}" data-k="location">${LOCATIONS.map(l=>`<option ${l===u.location?'selected':''}>${l}</option>`).join('')}</select></td>
+          <td><select data-ui="${i}" data-k="role"><option ${u.role==='admin'?'selected':''}>admin</option><option ${u.role==='manager'?'selected':''}>manager</option><option ${u.role==='tech'?'selected':''}>tech</option></select></td>
+          <td>${u===CURRENT_USER?'<span class="item-sub">(you)</span>':`<button class="btn btn-secondary btn-sm" data-rmu="${i}">Remove</button>`}</td>
+        </tr>`).join('')}
+      </tbody></table>
+      <div class="item-sub" style="margin-top:10px">Tech: sees only their location's incoming + transfers originating from their location. Manager: full read + Reports. Admin: everything including user management.</div>
+    </div></div>
+
+    <div class="card"><div class="card-header">SLA Rules (hours)</div><div class="card-body">
+      <div class="form-grid">
+        ${Object.keys(SLA_RULES).map(s => `<div class="form-group"><label>${s}</label><input type="number" data-sla="${s}" value="${SLA_RULES[s]}" /></div>`).join('')}
+      </div>
+      <button class="btn btn-primary btn-sm" id="saveSla" style="margin-top:10px">Save SLA rules</button>
+    </div></div>
+
+    <div class="card"><div class="card-header">Formula Library <button class="btn btn-primary btn-sm" id="addFormulaBtn">+ Add Formula</button></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">Formulas are scoped to a single location. Users from that location can pick them by name when creating a transfer instead of re-uploading.</p>
+      <table style="box-shadow:none"><thead><tr><th>Name</th><th>Location</th><th>Link</th><th>Added By</th><th></th></tr></thead><tbody>
+        ${FORMULAS.map((f,i) => `<tr>
+          <td><strong>${escapeHtml(f.name)}</strong></td>
+          <td><select data-fi="${i}" data-k="location">${LOCATIONS.map(l=>`<option ${l===f.location?'selected':''}>${l}</option>`).join('')}</select></td>
+          <td><input data-fi="${i}" data-k="link" value="${escapeHtml(f.link||'')}" style="width:260px" placeholder="https://..." /></td>
+          <td>${escapeHtml(f.createdBy||'—')}<div class="item-sub">${fmtDate(f.createdAt)}</div></td>
+          <td><button class="btn btn-secondary btn-sm" data-rmf="${i}">Remove</button></td>
+        </tr>`).join('')}
+      </tbody></table>
+    </div></div>
+
+    <div class="card"><div class="card-header">Teams Webhooks (per location)</div><div class="card-body">
+      ${LOCATIONS.map(l => `<div class="form-group" style="margin-bottom:8px"><label>${l}</label><input placeholder="https://pharmacyinnovations.webhook.office.com/webhookb2/..." /></div>`).join('')}
+      <div class="item-sub">Mockup — saving webhooks will wire up in the backend step.</div>
+    </div></div>
+  `;
+  root.querySelectorAll('[data-ui]').forEach(sel => sel.onchange = e => { USERS[+sel.dataset.ui][sel.dataset.k] = sel.value; });
+  root.querySelectorAll('[data-rmu]').forEach(b => b.onclick = () => { USERS.splice(+b.dataset.rmu,1); populateUserSwitcher(); renderAdmin(); });
+  root.querySelectorAll('[data-fi]').forEach(el => el.onchange = () => { FORMULAS[+el.dataset.fi][el.dataset.k] = el.value; });
+  root.querySelectorAll('[data-rmf]').forEach(b => b.onclick = () => { FORMULAS.splice(+b.dataset.rmf, 1); renderAdmin(); });
+  document.getElementById('addFormulaBtn').onclick = () => {
+    const name = prompt('Formula name?'); if (!name) return;
+    const loc = prompt('Location? (one of: ' + LOCATIONS.join(', ') + ')', CURRENT_USER.location);
+    if (!LOCATIONS.includes(loc)) { alert('Invalid location'); return; }
+    const link = prompt('Link (SharePoint URL, optional):') || '';
+    FORMULAS.push({ id: nextId(), name, location: loc, link, fileName: '', createdBy: CURRENT_USER.name, createdAt: new Date().toISOString() });
+    renderAdmin();
+  };
+  document.getElementById('addUserBtn').onclick = () => {
+    const name = prompt('Name?'); if (!name) return;
+    const email = prompt('Email?') || '';
+    USERS.push({ name, email, location: 'Erie', role: 'tech' });
+    populateUserSwitcher(); renderAdmin();
+  };
+  document.getElementById('saveSla').onclick = () => {
+    root.querySelectorAll('[data-sla]').forEach(el => SLA_RULES[el.dataset.sla] = +el.value || SLA_RULES[el.dataset.sla]);
+    alert('SLA rules updated.');
+    render();
+  };
+}
+
+// =====================================================================
+// New transfer form
+// =====================================================================
+function renderNewForm() {
+  const root = document.getElementById('view-new');
+  if (!state.draft) state.draft = freshDraft();
+  const d = state.draft;
+  root.innerHTML = `
+    <div class="page-header"><div class="page-title">New Transfer Request</div></div>
+    <div class="card"><div class="card-body">
+      <div class="section-title">Patient</div>
+      <div class="form-grid">
+        <div class="form-group"><label>Patient Name</label><input id="f-patientName" value="${escapeHtml(d.patientName)}" /></div>
+        <div class="form-group"><label>DOB</label><input type="date" id="f-patientDOB" value="${escapeHtml(d.patientDOB)}" /></div>
+        <div class="form-group full"><label>Allergies</label><input id="f-patientAllergies" value="${escapeHtml(d.patientAllergies)}" placeholder="NKA if none" /></div>
+      </div>
+
+      <div class="section"><div class="section-title">Routing</div>
+      <div class="form-grid">
+        <div class="form-group"><label>Origin Location</label><select id="f-origin">${LOCATIONS.map(l=>`<option ${l===d.originLocation?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Fill Location</label><select id="f-fill">${LOCATIONS.map(l=>`<option ${l===d.fillLocation?'selected':''}>${l}</option>`).join('')}</select><div class="hint">Erie handles sterile compounds</div></div>
+      </div></div>
+
+      <div class="section"><div class="section-title">Shipping</div>
+      <div class="form-grid">
+        <div class="form-group"><label>Ship To</label><select id="f-shipTo">${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===d.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Delivery Charge (if applicable)</label><select id="f-deliveryCharge"><option value="">—</option>${['3','5','15'].map(v=>`<option ${v===d.deliveryCharge?'selected':''}>$${v}</option>`).join('')}</select></div>
+        <div class="form-group full"><label>Address Line 1</label><input id="f-shipAddr1" value="${escapeHtml(d.shipAddr1)}" /></div>
+        <div class="form-group full"><label>Address Line 2</label><input id="f-shipAddr2" value="${escapeHtml(d.shipAddr2)}" /></div>
+        <div class="form-group"><label>City</label><input id="f-shipCity" value="${escapeHtml(d.shipCity)}" /></div>
+        <div class="form-group"><label>State / Zip</label><div style="display:flex;gap:8px"><input id="f-shipState" value="${escapeHtml(d.shipState)}" style="width:60px" /><input id="f-shipZip" value="${escapeHtml(d.shipZip)}" /></div></div>
+        <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-coldItem" ${d.coldItem?'checked':''} /><label for="f-coldItem">Cold item (requires special packaging)</label></div></div>
+      </div></div>
+
+      <div class="section"><div class="section-title">Billing</div>
+      <div class="form-grid">
+        <div class="form-group"><label>Billing Method</label><select id="f-billing">${['HealNow','CreditCard','PayInStore'].map(s=>`<option ${s===d.billing?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-ccPaladin" ${d.ccOnFileInPaladin?'checked':''} /><label for="f-ccPaladin">Credit card on file in Paladin</label></div><div class="hint">Never store the actual card number here.</div></div>
+        <div class="form-group"><label>Sema Dr Authorized</label><select id="f-sema">${['NA','Yes','No'].map(s=>`<option ${s===d.semaDrAuthorized?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Anticipated Ship Date</label><input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" /></div>
+      </div></div>
+
+      <div class="section"><div class="section-title">Required Documents</div>
+      <div class="form-grid">
+        <div class="form-group"><label>PK Transfer Sheet <span style="color:var(--danger)">*</span></label><input type="file" id="f-pkSheet" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" /><div class="hint" id="f-pkSheet-name">${d.pkSheet?escapeHtml(d.pkSheet.name):'Required — printed PK transfer form'}</div></div>
+        <div class="form-group full"><label>Formula Worksheet <span style="color:var(--danger)">*</span></label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+            <label class="checkbox-row"><input type="radio" name="formulaMode" value="library" ${(!d.formula||d.formula.fromLibrary)?'checked':''} /> From ${escapeHtml(d.originLocation)} library</label>
+            <label class="checkbox-row"><input type="radio" name="formulaMode" value="upload" ${(d.formula&&!d.formula.fromLibrary)?'checked':''} /> Upload new</label>
+          </div>
+          <div id="formulaLibraryBox">
+            <select id="f-formulaLibrary" style="width:100%">
+              <option value="">— Select a saved formula —</option>
+              ${FORMULAS.filter(f => f.location === d.originLocation).map(f => `<option value="${f.id}" ${d.formula&&d.formula.libraryId===f.id?'selected':''}>${escapeHtml(f.name)}</option>`).join('')}
+            </select>
+            <div class="hint">Only formulas saved for ${escapeHtml(d.originLocation)} are shown. Use Admin → Formula Library to add more.</div>
+          </div>
+          <div id="formulaUploadBox" style="display:none">
+            <input type="file" id="f-formula" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.xlsx,.xls" />
+            <div style="margin-top:6px" class="checkbox-row"><input type="checkbox" id="f-formulaSaveLib" ${d.formula&&d.formula.saveToLibrary?'checked':''} /><label for="f-formulaSaveLib">Save to my location's library for reuse</label></div>
+            <div class="hint" id="f-formula-name">${d.formula&&!d.formula.fromLibrary?escapeHtml(d.formula.name):'Required — compounding formula worksheet'}</div>
+          </div>
+        </div>
+        <div class="form-group full"><label>Hard Copy Scan (optional)</label><input type="file" id="f-hardCopy" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" /><div class="hint" id="f-hardCopy-name">${d.hardCopy?escapeHtml(d.hardCopy.name):'Optional — scan of original hard copy for reference'}</div></div>
+      </div></div>
+
+      <div class="section"><div class="section-title">Items / Prescriptions</div>
+      <div id="itemsEditor"></div>
+      <button class="btn btn-secondary btn-sm" id="addItemBtn" style="margin-top:8px">+ Add another Rx</button>
+      </div>
+
+      <div class="section" style="margin-top:24px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" id="resetDraft">Reset</button>
+        <button class="btn btn-primary" id="submitDraft">Submit transfer</button>
+      </div>
+    </div></div>
+  `;
+  renderDraftItems();
+  bindDraftInputs();
+  document.getElementById('addItemBtn').addEventListener('click', () => { state.draft.items.push(freshItem()); renderDraftItems(); });
+  document.getElementById('resetDraft').addEventListener('click', () => { state.draft = freshDraft(); renderNewForm(); });
+  document.getElementById('submitDraft').addEventListener('click', submitDraft);
+}
+
+function freshDraft() {
+  return {
+    patientName: '', patientDOB: '', patientAllergies: '',
+    originLocation: CURRENT_USER.location, fillLocation: 'Erie',
+    shipTo: 'Patient', deliveryCharge: '',
+    shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
+    billing: 'HealNow', ccOnFileInPaladin: false,
+    semaDrAuthorized: 'NA',
+    coldItem: false,
+    anticipatedShipDate: '',
+    pkSheet: null, formula: null, hardCopy: null,
+    items: [freshItem()]
+  };
+}
+function freshItem() { return { id: nextId(), drug: '', qty: '', rxNumber: '', receiptAttached: false, doctorName: '', doctorAddr: '', doctorPhone: '', doctorDEA: '', txFormVerified: false, notes: '' }; }
+
+function renderDraftItems() {
+  const wrap = document.getElementById('itemsEditor');
+  wrap.innerHTML = state.draft.items.map((it, idx) => `
+    <div class="item-row">
+      <div class="item-head">
+        <div class="item-title">Rx ${idx+1}</div>
+        ${state.draft.items.length>1?`<button class="btn btn-secondary btn-sm" data-rm="${idx}">Remove</button>`:''}
+      </div>
+      <div class="form-grid">
+        <div class="form-group"><label>Drug / Strength</label><input data-k="drug" data-idx="${idx}" value="${escapeHtml(it.drug)}" /></div>
+        <div class="form-group"><label>Qty / Days Supply</label><input data-k="qty" data-idx="${idx}" value="${escapeHtml(it.qty)}" /></div>
+        <div class="form-group"><label>Rx #</label><input data-k="rxNumber" data-idx="${idx}" value="${escapeHtml(it.rxNumber)}" /></div>
+        <div class="form-group"><div class="checkbox-row"><input type="checkbox" data-k="receiptAttached" data-idx="${idx}" ${it.receiptAttached?'checked':''} /><label>Receipt attached</label></div></div>
+        <div class="form-group"><label>Doctor Name</label><input data-k="doctorName" data-idx="${idx}" value="${escapeHtml(it.doctorName)}" /></div>
+        <div class="form-group"><label>Doctor Phone</label><input data-k="doctorPhone" data-idx="${idx}" value="${escapeHtml(it.doctorPhone)}" /></div>
+        <div class="form-group full"><label>Doctor Address</label><input data-k="doctorAddr" data-idx="${idx}" value="${escapeHtml(it.doctorAddr)}" /></div>
+        <div class="form-group"><label>Doctor DEA / NPI</label><input data-k="doctorDEA" data-idx="${idx}" value="${escapeHtml(it.doctorDEA)}" /></div>
+        <div class="form-group full"><label>Notes</label><textarea data-k="notes" data-idx="${idx}">${escapeHtml(it.notes)}</textarea></div>
+      </div>
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-k]').forEach(el => {
+    el.addEventListener('input', e => {
+      const idx = +el.dataset.idx, k = el.dataset.k;
+      state.draft.items[idx][k] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+  });
+  wrap.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => {
+    state.draft.items.splice(+b.dataset.rm, 1); renderDraftItems();
+  }));
+}
+
+function bindDraftInputs() {
+  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','semaDrAuthorized','anticipatedShipDate'];
+  fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => state.draft[f] = el.value); });
+  ['coldItem','ccPaladin'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('change', () => { state.draft[f==='ccPaladin'?'ccOnFileInPaladin':f] = el.checked; }); });
+  [['pkSheet','pkSheet'],['hardCopy','hardCopy']].forEach(([elId,key]) => {
+    const el = document.getElementById('f-'+elId);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      const file = el.files[0];
+      state.draft[key] = file ? { name: file.name, size: file.size, type: file.type } : null;
+      const lbl = document.getElementById('f-'+elId+'-name');
+      if (lbl) lbl.textContent = file ? `${file.name} (${(file.size/1024).toFixed(0)} KB)` : '';
+    });
+  });
+
+  // Formula mode toggle + inputs
+  const libBox = document.getElementById('formulaLibraryBox');
+  const upBox = document.getElementById('formulaUploadBox');
+  document.querySelectorAll('input[name=formulaMode]').forEach(r => r.onchange = e => {
+    const mode = e.target.value;
+    libBox.style.display = mode === 'library' ? '' : 'none';
+    upBox.style.display = mode === 'upload' ? '' : 'none';
+    state.draft.formula = null;
+  });
+  // initial display
+  const initialMode = state.draft.formula && !state.draft.formula.fromLibrary ? 'upload' : 'library';
+  libBox.style.display = initialMode === 'library' ? '' : 'none';
+  upBox.style.display = initialMode === 'upload' ? '' : 'none';
+
+  const libSel = document.getElementById('f-formulaLibrary');
+  libSel.onchange = () => {
+    const f = FORMULAS.find(x => x.id === +libSel.value);
+    state.draft.formula = f ? { fromLibrary: true, libraryId: f.id, name: f.name, link: f.link, fileName: f.fileName } : null;
+  };
+  const upEl = document.getElementById('f-formula');
+  upEl.onchange = () => {
+    const file = upEl.files[0];
+    if (!file) { state.draft.formula = null; return; }
+    state.draft.formula = { fromLibrary: false, name: file.name, size: file.size, type: file.type, saveToLibrary: document.getElementById('f-formulaSaveLib').checked };
+    document.getElementById('f-formula-name').textContent = `${file.name} (${(file.size/1024).toFixed(0)} KB)`;
+  };
+  document.getElementById('f-formulaSaveLib').onchange = e => { if (state.draft.formula && !state.draft.formula.fromLibrary) state.draft.formula.saveToLibrary = e.target.checked; };
+
+  // re-render formula library options when origin location changes
+  const origSel = document.getElementById('f-origin');
+  if (origSel) origSel.addEventListener('change', () => { state.draft.formula = null; renderNewForm(); });
+}
+
+function submitDraft() {
+  const d = state.draft;
+  const missing = [];
+  if (!d.patientName) missing.push('Patient name');
+  if (!d.items.length || !d.items[0].drug) missing.push('At least one Rx with drug name');
+  if (!d.pkSheet) missing.push('PK Transfer Sheet upload');
+  if (!d.formula) missing.push('Formula Worksheet (select from library or upload)');
+  if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
+  const t = {
+    ...d,
+    id: nextId(),
+    title: `${d.patientName} — ${new Date().toLocaleDateString()}`,
+    txEmailedDate: null, dateReceivedAtErie: null,
+    patientStatus: 'Pending', dateShipped: null, trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
+    status: 'New',
+    submittedBy: CURRENT_USER.name, assignedTo: null,
+    createdAt: new Date().toISOString(),
+    comments: []
+  };
+  // If uploading a new formula flagged to save to library, add it
+  if (d.formula && !d.formula.fromLibrary && d.formula.saveToLibrary) {
+    const savedName = prompt('Name this formula for the ' + d.originLocation + ' library:', d.formula.name.replace(/\.[^.]+$/,''));
+    if (savedName) {
+      FORMULAS.push({ id: nextId(), name: savedName, location: d.originLocation, link: '', fileName: d.formula.name, createdBy: CURRENT_USER.name, createdAt: new Date().toISOString() });
+    }
+  }
+  TRANSFERS.unshift(t);
+  state.draft = null;
+  alert('Transfer submitted. (Mock — would notify ' + t.fillLocation + ' via Teams webhook.)');
+  document.querySelector('.tab[data-tab=transfers]').click();
+}
+
+// =====================================================================
+// Transfer detail modal
+// =====================================================================
+function openTransfer(id) { state.openTransferId = id; renderModal(); }
+function closeModal() { state.openTransferId = null; document.getElementById('modalRoot').innerHTML = ''; }
+
+function renderModal() {
+  const t = TRANSFERS.find(x => x.id === state.openTransferId);
+  if (!t) return;
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+    <div class="modal-overlay" id="modalOverlay">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title">${escapeHtml(t.patientName)}</div>
+            <div class="item-sub">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)} · submitted ${fmtDate(t.createdAt)} by ${escapeHtml(t.submittedBy)}</div>
+          </div>
+          <button class="modal-close" id="modalClose">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+            <span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span>
+            ${t.coldItem?'<span class="badge badge-cold">Cold item</span>':''}
+            <div class="spacer" style="flex:1"></div>
+            <label style="font-size:12px;color:var(--gray-600)">Update status</label>
+            <select class="status-select" id="statusSelect">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select>
+          </div>
+
+          <div class="section-title">Patient</div>
+          <div style="font-size:13px;line-height:1.8">
+            <strong>${escapeHtml(t.patientName)}</strong> · DOB ${fmtDate(t.patientDOB)} · Allergies: ${escapeHtml(t.patientAllergies||'—')}
+          </div>
+
+          <div class="section"><div class="section-title">Shipping & Billing</div>
+          <div class="form-grid">
+            <div><strong>Ship to:</strong> ${escapeHtml(t.shipTo)}${t.deliveryCharge?` ($${t.deliveryCharge})`:''}</div>
+            <div><strong>Billing:</strong> ${escapeHtml(t.billing)}${t.ccOnFileInPaladin?' (CC on file in Paladin)':''}</div>
+            <div class="form-group full"><strong>Address:</strong><br>${escapeHtml(t.shipAddr1||'—')}${t.shipAddr2?'<br>'+escapeHtml(t.shipAddr2):''}${t.shipCity?'<br>'+escapeHtml(t.shipCity)+', '+escapeHtml(t.shipState)+' '+escapeHtml(t.shipZip):''}</div>
+            <div><strong>Anticipated ship:</strong> ${fmtDate(t.anticipatedShipDate)}</div>
+            <div><strong>Shipped:</strong> ${fmtDate(t.dateShipped)}</div>
+            <div><strong>Tracking:</strong> ${escapeHtml(t.trackingNumber||'—')}</div>
+            <div><strong>Paid:</strong> ${escapeHtml(t.paid)}</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" style="margin-top:10px" id="editShipBtn">Edit ship / tracking</button>
+          </div>
+
+          <div class="section"><div class="section-title">Attached Documents</div>
+          <div style="font-size:13px;line-height:1.9">
+            <div><strong>PK Transfer Sheet:</strong> ${t.pkSheet?`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.pkSheet.name)}</a>`:'<span style="color:var(--danger)">Missing</span>'}</div>
+            <div><strong>Formula Worksheet:</strong> ${t.formula?(t.formula.fromLibrary?`<a href="${escapeHtml(t.formula.link||'#')}" target="_blank" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a> <span class="item-sub">(from ${escapeHtml(t.originLocation)} library)</span>`:`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a>`):'<span style="color:var(--danger)">Missing</span>'}</div>
+            <div><strong>Hard Copy Scan:</strong> ${t.hardCopy?`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.hardCopy.name)}</a>`:'—'}</div>
+          </div>
+          </div>
+
+          <div class="section"><div class="section-title">Prescriptions / Items (${t.items.length})</div>
+          <div id="itemsList"></div>
+          </div>
+
+          <div class="section"><div class="section-title">Discussion</div>
+          <div id="commentsList"></div>
+          <div style="margin-top:12px">
+            <select id="newCommentScope" style="margin-bottom:6px;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px">
+              <option value="">Comment on whole transfer</option>
+              ${t.items.map(i=>`<option value="${i.id}">About: ${escapeHtml(i.drug||'Rx '+i.id)}</option>`).join('')}
+            </select>
+            <textarea id="newCommentBody" placeholder="Write a message..." style="width:100%;padding:9px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;min-height:70px"></textarea>
+            <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+              <label class="checkbox-row"><input type="checkbox" id="notifyTeams" checked /> Notify via Teams</label>
+              <div style="flex:1"></div>
+              <button class="btn btn-primary btn-sm" id="postComment">Post</button>
+            </div>
+          </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="modalCloseBtn">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+  renderItems(t);
+  renderComments(t);
+  document.getElementById('modalOverlay').addEventListener('click', e => { if (e.target.id === 'modalOverlay') closeModal(); });
+  document.getElementById('modalClose').addEventListener('click', closeModal);
+  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+  document.getElementById('statusSelect').addEventListener('change', e => {
+    const newStatus = e.target.value;
+    if (newStatus !== 'New' && newStatus !== 'Canceled') {
+      const unver = t.items.filter(i => !i.txFormVerified).length;
+      if (unver && newStatus !== 'New') {
+        if (!confirm(`${unver} item(s) have not been verified against the hard copy. Move to "${newStatus}" anyway?`)) { e.target.value = t.status; return; }
+      }
+    }
+    t.status = newStatus; renderModal(); render();
+  });
+  document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
+  document.getElementById('postComment').addEventListener('click', () => {
+    const body = document.getElementById('newCommentBody').value.trim();
+    if (!body) return;
+    const scope = document.getElementById('newCommentScope').value;
+    t.comments.push({ id: nextId(), itemId: scope ? +scope : null, author: CURRENT_USER.name, ts: new Date().toISOString(), body });
+    renderModal();
+  });
+}
+
+function renderItems(t) {
+  const wrap = document.getElementById('itemsList');
+  wrap.innerHTML = t.items.map(i => `
+    <div class="item-row ${i.txFormVerified?'verified':'unverified'}">
+      <div class="item-head">
+        <div><span class="item-title">${escapeHtml(i.drug||'(no drug name)')}</span> <span class="item-sub">· ${escapeHtml(i.qty||'')} · Rx ${escapeHtml(i.rxNumber||'—')}</span></div>
+        <label class="checkbox-row" style="font-size:12px"><input type="checkbox" data-verify="${i.id}" ${i.txFormVerified?'checked':''} /> PK form matches hard copy</label>
+      </div>
+      <div style="font-size:12px;color:var(--gray-600);line-height:1.6">
+        <div><strong>Dr.</strong> ${escapeHtml(i.doctorName||'—')} · ${escapeHtml(i.doctorPhone||'')} · DEA ${escapeHtml(i.doctorDEA||'—')}</div>
+        <div><strong>Addr:</strong> ${escapeHtml(i.doctorAddr||'—')}</div>
+        ${i.receiptAttached?'<div><strong>Receipt:</strong> Attached</div>':''}
+        ${i.notes?`<div style="margin-top:4px;color:var(--gray-700)"><strong>Notes:</strong> ${escapeHtml(i.notes)}</div>`:''}
+      </div>
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-verify]').forEach(cb => cb.addEventListener('change', e => {
+    const item = t.items.find(x => x.id === +cb.dataset.verify);
+    item.txFormVerified = e.target.checked;
+    renderModal();
+  }));
+}
+
+function renderComments(t) {
+  const wrap = document.getElementById('commentsList');
+  if (!t.comments.length) { wrap.innerHTML = '<div class="item-sub" style="padding:10px">No messages yet.</div>'; return; }
+  wrap.innerHTML = t.comments.map(c => {
+    const item = c.itemId ? t.items.find(i => i.id === c.itemId) : null;
+    return `<div class="comment">
+      <div class="comment-meta">
+        <span class="comment-author">${escapeHtml(c.author)}</span>
+        <span>${new Date(c.ts).toLocaleString()}</span>
+        ${item?`<span class="comment-scope">${escapeHtml(item.drug||'Rx '+item.id)}</span>`:''}
+      </div>
+      <div class="comment-body">${escapeHtml(c.body)}</div>
+    </div>`;
+  }).join('');
+}
+
+function editShip(t) {
+  const root = document.getElementById('modalRoot');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.zIndex = 300;
+  overlay.innerHTML = `<div class="modal" style="max-width:500px">
+    <div class="modal-header"><div class="modal-title">Edit Ship / Tracking</div><button class="modal-close" id="editClose">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-grid single">
+        <div class="form-group"><label>Tx Emailed Date</label><input type="date" id="e-tx" value="${escapeHtml(t.txEmailedDate||'')}" /></div>
+        <div class="form-group"><label>Date Received at Fill Location</label><input type="date" id="e-rcvErie" value="${escapeHtml(t.dateReceivedAtErie||'')}" /></div>
+        <div class="form-group"><label>Date Shipped</label><input type="date" id="e-dateShipped" value="${escapeHtml(t.dateShipped||'')}" /></div>
+        <div class="form-group"><label>Tracking Number</label><input id="e-tracking" value="${escapeHtml(t.trackingNumber)}" /></div>
+        <div class="form-group"><label>Date Received by Patient</label><input type="date" id="e-rcvPt" value="${escapeHtml(t.dateReceivedByPatient||'')}" /></div>
+        <div class="form-group"><label>Paid</label><select id="e-paid">${['Pending','HealNow','Paid','Pay in Store'].map(o=>`<option ${o===t.paid?'selected':''}>${o}</option>`).join('')}</select></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="editCancel">Cancel</button>
+      <button class="btn btn-primary" id="editSave">Save</button>
+    </div>
+  </div>`;
+  root.appendChild(overlay);
+  overlay.querySelector('#editClose').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#editCancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#editSave').addEventListener('click', () => {
+    t.txEmailedDate = overlay.querySelector('#e-tx').value || null;
+    t.dateReceivedAtErie = overlay.querySelector('#e-rcvErie').value || null;
+    t.dateShipped = overlay.querySelector('#e-dateShipped').value || null;
+    t.trackingNumber = overlay.querySelector('#e-tracking').value;
+    t.dateReceivedByPatient = overlay.querySelector('#e-rcvPt').value || null;
+    t.paid = overlay.querySelector('#e-paid').value;
+    overlay.remove();
+    renderModal();
+    render();
+  });
+}
+
+// =====================================================================
+// Shipments tab
+// =====================================================================
+const SHIP_STATUS_BADGE = { 'Pending':'badge-new','In Transit':'badge-progress','Delivered':'badge-shipped','Received':'badge-delivered' };
+
+function transferSummary(id) { const t = TRANSFERS.find(x => x.id === id); return t ? `${t.patientName} (${t.items.length} Rx)` : `#${id}`; }
+
+function renderShipments() {
+  const root = document.getElementById('view-shipments');
+  if (!state.shipFilter) state.shipFilter = { mine: false, search: '' };
+  const filtered = visibleShipments().filter(s => {
+    if (state.shipFilter.mine && s.toLocation !== CURRENT_USER.location) return false;
+    if (state.shipFilter.search) {
+      const q = state.shipFilter.search.toLowerCase();
+      if (!(s.trackingNumber||'').toLowerCase().includes(q) && !s.toLocation.toLowerCase().includes(q) && !s.fromLocation.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  root.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Shipments <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${filtered.length})</span></div>
+      <button class="btn btn-primary" id="newShipBtn">+ Create Shipment</button>
+    </div>
+
+    <div class="scan-bar">
+      <span class="label">📷 Scan tracking barcode:</span>
+      <input id="shipScan" placeholder="Focus here and scan — will open the matching shipment" autocomplete="off" />
+      <span class="item-sub" id="shipScanHint"></span>
+    </div>
+
+    <div class="filters">
+      <input placeholder="Filter tracking / location" id="shipSearch" value="${escapeHtml(state.shipFilter.search)}" style="min-width:260px" />
+      <label class="checkbox-row"><input type="checkbox" id="shipMine" ${state.shipFilter.mine?'checked':''} /> Only shipments to my location (${escapeHtml(CURRENT_USER.location)})</label>
+    </div>
+
+    ${filtered.length === 0 ? `<div class="empty"><h3>No shipments match</h3></div>` : `
+    <table><thead><tr>
+      <th>From → To</th><th>Type</th><th>Carrier</th><th>Tracking</th><th>Contents</th><th>Status</th><th>Ship Date</th><th>Delivered</th><th>Action</th>
+    </tr></thead><tbody>
+      ${filtered.map(s => {
+        const isMine = s.toLocation === CURRENT_USER.location;
+        const canReceive = isMine && s.status !== 'Received';
+        return `<tr data-ship="${s.id}">
+        <td><strong>${escapeHtml(s.fromLocation)}</strong> → ${escapeHtml(s.toLocation)}</td>
+        <td>${escapeHtml(s.destinationType)}</td>
+        <td>${escapeHtml(s.carrier)}${s.labelGenerated?' <span class="badge badge-verified" style="font-size:10px">Label auto-generated</span>':''}</td>
+        <td style="font-family:monospace;font-size:12px">${escapeHtml(s.trackingNumber||'—')}</td>
+        <td>${s.transferIds.map(transferSummary).join('<br>')}</td>
+        <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>${s.receivedBy?`<div class="item-sub">by ${escapeHtml(s.receivedBy)}</div>`:''}</td>
+        <td>${fmtDate(s.shipDate)}</td>
+        <td>${fmtDate(s.deliveredDate)}</td>
+        <td>${canReceive?`<button class="btn btn-primary btn-sm" data-receive-btn="${s.id}">📦 Receive</button>`:'<span class="item-sub">—</span>'}</td>
+      </tr>`;
+      }).join('')}
+    </tbody></table>`}
+  `;
+  document.getElementById('newShipBtn').addEventListener('click', openCreateShipment);
+  document.getElementById('shipMine').addEventListener('change', e => { state.shipFilter.mine = e.target.checked; renderShipments(); });
+  document.getElementById('shipSearch').addEventListener('input', e => { state.shipFilter.search = e.target.value; renderShipments(); });
+  root.querySelectorAll('tr[data-ship]').forEach(tr => tr.addEventListener('click', e => {
+    if (e.target.closest('[data-receive-btn]')) return;
+    openShipment(+tr.dataset.ship);
+  }));
+  root.querySelectorAll('[data-receive-btn]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openShipment(+b.dataset['receiveBtn']); }));
+
+  const scan = document.getElementById('shipScan');
+  scan.focus();
+  scan.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const q = scan.value.trim();
+    if (!q) return;
+    const match = SHIPMENTS.find(s => (s.trackingNumber||'').replace(/\s/g,'') === q.replace(/\s/g,''));
+    if (match) { scan.value=''; document.getElementById('shipScanHint').textContent = ''; openShipment(match.id); }
+    else { document.getElementById('shipScanHint').textContent = `✗ No shipment with tracking "${q}"`; document.getElementById('shipScanHint').style.color = 'var(--danger)'; }
+  });
+}
+
+function openCreateShipment() {
+  const root = document.getElementById('modalRoot');
+  const renderUI = () => {
+    const destType = document.getElementById('cm-destType')?.value || 'Pharmacy';
+    const toLoc = document.getElementById('cm-to')?.value || LOCATIONS[0];
+    const availableTransfers = visibleTransfers().filter(t => {
+      if (SHIPMENTS.some(s => s.transferIds.includes(t.id) && s.status !== 'Canceled')) return false;
+      if (['Delivered','Canceled','Shipped'].includes(t.status)) return false;
+      if (destType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === toLoc;
+      return t.shipTo === 'Patient';
+    });
+    const box = document.getElementById('cm-transfersBox');
+    if (!box) return;
+    box.innerHTML = `
+      <div style="margin-bottom:6px;font-size:13px;color:var(--gray-600)">
+        ${destType === 'Pharmacy' ? `Open transfers headed back to <strong>${escapeHtml(toLoc)}</strong>:` : 'Open transfers shipping directly to patients:'}
+      </div>
+      ${availableTransfers.length === 0 ? '<div class="item-sub">No open transfers match this destination.</div>' : `
+      <div style="max-height:300px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:6px">
+        ${availableTransfers.map(t => {
+          const unver = t.items.filter(i => !i.txFormVerified).length;
+          return `<div class="checkbox-row" style="padding:10px;border-bottom:1px solid var(--gray-100)">
+            <input type="checkbox" class="cm-t" value="${t.id}" />
+            <div style="flex:1">
+              <strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}
+              <div class="item-sub">${t.items.length} Rx · ${t.items.map(i=>escapeHtml(i.drug)).join(', ').slice(0,80)}${unver?` · <span class="pill-warn">${unver} unverified</span>`:''}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="margin-top:6px"><a href="#" id="cm-selectAll" style="font-size:12px;color:var(--primary)">Select all</a></div>`}
+    `;
+    const sa = document.getElementById('cm-selectAll');
+    if (sa) sa.onclick = e => { e.preventDefault(); document.querySelectorAll('.cm-t').forEach(c => c.checked = true); };
+  };
+
+  root.innerHTML = `<div class="modal-overlay" id="cmOverlay"><div class="modal" style="max-width:720px">
+    <div class="modal-header"><div class="modal-title">Create Shipment</div><button class="modal-close" id="cmClose">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group"><label>From</label><select id="cm-from">${LOCATIONS.map(l=>`<option ${l===CURRENT_USER.location?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Destination Type</label><select id="cm-destType"><option>Pharmacy</option><option>Patient</option></select></div>
+        <div class="form-group full" id="cm-toWrap"><label>To Pharmacy</label><select id="cm-to">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select><div class="hint">Picking a pharmacy will auto-list that location's open transfers below.</div></div>
+        <div class="form-group"><label>Carrier</label><select id="cm-carrier"><option>FedEx</option><option>UPS</option><option>USPS</option><option>Courier</option></select></div>
+        <div class="form-group"><label>Tracking Number</label><div style="display:flex;gap:6px"><input id="cm-tracking" placeholder="Enter or generate" /><button class="btn btn-secondary btn-sm" id="cm-genLabel" type="button">Generate FedEx Label</button></div></div>
+      </div>
+      <div class="section"><div class="section-title">Transfers to Include</div>
+        <div id="cm-transfersBox"></div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" id="cmCancel">Cancel</button><button class="btn btn-primary" id="cmSave">Create Shipment</button></div>
+  </div></div>`;
+
+  const close = () => root.innerHTML = '';
+  document.getElementById('cmClose').onclick = close;
+  document.getElementById('cmCancel').onclick = close;
+  document.getElementById('cmOverlay').onclick = e => { if (e.target.id === 'cmOverlay') close(); };
+  document.getElementById('cm-destType').onchange = () => {
+    const destType = document.getElementById('cm-destType').value;
+    const wrap = document.getElementById('cm-toWrap');
+    if (destType === 'Patient') {
+      wrap.innerHTML = '<label>Destination</label><input value="Patient (direct ship)" disabled /><input type="hidden" id="cm-to" value="Patient" />';
+    } else {
+      wrap.innerHTML = `<label>To Pharmacy</label><select id="cm-to">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select><div class="hint">Picking a pharmacy will auto-list that location's open transfers below.</div>`;
+      document.getElementById('cm-to').onchange = renderUI;
+    }
+    renderUI();
+  };
+  document.getElementById('cm-to').onchange = renderUI;
+  document.getElementById('cm-genLabel').onclick = () => {
+    const mockTracking = '7712 ' + Math.floor(1000+Math.random()*9000) + ' ' + Math.floor(1000+Math.random()*9000);
+    document.getElementById('cm-tracking').value = mockTracking;
+    alert('[Mock] FedEx label generated. Tracking: ' + mockTracking);
+  };
+  document.getElementById('cmSave').onclick = () => {
+    const picks = [...document.querySelectorAll('.cm-t:checked')].map(c => +c.value);
+    const tracking = document.getElementById('cm-tracking').value.trim();
+    if (!picks.length) { alert('Select at least one transfer.'); return; }
+    if (!tracking) { alert('Tracking number required.'); return; }
+    const s = {
+      id: nextId(),
+      fromLocation: document.getElementById('cm-from').value,
+      toLocation: document.getElementById('cm-to').value,
+      destinationType: document.getElementById('cm-destType').value,
+      carrier: document.getElementById('cm-carrier').value,
+      trackingNumber: tracking, labelGenerated: false,
+      status: 'In Transit',
+      shipDate: new Date().toISOString().slice(0,10),
+      deliveredDate: null, receivedDate: null, receivedBy: null,
+      transferIds: picks,
+      createdAt: new Date().toISOString(), createdBy: CURRENT_USER.name,
+      unpacked: {}, damagePhotos: []
+    };
+    SHIPMENTS.unshift(s);
+    picks.forEach(id => { const t = TRANSFERS.find(x => x.id === id); if (t) { t.status = 'Shipped'; t.dateShipped = s.shipDate; t.trackingNumber = s.trackingNumber; } });
+    close();
+    alert('Shipment created. (Mock — would notify ' + s.toLocation + ' via Teams webhook with manifest.)');
+    render();
+  };
+  renderUI();
+}
+
+function openShipment(id) {
+  const s = SHIPMENTS.find(x => x.id === id);
+  if (!s) return;
+  if (!s.unpacked) s.unpacked = {};
+  if (!s.damagePhotos) s.damagePhotos = [];
+  const root = document.getElementById('modalRoot');
+  const manifest = s.transferIds.map(tid => TRANSFERS.find(t => t.id === tid)).filter(Boolean);
+  const allItems = manifest.flatMap(t => t.items.map(i => ({t, i})));
+  const isReceiver = (s.toLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin') && s.status !== 'Received';
+  const unpackedCount = allItems.filter(({i}) => s.unpacked[i.id]).length;
+  const allUnpacked = allItems.length > 0 && unpackedCount === allItems.length;
+
+  root.innerHTML = `<div class="modal-overlay" id="smOverlay"><div class="modal">
+    <div class="modal-header"><div><div class="modal-title">Shipment ${escapeHtml(s.trackingNumber)}</div><div class="item-sub">${escapeHtml(s.fromLocation)} → ${escapeHtml(s.toLocation)} · ${escapeHtml(s.carrier)}</div></div><button class="modal-close" id="smClose">&times;</button></div>
+    <div class="modal-body">
+      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+        <span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>
+        <div><strong>Ship:</strong> ${fmtDate(s.shipDate)}</div>
+        <div><strong>Delivered:</strong> ${fmtDate(s.deliveredDate)}</div>
+        <div><strong>Received:</strong> ${fmtDate(s.receivedDate)}${s.receivedBy?` by ${escapeHtml(s.receivedBy)}`:''}</div>
+        ${isReceiver?`<div style="flex:1"></div><span class="pill-warn">📦 Headed to your location — unpack below</span>`:''}
+      </div>
+
+      <div class="section-title">Manifest (${manifest.length} transfer${manifest.length!==1?'s':''}, ${allItems.length} Rx)${isReceiver?` — ${unpackedCount}/${allItems.length} unpacked`:''}</div>
+      ${isReceiver && s.status === 'In Transit' ? `
+      <div style="background:var(--warning-bg);border:1px solid var(--warning);padding:12px 14px;border-radius:var(--radius);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div><strong>Package in transit.</strong> Once the box arrives at your pharmacy, click <em>"Arrived at my pharmacy"</em> to start unpacking.</div>
+        <button class="btn btn-primary btn-sm" id="sm-arrived">📦 Arrived at my pharmacy</button>
+      </div>` : ''}
+
+      ${manifest.map(t => `<div class="item-row">
+        <div class="item-head">
+          <div><strong>${escapeHtml(t.patientName)}</strong> <span class="item-sub">· DOB ${fmtDate(t.patientDOB)}</span></div>
+          <button class="btn btn-secondary btn-sm" data-open-t="${t.id}">Open transfer</button>
+        </div>
+        ${t.items.map(i => isReceiver && s.status === 'Delivered'
+          ? `<div class="checkbox-row" style="padding:6px 4px;border-bottom:1px solid var(--gray-100)">
+               <input type="checkbox" data-unpack="${i.id}" ${s.unpacked[i.id]?'checked':''} />
+               <div style="flex:1"><strong>${escapeHtml(i.drug)}</strong> <span class="item-sub">· ${escapeHtml(i.qty||'')} · Rx ${escapeHtml(i.rxNumber||'—')}</span></div>
+             </div>`
+          : `<div style="font-size:13px;padding:4px 0">• ${escapeHtml(i.drug)} — ${escapeHtml(i.qty||'')} · Rx ${escapeHtml(i.rxNumber||'—')}</div>`
+        ).join('')}
+      </div>`).join('')}
+
+      ${isReceiver && s.status === 'Delivered'?`
+      <div class="section" style="padding-top:14px;border-top:1px solid var(--gray-200)">
+        <div class="section-title">📷 Scan Rx barcode (optional)</div>
+        <input id="sm-scan" placeholder="Focus here and scan to auto-check items" style="width:100%;padding:9px;border:1px solid var(--gray-300);border-radius:6px;font-family:monospace" />
+        <div class="item-sub" id="sm-scanHint"></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Damage / Condition Photos (optional)</div>
+        <input type="file" accept="image/*" capture="environment" multiple id="sm-photo" />
+        ${s.damagePhotos.length?`<div class="photo-strip">${s.damagePhotos.map((p,idx)=>`<div class="photo-thumb" style="background-image:url('${p.dataUrl}')"><button class="rm" data-rmphoto="${idx}">×</button></div>`).join('')}</div>`:''}
+      </div>`:''}
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="smCloseBtn">Close</button>
+      ${isReceiver && s.status === 'Delivered'?`<button class="btn ${allUnpacked?'btn-primary':'btn-secondary'}" id="sm-receive" ${!allUnpacked?'disabled style="opacity:.5;cursor:not-allowed"':''}>Mark Package Received (all Rx checked)</button>`:''}
+    </div>
+  </div></div>`;
+
+  const close = () => root.innerHTML = '';
+  document.getElementById('smClose').onclick = close;
+  document.getElementById('smCloseBtn').onclick = close;
+  document.getElementById('smOverlay').onclick = e => { if (e.target.id === 'smOverlay') close(); };
+  root.querySelectorAll('[data-open-t]').forEach(b => b.onclick = () => { close(); openTransfer(+b.dataset['openT']); });
+  root.querySelectorAll('[data-unpack]').forEach(cb => cb.onchange = e => { s.unpacked[+cb.dataset.unpack] = e.target.checked; openShipment(s.id); });
+  const arrived = document.getElementById('sm-arrived');
+  if (arrived) arrived.onclick = () => {
+    s.status = 'Delivered'; s.deliveredDate = new Date().toISOString().slice(0,10);
+    openShipment(s.id);
+  };
+  const rec = document.getElementById('sm-receive');
+  if (rec) rec.onclick = () => {
+    s.status = 'Received'; s.receivedDate = new Date().toISOString().slice(0,10); s.receivedBy = CURRENT_USER.name;
+    s.transferIds.forEach(id => { const t = TRANSFERS.find(x => x.id === id); if (t) t.status = 'Delivered'; });
+    close();
+    alert('Marked received. (Mock — would notify origin via Teams.)');
+    render();
+  };
+  const photoEl = document.getElementById('sm-photo');
+  if (photoEl) photoEl.onchange = () => {
+    [...photoEl.files].forEach(file => {
+      const rd = new FileReader();
+      rd.onload = ev => { s.damagePhotos.push({ name: file.name, dataUrl: ev.target.result, uploadedBy: CURRENT_USER.name, ts: new Date().toISOString() }); openShipment(s.id); };
+      rd.readAsDataURL(file);
+    });
+  };
+  root.querySelectorAll('[data-rmphoto]').forEach(b => b.onclick = () => { s.damagePhotos.splice(+b.dataset.rmphoto, 1); openShipment(s.id); });
+  const scanInput = document.getElementById('sm-scan');
+  if (scanInput) {
+    scanInput.focus();
+    scanInput.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      const q = scanInput.value.trim();
+      if (!q) return;
+      let hit = false;
+      allItems.forEach(({i}) => { if (i.rxNumber === q) { s.unpacked[i.id] = true; hit = true; } });
+      document.getElementById('sm-scanHint').textContent = hit ? `✔ Matched "${q}"` : `✗ No Rx # match for "${q}"`;
+      document.getElementById('sm-scanHint').style.color = hit ? 'var(--success)' : 'var(--danger)';
+      scanInput.value = '';
+      if (hit) openShipment(s.id);
+    });
+  }
+}
+
+// =====================================================================
+// Pharmacist Review tab — verify each script against hard copy
+// =====================================================================
+function renderPharmReview() {
+  const root = document.getElementById('view-pharmreview');
+  if (!state.reviewFilter) state.reviewFilter = { fill: '', origin: '' };
+  const isAdmin = CURRENT_USER.role === 'admin';
+  // Non-admins: locked to their location as fill location (they can only verify where they're the filler)
+  if (!isAdmin) state.reviewFilter.fill = CURRENT_USER.location;
+  const matchesFilter = t => {
+    if (state.reviewFilter.fill && t.fillLocation !== state.reviewFilter.fill) return false;
+    if (state.reviewFilter.origin && t.originLocation !== state.reviewFilter.origin) return false;
+    return true;
+  };
+  const queue = TRANSFERS.filter(t => matchesFilter(t) && !['Delivered','Canceled','Shipped'].includes(t.status) && t.items.some(i => !i.txFormVerified));
+  const ready = TRANSFERS.filter(t => matchesFilter(t) && t.status === 'New' && t.items.every(i => i.txFormVerified));
+  root.innerHTML = `
+    <div class="page-header"><div class="page-title">Pharmacist Review${isAdmin?'':' — '+escapeHtml(CURRENT_USER.location)} <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${queue.length})</span></div></div>
+    <p style="color:var(--gray-600);margin-bottom:14px">Pharmacist step: verify each script on the printed PK transfer sheet matches the hard copy (doctor name, address, DEA, drug, qty). Check off each Rx. Once every item on a transfer is verified, click <strong>Mark Transfer Verified</strong> to advance it to <em>Tx Verified</em> status.${isAdmin?'':' You see only transfers where your pharmacy is the filling location.'}</p>
+    <div class="filters">
+      ${isAdmin?`<label style="font-size:12px;color:var(--gray-600)">Fill location:</label>
+      <select id="pr-fill"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===state.reviewFilter.fill?'selected':''}>${l}</option>`).join('')}</select>`:''}
+      <label style="font-size:12px;color:var(--gray-600);margin-left:8px">Origin:</label>
+      <select id="pr-origin"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===state.reviewFilter.origin?'selected':''}>${l}</option>`).join('')}</select>
+      ${isAdmin?`<button class="btn btn-secondary btn-sm" id="pr-mine">My location only</button>`:''}
+    </div>
+    ${queue.length === 0 ? `<div class="empty"><h3>Nothing to review</h3><p>All transfers at your location are verified.</p></div>` : queue.map(t => {
+      const unver = t.items.filter(i => !i.txFormVerified).length;
+      return `<div class="card">
+        <div class="card-header">
+          <div><strong>${escapeHtml(t.patientName)}</strong> <span class="item-sub">· DOB ${fmtDate(t.patientDOB)} · ${escapeHtml(t.originLocation)} → fill at ${escapeHtml(t.fillLocation)}</span></div>
+          <div><span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}</div>
+        </div>
+        <div class="card-body">
+          <div style="font-size:13px;margin-bottom:10px">
+            <strong>PK Transfer Sheet:</strong> ${t.pkSheet?`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.pkSheet.name)}</a>`:'<span style="color:var(--danger)">Missing</span>'} ·
+            <strong>Formula:</strong> ${t.formula?(t.formula.fromLibrary?`<a href="${escapeHtml(t.formula.link||'#')}" target="_blank" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a>`:escapeHtml(t.formula.name)):'<span style="color:var(--danger)">Missing</span>'} ·
+            <strong>Hard Copy:</strong> ${t.hardCopy?`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.hardCopy.name)}</a>`:'<span class="item-sub">not attached</span>'}
+          </div>
+          ${t.items.map(i => `<div class="item-row ${i.txFormVerified?'verified':'unverified'}">
+            <div class="item-head">
+              <div><span class="item-title">${escapeHtml(i.drug)}</span> <span class="item-sub">· ${escapeHtml(i.qty||'')} · Rx ${escapeHtml(i.rxNumber||'—')}</span></div>
+              <label class="checkbox-row" style="font-size:12px"><input type="checkbox" data-verifypr="${t.id}:${i.id}" ${i.txFormVerified?'checked':''} /> Verified against hard copy</label>
+            </div>
+            <div style="font-size:12px;color:var(--gray-600);line-height:1.6">
+              <div><strong>Dr.</strong> ${escapeHtml(i.doctorName||'—')} · ${escapeHtml(i.doctorPhone||'')} · DEA ${escapeHtml(i.doctorDEA||'—')}</div>
+              <div><strong>Addr:</strong> ${escapeHtml(i.doctorAddr||'—')}</div>
+              ${i.verifiedBy?`<div style="color:var(--success)">✔ Verified by ${escapeHtml(i.verifiedBy)} on ${fmtDate(i.verifiedAt)}</div>`:''}
+            </div>
+          </div>`).join('')}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+            <div class="item-sub">${unver} of ${t.items.length} item(s) still need verification</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-secondary btn-sm" data-open-pr="${t.id}">Open full transfer</button>
+              <button class="btn ${unver===0?'btn-primary':'btn-secondary'} btn-sm" data-advance="${t.id}" ${unver>0?'disabled style="opacity:.5;cursor:not-allowed"':''}>Mark Transfer Verified</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+    ${ready.length?`<div class="section-title" style="margin-top:24px">Ready to mark verified (${ready.length})</div>${ready.map(t=>`<div class="item-row verified"><div class="item-head"><div><strong>${escapeHtml(t.patientName)}</strong> <span class="item-sub">· all items verified</span></div><button class="btn btn-primary btn-sm" data-advance="${t.id}">Mark Transfer Verified</button></div></div>`).join('')}`:''}
+  `;
+  root.querySelectorAll('[data-verifypr]').forEach(cb => cb.onchange = e => {
+    const [tid, iid] = cb.dataset.verifypr.split(':').map(Number);
+    const t = TRANSFERS.find(x => x.id === tid);
+    const it = t.items.find(x => x.id === iid);
+    it.txFormVerified = e.target.checked;
+    if (e.target.checked) { it.verifiedBy = CURRENT_USER.name; it.verifiedAt = new Date().toISOString(); } else { delete it.verifiedBy; delete it.verifiedAt; }
+    renderPharmReview();
+  });
+  root.querySelectorAll('[data-advance]').forEach(b => b.onclick = () => {
+    const t = TRANSFERS.find(x => x.id === +b.dataset.advance);
+    if (t.items.some(i => !i.txFormVerified)) { alert('All items must be verified first.'); return; }
+    t.status = 'Tx Verified'; t.pharmacistVerifiedBy = CURRENT_USER.name; t.pharmacistVerifiedAt = new Date().toISOString();
+    renderPharmReview();
+    alert('Transfer marked verified. (Mock — would notify the assigned tech via Teams.)');
+    render();
+  });
+  root.querySelectorAll('[data-open-pr]').forEach(b => b.onclick = () => openTransfer(+b.dataset['openPr']));
+  const prFill = document.getElementById('pr-fill'); if (prFill) prFill.onchange = e => { state.reviewFilter.fill = e.target.value; renderPharmReview(); };
+  document.getElementById('pr-origin').onchange = e => { state.reviewFilter.origin = e.target.value; renderPharmReview(); };
+  const prMine = document.getElementById('pr-mine'); if (prMine) prMine.onclick = () => { state.reviewFilter = { fill: CURRENT_USER.location, origin: '' }; renderPharmReview(); };
+}
+
+// init
+populateUserSwitcher();
+bindGlobalSearch();
+applyRoleVisibility();
+render();
+</script>
+</body>
+</html>
