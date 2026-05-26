@@ -1521,6 +1521,7 @@ function renderShipments() {
       <div class="page-title">Shipments <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${filtered.length})</span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span class="item-sub" id="fedexStatusPill" style="font-size:12px"></span>
+        <button class="btn btn-secondary" id="testFedexBtn" title="Test the FedEx connection with a sandbox tracking number">🧪 Test FedEx</button>
         <button class="btn btn-secondary" id="pullFedexBtn" title="Pull recent shipments from FedEx and auto-match by ship-to address">📦 Pull from FedEx</button>
         <button class="btn btn-primary" id="newShipBtn">+ Create Shipment</button>
       </div>
@@ -1560,6 +1561,7 @@ function renderShipments() {
   `;
   document.getElementById('newShipBtn').addEventListener('click', openCreateShipment);
   document.getElementById('pullFedexBtn').addEventListener('click', openFedexPullModal);
+  document.getElementById('testFedexBtn').addEventListener('click', openFedexTestModal);
   updateFedexStatusPill();
   document.getElementById('shipMine').addEventListener('change', e => { state.shipFilter.mine = e.target.checked; renderShipments(); });
   document.getElementById('shipSearch').addEventListener('input', e => { state.shipFilter.search = e.target.value; renderShipments(); });
@@ -2359,6 +2361,89 @@ function scoreMatch(fedexShip, transfer) {
     if (daysOff <= 14) score += Math.max(0, 10 - daysOff);
   }
   return score;
+}
+
+// FedEx-provided sandbox test tracking numbers. Each returns a specific simulated status.
+const FEDEX_SANDBOX_TEST_NUMBERS = [
+  { tn: '122816215025810', expected: 'Delivered' },
+  { tn: '449044304137821', expected: 'On FedEx Vehicle for Delivery' },
+  { tn: '920241085725456', expected: 'At Local FedEx Facility' },
+  { tn: '568838414941',    expected: 'At Destination Sort Facility' },
+  { tn: '039813852990618', expected: 'Departed FedEx Hub' },
+  { tn: '231300687629630', expected: 'Picked Up' }
+];
+
+function openFedexTestModal() {
+  const root = document.getElementById('modalRoot');
+  const s = { picked: FEDEX_SANDBOX_TEST_NUMBERS[0].tn, custom: '', loading: false, result: null, error: null, raw: null };
+
+  const render = () => {
+    root.innerHTML = `<div class="modal-overlay" id="ftOverlay"><div class="modal" style="max-width:720px">
+      <div class="modal-header"><div><div class="modal-title">Test FedEx Connection</div><div class="item-sub">Calls /api/fedex-track with a sandbox tracking number to verify auth + round-trip works</div></div><button class="modal-close" id="ftClose">&times;</button></div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom:14px">
+          <label>Pick a sandbox test tracking #</label>
+          <select id="ft-pick">
+            ${FEDEX_SANDBOX_TEST_NUMBERS.map(x => `<option value="${x.tn}" ${x.tn===s.picked?'selected':''}>${x.tn} — expects "${x.expected}"</option>`).join('')}
+          </select>
+          <div class="hint">These are FedEx-provided test numbers. Each returns a specific simulated status.</div>
+        </div>
+        <div class="form-group" style="margin-bottom:14px">
+          <label>...or enter your own (real tracking #s only work in production mode)</label>
+          <input id="ft-custom" value="${escapeHtml(s.custom)}" placeholder="e.g. 472779332371" style="font-family:monospace" />
+        </div>
+        <button class="btn btn-primary" id="ft-go" ${s.loading?'disabled style="opacity:.5"':''}>${s.loading?'Calling FedEx…':'Run test →'}</button>
+        ${s.error ? `<div style="margin-top:14px;background:var(--danger-bg);border:1px solid var(--danger);padding:10px 14px;border-radius:6px;font-size:13px"><strong style="color:var(--danger)">Error:</strong> ${escapeHtml(s.error)}</div>` : ''}
+        ${s.result && s.result.length > 0 ? `<div style="margin-top:14px">
+          <div class="section-title" style="margin-bottom:8px">Result</div>
+          ${s.result.map(r => `<div class="item-row" style="background:var(--success-bg);border-left:4px solid var(--success)">
+            <div class="item-head"><div><strong>${escapeHtml(r.trackingNumber)}</strong></div><span class="badge badge-shipped">${escapeHtml(r.status||'—')}</span></div>
+            <div style="font-size:12px;color:var(--gray-700);line-height:1.6">
+              ${r.statusCode?`<div><strong>Code:</strong> <code style="font-family:monospace">${escapeHtml(r.statusCode)}</code></div>`:''}
+              ${r.statusDescription?`<div><strong>Description:</strong> ${escapeHtml(r.statusDescription)}</div>`:''}
+              ${r.deliveryDate?`<div><strong>Delivery date:</strong> ${escapeHtml(r.deliveryDate)}</div>`:''}
+              ${r.lastEvent?`<div><strong>Last scan:</strong> ${escapeHtml(r.lastEvent.eventDescription||'')} · ${escapeHtml(r.lastEvent.location||'')} · ${escapeHtml(r.lastEvent.date||'')}</div>`:''}
+            </div>
+          </div>`).join('')}
+          <details style="margin-top:8px"><summary class="item-sub" style="cursor:pointer">Show raw JSON response</summary><pre style="background:var(--gray-100);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px">${escapeHtml(JSON.stringify(s.raw,null,2))}</pre></details>
+        </div>` : ''}
+        ${s.result && s.result.length === 0 ? `<div style="margin-top:14px;background:var(--warning-bg);border:1px solid var(--warning);padding:10px 14px;border-radius:6px;font-size:13px">FedEx returned an empty result. If you're in sandbox, this can happen if you typed a real (non-sandbox) tracking number. Try one of the picked sandbox numbers above.</div>` : ''}
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" id="ftCloseBtn">Close</button></div>
+    </div></div>`;
+    document.getElementById('ftClose').onclick = close;
+    document.getElementById('ftCloseBtn').onclick = close;
+    document.getElementById('ftOverlay').onclick = e => { if (e.target.id === 'ftOverlay') close(); };
+    document.getElementById('ft-pick').onchange = e => { s.picked = e.target.value; };
+    document.getElementById('ft-custom').oninput = e => { s.custom = e.target.value; };
+    document.getElementById('ft-go').onclick = run;
+  };
+
+  const run = async () => {
+    s.loading = true; s.error = null; s.result = null; s.raw = null; render();
+    const tn = (s.custom || s.picked).trim();
+    try {
+      const r = await fetch('/api/fedex-track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackingNumbers: [tn] })
+      });
+      const data = await r.json();
+      s.raw = data;
+      if (!r.ok) {
+        s.error = (data && (data.error || JSON.stringify(data.details||data))) || ('HTTP ' + r.status);
+      } else {
+        s.result = data.results || [];
+      }
+    } catch (e) {
+      s.error = e.message;
+    }
+    s.loading = false;
+    render();
+  };
+
+  const close = () => { root.innerHTML = ''; };
+  render();
 }
 
 function openFedexPullModal() {
