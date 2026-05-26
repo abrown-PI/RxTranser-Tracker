@@ -1,0 +1,10 @@
+{
+  "name": "rxtransfer-tracker-api",
+  "version": "1.0.0",
+  "description": "Azure Functions backend for FedEx integration",
+  "main": "index.js",
+  "scripts": {
+    "start": "func start"
+  },
+  "dependencies": {}
+}

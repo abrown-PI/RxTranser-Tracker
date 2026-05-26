@@ -1519,7 +1519,11 @@ function renderShipments() {
   root.innerHTML = `
     <div class="page-header">
       <div class="page-title">Shipments <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${filtered.length})</span></div>
-      <button class="btn btn-primary" id="newShipBtn">+ Create Shipment</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="item-sub" id="fedexStatusPill" style="font-size:12px"></span>
+        <button class="btn btn-secondary" id="pullFedexBtn" title="Pull recent shipments from FedEx and auto-match by ship-to address">📦 Pull from FedEx</button>
+        <button class="btn btn-primary" id="newShipBtn">+ Create Shipment</button>
+      </div>
     </div>
 
     <div class="scan-bar">
@@ -1555,6 +1559,8 @@ function renderShipments() {
     </tbody></table>`}
   `;
   document.getElementById('newShipBtn').addEventListener('click', openCreateShipment);
+  document.getElementById('pullFedexBtn').addEventListener('click', openFedexPullModal);
+  updateFedexStatusPill();
   document.getElementById('shipMine').addEventListener('change', e => { state.shipFilter.mine = e.target.checked; renderShipments(); });
   document.getElementById('shipSearch').addEventListener('input', e => { state.shipFilter.search = e.target.value; renderShipments(); });
   root.querySelectorAll('tr[data-ship]').forEach(tr => tr.addEventListener('click', e => {
@@ -2283,11 +2289,271 @@ function renderActionItems() {
   });
 }
 
+// =====================================================================
+// FedEx integration — pull recent shipments and match by ship-to address
+// =====================================================================
+let _fedexStatusCache = null;
+async function checkFedexConfigured() {
+  if (_fedexStatusCache) return _fedexStatusCache;
+  try {
+    const r = await fetch('/api/fedex-status');
+    if (!r.ok) return { configured: false, error: 'API endpoint not reachable' };
+    _fedexStatusCache = await r.json();
+    return _fedexStatusCache;
+  } catch (e) {
+    return { configured: false, error: 'Network error: ' + e.message };
+  }
+}
+
+async function updateFedexStatusPill() {
+  const el = document.getElementById('fedexStatusPill');
+  if (!el) return;
+  const s = await checkFedexConfigured();
+  if (s.configured) {
+    el.innerHTML = `<span style="color:var(--success)">● FedEx ${s.environment}</span>`;
+  } else {
+    el.innerHTML = `<span style="color:var(--gray-500)" title="${escapeHtml(s.error||s.missing&&s.missing.join(', ')||'Not configured')}">○ FedEx not configured</span>`;
+  }
+}
+
+// Normalize an address for fuzzy match — uppercase, strip punctuation, collapse whitespace,
+// drop the common "STREET → ST", "ROAD → RD" suffixes that vary between FedEx and our records.
+function normalizeAddr(s) {
+  if (!s) return '';
+  return String(s).toUpperCase()
+    .replace(/\bSTREET\b/g, 'ST').replace(/\bROAD\b/g, 'RD').replace(/\bAVENUE\b/g, 'AVE')
+    .replace(/\bDRIVE\b/g, 'DR').replace(/\bBOULEVARD\b/g, 'BLVD').replace(/\bLANE\b/g, 'LN')
+    .replace(/\bCIRCLE\b/g, 'CIR').replace(/\bCOURT\b/g, 'CT').replace(/\bPLACE\b/g, 'PL')
+    .replace(/[.,#]/g, '').replace(/\s+/g, ' ').trim();
+}
+function lastNameOf(name) { if (!name) return ''; return name.split(',')[0].trim().toUpperCase(); }
+
+// Score a potential match between a FedEx shipment and one of our transfers.
+// Higher score = better match. Returns 0 if there's no plausible link.
+function scoreMatch(fedexShip, transfer) {
+  let score = 0;
+  const r = fedexShip.recipient || {};
+  const tLast = lastNameOf(transfer.patientName);
+  const fLast = lastNameOf(r.name);
+  // Recipient name match (last name)
+  if (tLast && fLast && tLast === fLast) score += 50;
+  // Ship-to address — pharmacy or patient
+  if (transfer.shipTo === 'Pharmacy') {
+    // For pharmacy ships, compare against PHARMACY_ADDRESSES[originLocation]
+    const pa = PHARMACY_ADDRESSES[transfer.originLocation];
+    if (pa) {
+      if (normalizeAddr(pa.addr1) === normalizeAddr(r.addr1) && pa.zip && pa.zip === r.zip) score += 40;
+      else if (pa.zip && pa.zip === r.zip) score += 20;
+    }
+  } else {
+    // Patient ship — compare against transfer.shipAddr*
+    if (transfer.shipAddr1 && r.addr1 && normalizeAddr(transfer.shipAddr1) === normalizeAddr(r.addr1)) score += 40;
+    if (transfer.shipZip && r.zip && transfer.shipZip === r.zip) score += 10;
+    if (transfer.shipCity && r.city && transfer.shipCity.toUpperCase() === r.city.toUpperCase()) score += 5;
+  }
+  // Date proximity — FedEx ship date should be within a week of when our transfer entered "Ready to Ship" or "In Progress"
+  const fDate = fedexShip.shipDate ? new Date(fedexShip.shipDate) : null;
+  const tDate = transfer.createdAt ? new Date(transfer.createdAt) : null;
+  if (fDate && tDate) {
+    const daysOff = Math.abs(fDate - tDate) / 86400000;
+    if (daysOff <= 14) score += Math.max(0, 10 - daysOff);
+  }
+  return score;
+}
+
+function openFedexPullModal() {
+  const root = document.getElementById('modalRoot');
+  const today = new Date().toISOString().slice(0,10);
+  const tenDaysAgo = new Date(Date.now() - 10*86400000).toISOString().slice(0,10);
+  const state = { dateFrom: tenDaysAgo, dateTo: today, loading: false, results: null, error: null, matches: [] };
+
+  const render = () => {
+    root.innerHTML = `<div class="modal-overlay" id="fxOverlay"><div class="modal" style="max-width:900px">
+      <div class="modal-header"><div><div class="modal-title">Pull Shipments from FedEx</div><div class="item-sub">Match recent FedEx shipments to open transfers by ship-to address</div></div><button class="modal-close" id="fxClose">&times;</button></div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group"><label>From</label><input type="date" id="fx-from" value="${state.dateFrom}" /></div>
+          <div class="form-group"><label>To</label><input type="date" id="fx-to" value="${state.dateTo}" /></div>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary" id="fx-go" ${state.loading?'disabled style="opacity:.5"':''}>${state.loading?'Pulling…':'Pull from FedEx'}</button>
+          ${state.error?`<span style="color:var(--danger);font-size:13px">${escapeHtml(state.error)}</span>`:''}
+        </div>
+        ${state.results ? renderResults() : `<div style="margin-top:20px;color:var(--gray-500);font-size:13px">Click "Pull from FedEx" to fetch shipments in the date range and auto-match them to open transfers.</div>`}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="fxCancel">Close</button>
+        ${state.matches.some(m => m.approved) ? `<button class="btn btn-primary" id="fxApply">Apply ${state.matches.filter(m=>m.approved).length} matched shipment(s)</button>` : ''}
+      </div>
+    </div></div>`;
+    document.getElementById('fxClose').onclick = close;
+    document.getElementById('fxCancel').onclick = close;
+    document.getElementById('fxOverlay').onclick = e => { if (e.target.id === 'fxOverlay') close(); };
+    document.getElementById('fx-from').onchange = e => { state.dateFrom = e.target.value; };
+    document.getElementById('fx-to').onchange = e => { state.dateTo = e.target.value; };
+    document.getElementById('fx-go').onclick = pull;
+    bindResultRows();
+    const apply = document.getElementById('fxApply');
+    if (apply) apply.onclick = applyMatches;
+  };
+
+  const renderResults = () => {
+    if (state.results.length === 0) return '<div class="empty"><h3>No shipments found</h3><p>FedEx returned no shipments for this date range.</p></div>';
+    return `
+      <div style="margin-top:14px;font-size:13px;color:var(--gray-700)">
+        Pulled <strong>${state.results.length}</strong> shipment(s). ${state.matches.filter(m=>m.bestMatch).length} have a candidate match. Confirm each below.
+      </div>
+      <table style="box-shadow:none;font-size:13px;margin-top:10px"><thead><tr>
+        <th>FedEx Recipient</th><th>Ship Date</th><th>Tracking #</th><th>Suggested Transfer</th><th>Score</th><th>Confirm</th>
+      </tr></thead><tbody>
+        ${state.matches.map((m, idx) => `<tr ${m.approved?'style="background:var(--success-bg)"':(m.bestMatch?'':'style="opacity:.6"')}>
+          <td><strong>${escapeHtml(m.ship.recipient.name||'(no name)')}</strong><div class="item-sub">${escapeHtml([m.ship.recipient.addr1, m.ship.recipient.city, m.ship.recipient.state, m.ship.recipient.zip].filter(Boolean).join(', '))}</div></td>
+          <td>${fmtDate(m.ship.shipDate)}</td>
+          <td style="font-family:monospace;font-size:12px">${escapeHtml(m.ship.trackingNumber)}</td>
+          <td>${m.bestMatch ? `
+            <select data-pick="${idx}" style="font-size:12px;padding:4px;max-width:260px">
+              ${m.candidates.slice(0, 5).map(c => `<option value="${c.transfer.id}" ${m.bestMatch.transfer.id===c.transfer.id?'selected':''}>${escapeHtml(c.transfer.patientName)} · ${escapeHtml(c.transfer.originLocation)} → ${escapeHtml(c.transfer.fillLocation)} (score ${c.score})</option>`).join('')}
+              <option value="">— No match —</option>
+            </select>` : '<span class="item-sub">No candidate</span>'}</td>
+          <td>${m.bestMatch?`<span class="badge ${m.bestMatch.score>=60?'badge-shipped':'badge-progress'}" style="font-size:10px">${m.bestMatch.score}</span>`:''}</td>
+          <td>${m.bestMatch?`<label class="checkbox-row"><input type="checkbox" data-approve="${idx}" ${m.approved?'checked':''} /></label>`:''}</td>
+        </tr>`).join('')}
+      </tbody></table>
+    `;
+  };
+
+  const bindResultRows = () => {
+    document.querySelectorAll('[data-pick]').forEach(sel => sel.onchange = e => {
+      const idx = +sel.dataset.pick;
+      const tid = +e.target.value;
+      state.matches[idx].bestMatch = tid ? state.matches[idx].candidates.find(c => c.transfer.id === tid) : null;
+      if (!tid) state.matches[idx].approved = false;
+      render();
+    });
+    document.querySelectorAll('[data-approve]').forEach(cb => cb.onchange = e => {
+      const idx = +cb.dataset.approve;
+      state.matches[idx].approved = e.target.checked;
+      render();
+    });
+  };
+
+  const pull = async () => {
+    state.loading = true; state.error = null; render();
+    try {
+      const r = await fetch('/api/fedex-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dateFrom: state.dateFrom, dateTo: state.dateTo })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'FedEx pull failed');
+      state.results = data.shipments || [];
+      // Build candidate matches for each FedEx shipment
+      const openTransfers = TRANSFERS.filter(t => !['Delivered','Canceled'].includes(t.status) && !t.trackingNumber);
+      state.matches = state.results.map(ship => {
+        const candidates = openTransfers
+          .map(t => ({ transfer: t, score: scoreMatch(ship, t) }))
+          .filter(c => c.score > 0)
+          .sort((a,b) => b.score - a.score);
+        const bestMatch = candidates[0] || null;
+        return { ship, candidates, bestMatch, approved: !!(bestMatch && bestMatch.score >= 60) };
+      });
+    } catch (e) {
+      state.error = e.message;
+      state.results = null;
+    }
+    state.loading = false;
+    render();
+  };
+
+  const applyMatches = () => {
+    let applied = 0;
+    state.matches.filter(m => m.approved && m.bestMatch).forEach(m => {
+      const t = m.bestMatch.transfer;
+      t.trackingNumber = m.ship.trackingNumber;
+      t.dateShipped = m.ship.shipDate || t.dateShipped || new Date().toISOString().slice(0,10);
+      if (!['Shipped','Delivered','Canceled'].includes(t.status)) t.status = 'Shipped';
+      // Also create a shipment record if one doesn't already exist for this tracking #
+      if (!SHIPMENTS.some(s => s.trackingNumber === m.ship.trackingNumber)) {
+        SHIPMENTS.unshift({
+          id: nextId(),
+          fromLocation: t.fillLocation,
+          toLocation: t.shipTo === 'Pharmacy' ? t.originLocation : 'Patient',
+          destinationType: t.shipTo === 'Pharmacy' ? 'Pharmacy' : 'Patient',
+          carrier: 'FedEx',
+          trackingNumber: m.ship.trackingNumber,
+          labelGenerated: false,
+          status: 'In Transit',
+          shipDate: m.ship.shipDate,
+          deliveredDate: null, receivedDate: null, receivedBy: null,
+          transferIds: [t.id],
+          createdAt: new Date().toISOString(), createdBy: 'FedEx auto-match',
+          unpacked: {}
+        });
+      }
+      applied++;
+    });
+    close();
+    alert(`Linked ${applied} FedEx shipment(s) to transfers.`);
+    render2(); // re-render the Shipments tab
+  };
+  const render2 = () => renderShipments();
+
+  const close = () => { root.innerHTML = ''; };
+  render();
+};
+
+// Auto-refresh tracking statuses every 15 minutes.
+// Started once at app init. Each tick: only fires a FedEx call when the user is actually
+// on the Shipments tab (no point burning API calls if nobody's looking).
+function startFedexAutoRefresh() {
+  setInterval(refreshActiveTracking, 15 * 60 * 1000);
+}
+async function refreshActiveTracking() {
+  if (state.tab !== 'shipments') return;
+  const cfg = await checkFedexConfigured();
+  if (!cfg.configured) return;
+  const numbers = [...new Set(SHIPMENTS
+    .filter(s => s.trackingNumber && !['Received'].includes(s.status))
+    .map(s => s.trackingNumber.replace(/\s+/g, '')))];
+  if (!numbers.length) return;
+  try {
+    const r = await fetch('/api/fedex-track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trackingNumbers: numbers })
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    (data.results || []).forEach(res => {
+      const s = SHIPMENTS.find(x => x.trackingNumber && x.trackingNumber.replace(/\s+/g,'') === res.trackingNumber);
+      if (!s) return;
+      // Map FedEx status codes to our internal shipment status set
+      const code = (res.statusCode || '').toUpperCase();
+      if (code === 'DL' || /DELIVER/i.test(res.status)) {
+        s.status = 'Delivered';
+        if (res.deliveryDate) s.deliveredDate = res.deliveryDate.slice(0,10);
+        // Cascade to linked transfers
+        s.transferIds.forEach(tid => {
+          const t = TRANSFERS.find(x => x.id === tid);
+          if (t && t.status !== 'Delivered') { t.status = 'Delivered'; if (!t.dateReceivedByPatient) t.dateReceivedByPatient = s.deliveredDate; }
+        });
+      } else if (code) {
+        s.status = 'In Transit';
+      }
+      s.fedexLastStatus = res.status;
+      s.fedexLastChecked = new Date().toISOString();
+    });
+    if (state.tab === 'shipments') renderShipments();
+  } catch (e) { console.warn('FedEx refresh failed', e); }
+}
+
 // init
 populateUserSwitcher();
 bindGlobalSearch();
 applyRoleVisibility();
 render();
+startFedexAutoRefresh();
 </script>
 </body>
 </html>
