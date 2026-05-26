@@ -1,11 +1,40 @@
 // POST /api/fedex-search  body: { dateFrom: "YYYY-MM-DD", dateTo: "YYYY-MM-DD" }
-// Returns: { shipments: [{ trackingNumber, shipDate, recipient: {name, addr1, city, state, zip}, status, ... }] }
-//
-// Uses FedEx Shipments History (Search) API. The exact endpoint shape varies by FedEx
-// product; this implementation targets the standard `/shipments/v1/searches` POST endpoint
-// with the account number filter. If your account uses a different product, the
-// fedexFetch call below is the only thing that needs swapping out.
-const { fedexFetch, cfg, errorResponse } = require('../shared/fedex');
+// Returns: { shipments: [{ trackingNumber, shipDate, recipient: {...} }] }
+// Self-contained — no shared module require.
+
+let _cachedToken = null;
+let _cachedTokenExpiry = 0;
+
+async function getAccessToken() {
+  if (_cachedToken && Date.now() < _cachedTokenExpiry) return _cachedToken;
+  const base = process.env.FEDEX_API_BASE || 'https://apis-sandbox.fedex.com';
+  const clientId = process.env.FEDEX_CLIENT_ID;
+  const clientSecret = process.env.FEDEX_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    const err = new Error('FedEx not configured.');
+    err.statusCode = 503;
+    throw err;
+  }
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret
+  });
+  const resp = await fetch(base + '/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+  if (!resp.ok) {
+    const err = new Error('FedEx OAuth failed: ' + resp.status);
+    err.statusCode = 502;
+    throw err;
+  }
+  const data = await resp.json();
+  _cachedToken = data.access_token;
+  _cachedTokenExpiry = Date.now() + (data.expires_in - 600) * 1000;
+  return _cachedToken;
+}
 
 module.exports = async function (context, req) {
   try {
@@ -14,21 +43,35 @@ module.exports = async function (context, req) {
       context.res = { status: 400, body: { error: 'dateFrom and dateTo (YYYY-MM-DD) required' } };
       return;
     }
-    const c = cfg();
+    const base = process.env.FEDEX_API_BASE || 'https://apis-sandbox.fedex.com';
+    const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER || '';
+    const token = await getAccessToken();
     const body = {
-      accountNumber: { value: c.accountNumber || '' },
+      accountNumber: { value: accountNumber },
       searchDateRange: { beginDate: dateFrom, endDate: dateTo },
-      // Page size cap — FedEx default is 25; we ask for the documented max.
       paging: { resultsPerPage: 250 }
     };
-    const data = await fedexFetch('/shipments/v1/searches', {
+    const resp = await fetch(base + '/shipments/v1/searches', {
       method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'X-locale': 'en_US'
+      },
       body: JSON.stringify(body)
     });
+    const txt = await resp.text();
+    let data;
+    try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+    if (!resp.ok) {
+      const err = new Error('FedEx search API ' + resp.status);
+      err.statusCode = resp.status >= 500 ? 502 : resp.status;
+      err.body = data;
+      throw err;
+    }
     const out = data && data.output;
     const rawShipments = (out && (out.shipments || out.shipmentDetails)) || [];
     const shipments = rawShipments.map(s => {
-      // FedEx response shape is inconsistent across products; normalize defensively.
       const trackingNumber = (s.trackingNumber || (s.masterTrackingNumber && s.masterTrackingNumber.trackingNumber) || '').replace(/\s+/g, '');
       const shipDate = s.shipDateStamp || s.shipDate || null;
       const r = s.recipient || s.recipientAddress || s.receiverAddress || {};
@@ -58,6 +101,10 @@ module.exports = async function (context, req) {
     };
   } catch (err) {
     context.log.error(err);
-    context.res = errorResponse(err);
+    context.res = {
+      status: err.statusCode || 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: { error: err.message, details: err.body || null }
+    };
   }
 };
