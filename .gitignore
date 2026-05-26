@@ -1,0 +1,7 @@
+node_modules/
+api/node_modules/
+*.pyc
+__pycache__/
+.env
+.env.local
+local.settings.json

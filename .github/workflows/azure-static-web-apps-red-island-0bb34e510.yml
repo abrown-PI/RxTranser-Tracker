@@ -31,6 +31,7 @@ jobs:
           app_location: "/" # App source code path
           api_location: "api" # Api source code path - Azure Functions
           output_location: "" # Built app content directory - optional
+          skip_app_build: true # Static HTML; no build step needed
           ###### End of Repository/Build Configurations ######
 
   close_pull_request_job:
