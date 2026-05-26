@@ -207,7 +207,7 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
   <button class="tab" data-tab="refill">+ Refill</button>
   <button class="tab" data-tab="actions">Action Items <span id="actionsBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
   <button class="tab" data-tab="shipments">Shipments <span id="incomingBadge" style="background:var(--warning);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
-  <button class="tab" data-tab="sla">SLA Alerts <span id="slaBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
+  <button class="tab" data-tab="sla">Alerts <span id="slaBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
   <button class="tab" data-tab="stats">Reports</button>
   <button class="tab" data-tab="admin" data-admin-only>Admin</button>
 </div>
@@ -689,7 +689,10 @@ function updateIncomingBadge() {
   }
 }
 function updateSLABadge() {
-  const count = visibleTransfers().filter(t => slaStatus(t).state === 'breach').length;
+  const breaches = visibleTransfers().filter(t => slaStatus(t).state === 'breach').length;
+  let questions = 0;
+  try { questions = openQuestionsForUser().mine.length; } catch {}
+  const count = breaches + questions;
   const b = document.getElementById('slaBadge');
   if (!b) return;
   if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; }
@@ -926,30 +929,100 @@ function renderStats() {
 }
 
 // =====================================================================
-// SLA Alerts tab
+// Alerts tab — open questions + transfers past their status time limits
 // =====================================================================
+// A question is "open" if it's the last comment on the transfer (nobody has replied yet).
+// We surface ones where the asker is NOT at the current user's location (i.e., the user
+// is on the team that's being asked), and also show questions asked by current user as
+// info so they can track their own pending questions.
+function openQuestionsForUser() {
+  const mine = []; // questions current user (or their location) needs to answer
+  const asked = []; // questions current user asked, still awaiting reply
+  visibleTransfers().forEach(t => {
+    if (!t.comments || !t.comments.length) return;
+    const last = t.comments[t.comments.length - 1];
+    if (!last.isQuestion) return;
+    // Determine if it's "ours to answer": current user is at one of the transfer's locations and NOT the asker
+    const userLoc = CURRENT_USER.location;
+    const involvedLocs = [t.originLocation, t.fillLocation].filter(Boolean);
+    const askerName = last.author;
+    const isMine = involvedLocs.includes(userLoc) && askerName !== CURRENT_USER.name;
+    const askedByMe = askerName === CURRENT_USER.name;
+    if (CURRENT_USER.role === 'admin') {
+      // Admins see all open questions
+      mine.push({ t, q: last });
+    } else if (isMine) {
+      mine.push({ t, q: last });
+    } else if (askedByMe) {
+      asked.push({ t, q: last });
+    }
+  });
+  return { mine, asked };
+}
+
 function renderSLA() {
   const root = document.getElementById('view-sla');
   const issues = visibleTransfers().map(t => ({ t, sla: slaStatus(t) })).filter(x => x.sla.state === 'breach' || x.sla.state === 'warn').sort((a,b) => (a.sla.state==='breach'?0:1) - (b.sla.state==='breach'?0:1));
+  const { mine, asked } = openQuestionsForUser();
+  const totalAlerts = issues.length + mine.length;
   root.innerHTML = `
-    <div class="page-header"><div class="page-title">SLA Alerts <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${issues.length})</span></div></div>
-    <p style="color:var(--gray-600);margin-bottom:14px">Transfers that have sat in their current status longer than allowed. SLA rules: New 24h · In Progress 72h · Ready to Ship 24h. In production, breaches auto-notify the assigned user via Teams.</p>
-    ${issues.length === 0 ? `<div class="empty"><h3>🎉 All transfers within SLA</h3></div>` : `
-      <table><thead><tr><th>SLA</th><th>Patient</th><th>Status</th><th>Status Age</th><th>Origin</th><th>Assigned</th></tr></thead><tbody>
-        ${issues.map(({t,sla}) => {
-          const hoursIn = Math.round((Date.now() - new Date(t.createdAt).getTime()) / 3600000);
-          return `<tr class="row-sla-${sla.state}" data-id="${t.id}">
-            <td>${sla.state==='breach'?`<span class="pill-danger">⚠ Breach</span>`:`<span class="pill-warn">Near SLA</span>`}</td>
-            <td><strong>${escapeHtml(t.patientName)}</strong></td>
-            <td><span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span></td>
-            <td>${hoursIn}h (limit ${SLA_RULES[t.status]||'—'}h)</td>
-            <td>${escapeHtml(t.originLocation)}</td>
-            <td>${escapeHtml(t.assignedTo||'Unassigned')}</td>
-          </tr>`;
-        }).join('')}
+    <div class="page-header"><div class="page-title">Alerts <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${totalAlerts})</span></div></div>
+
+    <div class="card"><div class="card-header">Open Questions${mine.length?` <span class="badge badge-progress">${mine.length} awaiting your answer</span>`:''}</div><div class="card-body">
+      ${mine.length === 0 ? `<div class="empty" style="padding:20px"><h3>🎉 No open questions for you</h3></div>` : `
+      <table style="box-shadow:none;font-size:13px"><thead><tr>
+        <th>Patient</th><th>From → Fill</th><th>Asked By</th><th>When</th><th>Question</th><th></th>
+      </tr></thead><tbody>
+        ${mine.map(({t,q}) => `<tr style="background:var(--warning-bg)" data-open-q="${t.id}">
+          <td><strong>${escapeHtml(t.patientName)}</strong></td>
+          <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+          <td>${escapeHtml(q.author)}</td>
+          <td>${new Date(q.ts).toLocaleString()}</td>
+          <td>${escapeHtml((q.body||'').replace(/^❓\s*/,'').slice(0,120))}${(q.body||'').length>120?'…':''}</td>
+          <td><button class="btn btn-primary btn-sm" data-answer="${t.id}">Answer →</button></td>
+        </tr>`).join('')}
       </tbody></table>`}
+    </div></div>
+
+    ${asked.length ? `<div class="card"><div class="card-header">Questions You've Asked <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— waiting on a reply</span></div><div class="card-body">
+      <table style="box-shadow:none;font-size:13px"><thead><tr><th>Patient</th><th>Sent To</th><th>When</th><th>Question</th><th></th></tr></thead><tbody>
+        ${asked.map(({t,q}) => `<tr data-open-q="${t.id}">
+          <td><strong>${escapeHtml(t.patientName)}</strong></td>
+          <td>${escapeHtml([t.originLocation, t.fillLocation].filter(l => l && l !== CURRENT_USER.location).join(', '))}</td>
+          <td>${new Date(q.ts).toLocaleString()}</td>
+          <td>${escapeHtml((q.body||'').replace(/^❓\s*/,'').slice(0,120))}${(q.body||'').length>120?'…':''}</td>
+          <td><button class="btn btn-secondary btn-sm" data-answer="${t.id}">View</button></td>
+        </tr>`).join('')}
+      </tbody></table>
+    </div></div>` : ''}
+
+    <div class="card"><div class="card-header">Transfers Past Status Time Limit ${issues.length?`<span class="badge badge-canceled">${issues.length}</span>`:''}</div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">Transfers that have sat in their current status longer than allowed. Limits: New 24h · In Progress 72h · Ready to Ship 24h. Adjust in Admin.</p>
+      ${issues.length === 0 ? `<div class="empty" style="padding:20px"><h3>🎉 All transfers within their time limits</h3></div>` : `
+        <table style="box-shadow:none;font-size:13px"><thead><tr><th>Status</th><th>Patient</th><th>Status</th><th>Age</th><th>Origin</th><th>Assigned</th></tr></thead><tbody>
+          ${issues.map(({t,sla}) => {
+            const hoursIn = Math.round((Date.now() - new Date(t.createdAt).getTime()) / 3600000);
+            return `<tr class="row-sla-${sla.state}" data-id="${t.id}">
+              <td>${sla.state==='breach'?`<span class="pill-danger">⚠ Overdue</span>`:`<span class="pill-warn">Approaching</span>`}</td>
+              <td><strong>${escapeHtml(t.patientName)}</strong></td>
+              <td><span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span></td>
+              <td>${hoursIn}h (limit ${SLA_RULES[t.status]||'—'}h)</td>
+              <td>${escapeHtml(t.originLocation)}</td>
+              <td>${escapeHtml(t.assignedTo||'Unassigned')}</td>
+            </tr>`;
+          }).join('')}
+        </tbody></table>`}
+    </div></div>
   `;
   root.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openTransfer(+tr.dataset.id));
+  root.querySelectorAll('[data-open-q]').forEach(tr => tr.onclick = e => {
+    if (e.target.closest('[data-answer]')) return;
+    openTransfer(+tr.dataset.openQ);
+  });
+  root.querySelectorAll('[data-answer]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    openTransfer(+b.dataset.answer);
+  });
 }
 
 // =====================================================================
