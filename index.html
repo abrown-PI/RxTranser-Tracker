@@ -204,6 +204,7 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 <div class="tabs">
   <button class="tab active" data-tab="transfers">Transfers</button>
   <button class="tab" data-tab="new">+ New Transfer</button>
+  <button class="tab" data-tab="refill">+ Refill</button>
   <button class="tab" data-tab="actions">Action Items <span id="actionsBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
   <button class="tab" data-tab="shipments">Shipments <span id="incomingBadge" style="background:var(--warning);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
   <button class="tab" data-tab="sla">SLA Alerts <span id="slaBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
@@ -214,6 +215,7 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 <div class="container">
   <div id="view-transfers"></div>
   <div id="view-new" style="display:none"></div>
+  <div id="view-refill" style="display:none"></div>
   <div id="view-actions" style="display:none"></div>
   <div id="view-shipments" style="display:none"></div>
   <div id="view-sla" style="display:none"></div>
@@ -223,12 +225,34 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 
 <div id="modalRoot"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+</script>
 <script src="data.js"></script>
 <script>
 // =====================================================================
 // MOCK DATA — replace with SharePoint API calls later
 // =====================================================================
 const LOCATIONS = ['Erie', 'Lancaster', 'Greenville', 'Houston', 'Tucson', 'Flower Mound', 'Denton', 'Corinth', 'Jamestown', 'Virginia Beach', 'Seminole'];
+
+// Pharmacy mailing addresses for the Ship-to-Pharmacy auto-fill.
+// Cities/states are pre-populated from the canonical roster; street/zip are editable in Admin.
+let PHARMACY_ADDRESSES = {
+  'Erie':           { addr1: '', addr2: '', city: 'Erie',           state: 'PA', zip: '' },
+  'Lancaster':      { addr1: '', addr2: '', city: 'Lancaster',      state: 'PA', zip: '' },
+  'Greenville':     { addr1: '640 Congaree Rd', addr2: '', city: 'Greenville', state: 'SC', zip: '29607' },
+  'Houston':        { addr1: '', addr2: '', city: 'Houston',        state: 'TX', zip: '' },
+  'Tucson':         { addr1: '', addr2: '', city: 'Tucson',         state: 'AZ', zip: '' },
+  'Flower Mound':   { addr1: '', addr2: '', city: 'Flower Mound',   state: 'TX', zip: '' },
+  'Denton':         { addr1: '', addr2: '', city: 'Denton',         state: 'TX', zip: '' },
+  'Corinth':        { addr1: '', addr2: '', city: 'Corinth',        state: 'TX', zip: '' },
+  'Jamestown':      { addr1: '', addr2: '', city: 'Jamestown',      state: 'NY', zip: '' },
+  'Virginia Beach': { addr1: '', addr2: '', city: 'Virginia Beach', state: 'VA', zip: '' },
+  'Seminole':       { addr1: '', addr2: '', city: 'Seminole',       state: 'FL', zip: '' }
+};
 
 // Demo users — in production these come from MSAL / Azure AD + SharePoint group membership
 let USERS = [
@@ -243,7 +267,7 @@ let USERS = [
 let CURRENT_USER = USERS[0]; // defaults to admin for demo
 
 // SLA rules (hours allowed per status before breach)
-let SLA_RULES = { 'New': 24, 'Tx Verified': 48, 'In Progress': 72, 'Ready to Ship': 24 };
+let SLA_RULES = { 'New': 24, 'In Progress': 72, 'Ready to Ship': 24 };
 
 // Formula library — reusable formulas scoped to the originating location
 let FORMULAS = [
@@ -280,12 +304,12 @@ function slaStatus(t) {
   return { state: 'ok', hoursOver: 0 };
 }
 
-const STATUSES = ['New', 'Tx Verified', 'In Progress', 'Ready to Ship', 'Shipped', 'Delivered', 'Canceled'];
-const STATUS_BADGE = { 'New': 'badge-new', 'Tx Verified': 'badge-verified', 'In Progress': 'badge-progress', 'Ready to Ship': 'badge-ready', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
+const STATUSES = ['New', 'In Progress', 'Ready to Ship', 'Shipped', 'Delivered', 'Canceled'];
+const STATUS_BADGE = { 'New': 'badge-new', 'In Progress': 'badge-progress', 'Ready to Ship': 'badge-ready', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
 
 // Helper to build item entries
 function mkItem(id, drug, qty, rxNumber, doctor, doctorAddr, verified=false, notes='') {
-  return { id, drug, qty, rxNumber, receiptAttached: true, doctorName: doctor, doctorAddr, doctorPhone: '', doctorDEA: '', txFormVerified: verified, notes };
+  return { id, drug, qty, rxNumber, receivingRxNumber: '', receiptAttached: true, doctorName: doctor, doctorAddr, doctorPhone: '', doctorDEA: '', txFormVerified: verified, notes };
 }
 
 let TRANSFERS = (typeof IMPORT_DATA !== 'undefined' ? IMPORT_DATA : []).map(d => ({
@@ -390,7 +414,7 @@ function bindGlobalSearch() {
     if (!q) { box.style.display = 'none'; return; }
     const hits = [];
     visibleTransfers().forEach(t => {
-      const hay = [t.patientName, t.trackingNumber, t.originLocation, t.fillLocation, t.shipCity, ...t.items.map(i => i.drug+' '+i.rxNumber+' '+i.doctorName+' '+i.doctorAddr)].join(' ').toLowerCase();
+      const hay = [t.patientName, t.trackingNumber, t.originLocation, t.fillLocation, t.shipCity, ...t.items.map(i => i.drug+' '+i.rxNumber+' '+(i.receivingRxNumber||'')+' '+i.doctorName+' '+i.doctorAddr)].join(' ').toLowerCase();
       if (hay.includes(q)) hits.push({ type: 'transfer', t });
     });
     visibleShipments().forEach(s => { if ((s.trackingNumber||'').toLowerCase().includes(q)) hits.push({ type: 'shipment', s }); });
@@ -440,6 +464,7 @@ function printDocs(items) {
 function render() {
   if (state.tab === 'transfers') renderTransfers();
   else if (state.tab === 'new') renderNewForm();
+  else if (state.tab === 'refill') renderRefillTab();
   else if (state.tab === 'actions') renderActionItems();
   else if (state.tab === 'shipments') renderShipments();
   else if (state.tab === 'sla') renderSLA();
@@ -556,7 +581,7 @@ function renderTransfers() {
 }
 
 // Batch-print PK transfer sheets + hard copies for selected transfers.
-// After the print window opens, auto-advance any 'New' or 'Tx Verified' transfers to 'In Progress'.
+// After the print window opens, auto-advance any 'New' transfers to 'In Progress'.
 function batchPrintTransfers(ids) {
   if (!ids.length) return;
   const transfers = ids.map(id => TRANSFERS.find(t => t.id === id)).filter(Boolean);
@@ -574,7 +599,7 @@ function batchPrintTransfers(ids) {
   // Auto-advance status
   let advanced = 0;
   transfers.forEach(t => {
-    if (['New','Tx Verified'].includes(t.status)) { t.status = 'In Progress'; advanced++; }
+    if (t.status === 'New') { t.status = 'In Progress'; advanced++; }
   });
   state.printSelection.clear();
   if (advanced) {
@@ -674,7 +699,7 @@ function renderSLA() {
   const issues = visibleTransfers().map(t => ({ t, sla: slaStatus(t) })).filter(x => x.sla.state === 'breach' || x.sla.state === 'warn').sort((a,b) => (a.sla.state==='breach'?0:1) - (b.sla.state==='breach'?0:1));
   root.innerHTML = `
     <div class="page-header"><div class="page-title">SLA Alerts <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${issues.length})</span></div></div>
-    <p style="color:var(--gray-600);margin-bottom:14px">Transfers that have sat in their current status longer than allowed. SLA rules: New 24h · Tx Verified 48h · In Progress 72h · Ready to Ship 24h. In production, breaches auto-notify the assigned user via Teams.</p>
+    <p style="color:var(--gray-600);margin-bottom:14px">Transfers that have sat in their current status longer than allowed. SLA rules: New 24h · In Progress 72h · Ready to Ship 24h. In production, breaches auto-notify the assigned user via Teams.</p>
     ${issues.length === 0 ? `<div class="empty"><h3>🎉 All transfers within SLA</h3></div>` : `
       <table><thead><tr><th>SLA</th><th>Patient</th><th>Status</th><th>Status Age</th><th>Origin</th><th>Assigned</th></tr></thead><tbody>
         ${issues.map(({t,sla}) => {
@@ -734,6 +759,23 @@ function renderAdmin() {
       </tbody></table>
     </div></div>
 
+    <div class="card"><div class="card-header">Pharmacy Mailing Addresses <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— used to auto-fill Ship-to-Pharmacy</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">When a user picks "Ship to: Pharmacy" on a new transfer, the address fields are auto-filled from this list using the origin location.</p>
+      <table style="box-shadow:none;font-size:13px"><thead><tr><th>Location</th><th>Address Line 1</th><th>Line 2</th><th>City</th><th>State</th><th>Zip</th></tr></thead><tbody>
+        ${LOCATIONS.map(l => {
+          const a = PHARMACY_ADDRESSES[l] || { addr1:'', addr2:'', city:l, state:'', zip:'' };
+          return `<tr>
+            <td><strong>${escapeHtml(l)}</strong></td>
+            <td><input data-pa="${l}" data-k="addr1" value="${escapeHtml(a.addr1)}" style="width:100%" placeholder="123 Main St" /></td>
+            <td><input data-pa="${l}" data-k="addr2" value="${escapeHtml(a.addr2)}" style="width:100%" placeholder="Suite #" /></td>
+            <td><input data-pa="${l}" data-k="city" value="${escapeHtml(a.city)}" style="width:100%" /></td>
+            <td><input data-pa="${l}" data-k="state" value="${escapeHtml(a.state)}" style="width:50px" /></td>
+            <td><input data-pa="${l}" data-k="zip" value="${escapeHtml(a.zip)}" style="width:80px" /></td>
+          </tr>`;
+        }).join('')}
+      </tbody></table>
+    </div></div>
+
     <div class="card"><div class="card-header">Teams Webhooks (per location)</div><div class="card-body">
       ${LOCATIONS.map(l => `<div class="form-group" style="margin-bottom:8px"><label>${l}</label><input placeholder="https://pharmacyinnovations.webhook.office.com/webhookb2/..." /></div>`).join('')}
       <div class="item-sub">Mockup — saving webhooks will wire up in the backend step.</div>
@@ -742,6 +784,11 @@ function renderAdmin() {
   root.querySelectorAll('[data-ui]').forEach(sel => sel.onchange = e => { USERS[+sel.dataset.ui][sel.dataset.k] = sel.value; });
   root.querySelectorAll('[data-rmu]').forEach(b => b.onclick = () => { USERS.splice(+b.dataset.rmu,1); populateUserSwitcher(); renderAdmin(); });
   root.querySelectorAll('[data-fi]').forEach(el => el.onchange = () => { FORMULAS[+el.dataset.fi][el.dataset.k] = el.value; });
+  root.querySelectorAll('[data-pa]').forEach(el => el.onchange = () => {
+    const loc = el.dataset.pa, k = el.dataset.k;
+    if (!PHARMACY_ADDRESSES[loc]) PHARMACY_ADDRESSES[loc] = { addr1:'', addr2:'', city:loc, state:'', zip:'' };
+    PHARMACY_ADDRESSES[loc][k] = el.value;
+  });
   root.querySelectorAll('[data-rmf]').forEach(b => b.onclick = () => { FORMULAS.splice(+b.dataset.rmf, 1); renderAdmin(); });
   document.getElementById('addFormulaBtn').onclick = () => {
     const name = prompt('Formula name?'); if (!name) return;
@@ -812,9 +859,10 @@ function renderNewForm() {
       <div class="section"><div class="section-title">Billing</div>
       <div class="form-grid">
         <div class="form-group"><label>Billing Method</label><select id="f-billing">${['HealNow','CreditCard','PayInStore'].map(s=>`<option ${s===d.billing?'selected':''}>${s}</option>`).join('')}</select></div>
-        <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-ccPaladin" ${d.ccOnFileInPaladin?'checked':''} /><label for="f-ccPaladin">Credit card on file in Paladin</label></div><div class="hint">Never store the actual card number here.</div></div>
+        <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-ccPaladin" ${d.ccOnFileInPaladin?'checked':''} /><label for="f-ccPaladin">Credit card on file</label></div><div class="hint">Never store the actual card number here.</div></div>
         <div class="form-group full" id="f-ccFormBox" style="display:${d.billing==='CreditCard'?'':'none'}">
           <label>Signed Credit Card Authorization Form ${d.ccOnFileInPaladin?'<span class="hint" style="text-transform:none;font-weight:400">(optional — card already on file)</span>':'<span style="color:var(--danger)">*</span>'}</label>
+
           <input type="file" id="f-ccForm" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" />
           <div class="hint" id="f-ccForm-name">${d.ccForm?escapeHtml(d.ccForm.name):'Upload the patient-signed authorization form. Billing team will retrieve this from the app.'}</div>
         </div>
@@ -852,7 +900,14 @@ function renderNewForm() {
         </div>
       </div></div>
 
-      <div class="section"><div class="section-title">Items / Prescriptions</div>
+      <div class="section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid var(--primary-bg)">
+        <div class="section-title" style="border:none;padding:0;margin:0">Items / Prescriptions</div>
+        <div style="display:flex;align-items:center;gap:10px;background:var(--primary-bg);padding:6px 14px;border-radius:6px">
+          <span style="font-size:12px;color:var(--primary-dark);font-weight:600;text-transform:uppercase;letter-spacing:.03em">Total Rx</span>
+          <span id="itemsTotalCount" style="font-size:18px;font-weight:700;color:var(--primary-dark)">${state.draft.items.length}</span>
+        </div>
+      </div>
       <div id="itemsEditor"></div>
       <button class="btn btn-secondary btn-sm" id="addItemBtn" style="margin-top:8px">+ Add another Rx</button>
       </div>
@@ -871,6 +926,124 @@ function renderNewForm() {
   document.querySelectorAll('input[name=transferType]').forEach(r => r.onchange = e => { state.draft.transferType = e.target.value; });
   const clr = document.getElementById('clearRefill');
   if (clr) clr.onclick = () => { state.draft.refillOfId = null; renderNewForm(); };
+}
+
+// =====================================================================
+// PDF text extraction + transfer-sheet parser
+// =====================================================================
+// Read a PDF File and return the concatenated text from all pages.
+// Returns null if pdf.js is unavailable or the file is image-only / non-PDF.
+async function extractPdfText(file) {
+  if (!window.pdfjsLib || !file) return null;
+  try {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pages = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const tc = await page.getTextContent();
+      pages.push(tc.items.map(i => i.str).join(' '));
+    }
+    return pages.join('\n');
+  } catch (e) {
+    console.warn('PDF text extraction failed', e);
+    return null;
+  }
+}
+
+// Parse a PK transfer sheet text dump into the structured fields we care about.
+// The sheet has consistent labels ("Patient :", "Rx number :", "Drug :", etc.) so we use
+// label-anchored regex. Any field that doesn't match is left null and the user fills it in.
+function parseTransferSheet(text) {
+  if (!text) return null;
+  // Normalize whitespace and labels
+  const T = text.replace(/ /g, ' ').replace(/\s+/g, ' ');
+  const grab = (re) => { const m = T.match(re); return m ? m[1].trim() : null; };
+  // Patient — "Patient :" + name (LAST, FIRST style). Stop at next label.
+  const patientName = grab(/Patient\s*:\s*([A-Z][A-Z ,\.'\-]+?)(?=\s+(?:Patient Phone|Patient DOB|Patient Address|Doctor|Drug|Rx number|Store|Person|Pharmacy information|Date|First fill|Last fill|DAW|Quantity|Refills|Instructions|Transferred By|$))/i);
+  const patientDOBRaw = grab(/Patient DOB\s*:\s*([0-9\/\-]+)/i);
+  // Convert MM/DD/YYYY -> YYYY-MM-DD for date input
+  const patientDOB = patientDOBRaw ? (() => {
+    const m = patientDOBRaw.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (!m) return null;
+    let [, mm, dd, yy] = m;
+    if (yy.length === 2) yy = (+yy > 50 ? '19' : '20') + yy;
+    return `${yy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  })() : null;
+  // Patient Address — usually two lines: street, then city/state/zip. Capture until next labeled field.
+  const patientAddrBlock = grab(/Patient Address\s*:\s*(.*?)(?=\s+(?:Drug|DAW|Doctor|Rx number|Patient Phone|Store|Person|Pharmacy information|Date|First fill|Last fill|Quantity|Refills|Instructions|Transferred By|$))/i);
+  let shipAddr1='', shipCity='', shipState='', shipZip='';
+  if (patientAddrBlock) {
+    // Split into street vs "CITY, ST ZIP". The city/state/zip pattern is the strongest anchor.
+    const csz = patientAddrBlock.match(/([A-Za-z\.' \-]+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$/);
+    if (csz) {
+      shipCity = csz[1].trim();
+      shipState = csz[2].trim();
+      shipZip = csz[3].trim();
+      shipAddr1 = patientAddrBlock.replace(csz[0], '').trim();
+    } else {
+      shipAddr1 = patientAddrBlock.trim();
+    }
+  }
+  const rxNumber = grab(/Rx number\s*:\s*(\S+)/i);
+  const drug = grab(/Drug\s*:\s*(.*?)(?=\s+(?:DAW|Instructions|Doctor|Date Written|First fill|Quantity|Refills|Patient|Rx number|Store|Person|Pharmacy information|Transferred By|$))/i);
+  const qtyRaw = grab(/Date Written\s*:\s*\S+\s+Qty\s*:\s*(\d+)/i) || grab(/Qty\s*:\s*(\d+)/i);
+  const qty = qtyRaw;
+  return { patientName, patientDOB, shipAddr1, shipCity, shipState, shipZip, rxNumber, drug, qty };
+}
+
+// Iterate over uploaded PK transfer sheet files, parse each, and apply the recognized
+// fields to the current draft. Patient info comes from the first sheet that has it.
+// Rx/drug/qty per file become one item per file (so a 2-PDF upload becomes 2 Rx rows).
+async function autoFillFromTransferSheets(files) {
+  let applied = 0, parsedFiles = 0;
+  const parsedItems = [];
+  let patientFilled = false;
+  const d = state.draft;
+  for (const file of files) {
+    if (!/\.pdf$/i.test(file.name)) continue;
+    const text = await extractPdfText(file);
+    if (!text) continue;
+    const f = parseTransferSheet(text);
+    if (!f) continue;
+    parsedFiles++;
+    // Apply patient-level fields only once (first sheet wins)
+    if (!patientFilled) {
+      if (f.patientName && !d.patientName) { d.patientName = f.patientName; applied++; }
+      if (f.patientDOB && !d.patientDOB) { d.patientDOB = f.patientDOB; applied++; }
+      if (d.shipTo === 'Patient') {
+        if (f.shipAddr1 && !d.shipAddr1) { d.shipAddr1 = f.shipAddr1; applied++; }
+        if (f.shipCity && !d.shipCity) { d.shipCity = f.shipCity; applied++; }
+        if (f.shipState && !d.shipState) { d.shipState = f.shipState; applied++; }
+        if (f.shipZip && !d.shipZip) { d.shipZip = f.shipZip; applied++; }
+      }
+      patientFilled = true;
+    }
+    if (f.rxNumber || f.drug || f.qty) parsedItems.push({ rxNumber: f.rxNumber || '', drug: f.drug || '', qty: f.qty || '' });
+  }
+  // Apply parsed items: fill the first empty Rx row, then add new rows for the rest
+  parsedItems.forEach((pi) => {
+    const empty = d.items.find(i => !i.rxNumber && !i.drug && !i.qty);
+    if (empty) {
+      if (pi.rxNumber) { empty.rxNumber = pi.rxNumber; applied++; }
+      if (pi.drug) { empty.drug = pi.drug; applied++; }
+      if (pi.qty) { empty.qty = pi.qty; applied++; }
+    } else {
+      const item = freshItem();
+      item.rxNumber = pi.rxNumber; item.drug = pi.drug; item.qty = pi.qty;
+      d.items.push(item);
+      if (pi.rxNumber) applied++;
+      if (pi.drug) applied++;
+      if (pi.qty) applied++;
+    }
+  });
+  // Refresh the form fields that may have been mutated
+  ['patientName','patientDOB','shipAddr1','shipCity','shipState','shipZip'].forEach(k => {
+    const el = document.getElementById('f-' + k);
+    if (el && d[k] != null) el.value = d[k];
+  });
+  renderDraftItems();
+  return { count: applied, parsedFiles };
 }
 
 function freshDraft() {
@@ -920,26 +1093,24 @@ function draftFromRefill(source) {
     }))
   };
 }
-function freshItem() { return { id: nextId(), drug: '', qty: '', rxNumber: '', receiptAttached: false, doctorName: '', doctorAddr: '', doctorPhone: '', doctorDEA: '', txFormVerified: false, notes: '' }; }
+function freshItem() { return { id: nextId(), drug: '', qty: '', rxNumber: '', receivingRxNumber: '', receiptAttached: false, doctorName: '', doctorAddr: '', doctorPhone: '', doctorDEA: '', txFormVerified: false, notes: '' }; }
 
 function renderDraftItems() {
   const wrap = document.getElementById('itemsEditor');
+  const count = state.draft.items.length;
+  const totalBox = document.getElementById('itemsTotalCount');
+  if (totalBox) totalBox.textContent = count;
   wrap.innerHTML = state.draft.items.map((it, idx) => `
     <div class="item-row">
       <div class="item-head">
         <div class="item-title">Rx ${idx+1}</div>
-        ${state.draft.items.length>1?`<button class="btn btn-secondary btn-sm" data-rm="${idx}">Remove</button>`:''}
+        ${count>1?`<button class="btn btn-secondary btn-sm" data-rm="${idx}">Remove</button>`:''}
       </div>
       <div class="form-grid">
-        <div class="form-group"><label>Drug / Strength</label><input data-k="drug" data-idx="${idx}" value="${escapeHtml(it.drug)}" /></div>
+        <div class="form-group"><label>Origin Rx #</label><input data-k="rxNumber" data-idx="${idx}" value="${escapeHtml(it.rxNumber)}" placeholder="From sending pharmacy" /></div>
+        <div class="form-group"><label>Receiving Rx # <span class="hint" style="text-transform:none;font-weight:400">(fill location)</span></label><input data-k="receivingRxNumber" data-idx="${idx}" value="${escapeHtml(it.receivingRxNumber||'')}" placeholder="Assigned at Erie" /></div>
+        <div class="form-group"><label>Drug / Strength</label><input data-k="drug" data-idx="${idx}" value="${escapeHtml(it.drug)}" placeholder="Auto-filled from transfer sheet if PDF" /></div>
         <div class="form-group"><label>Qty / Days Supply</label><input data-k="qty" data-idx="${idx}" value="${escapeHtml(it.qty)}" /></div>
-        <div class="form-group"><label>Rx #</label><input data-k="rxNumber" data-idx="${idx}" value="${escapeHtml(it.rxNumber)}" /></div>
-        <div class="form-group"><div class="checkbox-row"><input type="checkbox" data-k="receiptAttached" data-idx="${idx}" ${it.receiptAttached?'checked':''} /><label>Receipt attached</label></div></div>
-        <div class="form-group"><label>Doctor Name</label><input data-k="doctorName" data-idx="${idx}" value="${escapeHtml(it.doctorName)}" /></div>
-        <div class="form-group"><label>Doctor Phone</label><input data-k="doctorPhone" data-idx="${idx}" value="${escapeHtml(it.doctorPhone)}" /></div>
-        <div class="form-group full"><label>Doctor Address</label><input data-k="doctorAddr" data-idx="${idx}" value="${escapeHtml(it.doctorAddr)}" /></div>
-        <div class="form-group"><label>Doctor DEA / NPI</label><input data-k="doctorDEA" data-idx="${idx}" value="${escapeHtml(it.doctorDEA)}" /></div>
-        <div class="form-group full"><label>Notes</label><textarea data-k="notes" data-idx="${idx}">${escapeHtml(it.notes)}</textarea></div>
       </div>
     </div>
   `).join('');
@@ -957,6 +1128,23 @@ function renderDraftItems() {
 function bindDraftInputs() {
   const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate'];
   fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => state.draft[f] = el.value); });
+
+  // Ship-to-Pharmacy auto-fill: when user picks Pharmacy or changes origin, fill ship address from origin pharmacy
+  const fillPharmacyAddress = () => {
+    if (state.draft.shipTo !== 'Pharmacy') return;
+    const addr = PHARMACY_ADDRESSES[state.draft.originLocation];
+    if (!addr) return;
+    state.draft.shipAddr1 = addr.addr1 || '';
+    state.draft.shipAddr2 = addr.addr2 || '';
+    state.draft.shipCity = addr.city || '';
+    state.draft.shipState = addr.state || '';
+    state.draft.shipZip = addr.zip || '';
+    ['shipAddr1','shipAddr2','shipCity','shipState','shipZip'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.value = state.draft[f]; });
+  };
+  const shipToSel = document.getElementById('f-shipTo');
+  if (shipToSel) shipToSel.addEventListener('change', fillPharmacyAddress);
+  const originSel2 = document.getElementById('f-origin');
+  if (originSel2) originSel2.addEventListener('change', fillPharmacyAddress);
   ['coldItem','ccPaladin'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('change', () => { state.draft[f==='ccPaladin'?'ccOnFileInPaladin':f] = el.checked; }); });
 
   // Show/hide CC form upload based on billing
@@ -980,11 +1168,22 @@ function bindDraftInputs() {
   [['pkSheet','pkSheets'],['hardCopy','hardCopies']].forEach(([elId,key]) => {
     const el = document.getElementById('f-'+elId);
     if (!el) return;
-    el.addEventListener('change', () => {
-      const files = [...el.files].map(f => ({ name: f.name, size: f.size, type: f.type }));
+    el.addEventListener('change', async () => {
+      const rawFiles = [...el.files];
+      const files = rawFiles.map(f => ({ name: f.name, size: f.size, type: f.type }));
       state.draft[key] = files;
       const lbl = document.getElementById('f-'+elId+'-name');
       if (lbl) lbl.textContent = files.length ? files.map(f => `${f.name} (${(f.size/1024).toFixed(0)} KB)`).join(', ') : '';
+      // PK transfer sheet auto-parse: try each uploaded PDF and apply matched fields to the draft
+      if (key === 'pkSheets' && rawFiles.length) {
+        if (lbl) lbl.innerHTML = lbl.textContent + ' <span style="color:var(--primary)">· Reading sheet…</span>';
+        const applied = await autoFillFromTransferSheets(rawFiles);
+        if (lbl) {
+          lbl.textContent = files.map(f => `${f.name} (${(f.size/1024).toFixed(0)} KB)`).join(', ');
+          if (applied.count > 0) lbl.innerHTML += ` <span style="color:var(--success)">· ✓ Auto-filled ${applied.count} field${applied.count>1?'s':''} from ${applied.parsedFiles} sheet${applied.parsedFiles>1?'s':''}</span>`;
+          else lbl.innerHTML += ' <span style="color:var(--gray-500)">· Could not auto-fill (image PDF or unrecognized layout — enter manually)</span>';
+        }
+      }
     });
   });
 
@@ -1026,7 +1225,7 @@ function submitDraft() {
   const missing = [];
   if (!d.patientName) missing.push('Patient name');
   if (!d.pkSheets || !d.pkSheets.length) missing.push('At least one PK Transfer Sheet upload');
-  if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "on file in Paladin")');
+  if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "Credit card on file")');
   if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
   const t = {
     ...d,
@@ -1091,7 +1290,7 @@ function renderModal() {
           <div class="section"><div class="section-title">Shipping & Billing</div>
           <div class="form-grid">
             <div><strong>Ship to:</strong> ${escapeHtml(t.shipTo)}${t.deliveryCharge?` ($${t.deliveryCharge})`:''}</div>
-            <div><strong>Billing:</strong> ${escapeHtml(t.billing)}${t.ccOnFileInPaladin?' (CC on file in Paladin)':''}</div>
+            <div><strong>Billing:</strong> ${escapeHtml(t.billing)}${t.ccOnFileInPaladin?' (CC on file)':''}</div>
             <div class="form-group full"><strong>Address:</strong><br>${escapeHtml(t.shipAddr1||'—')}${t.shipAddr2?'<br>'+escapeHtml(t.shipAddr2):''}${t.shipCity?'<br>'+escapeHtml(t.shipCity)+', '+escapeHtml(t.shipState)+' '+escapeHtml(t.shipZip):''}</div>
             <div><strong>Anticipated ship:</strong> ${fmtDate(t.anticipatedShipDate)}</div>
             <div><strong>Shipped:</strong> ${fmtDate(t.dateShipped)}</div>
@@ -1106,7 +1305,7 @@ function renderModal() {
             <div><strong>PK Transfer Sheet${(t.pkSheets&&t.pkSheets.length>1)?'s':''}:</strong> ${docList(t.pkSheets || (t.pkSheet?[t.pkSheet]:[]))}</div>
             <div><strong>Hard Copy Scan${(t.hardCopies&&t.hardCopies.length>1)?'s':''}:</strong> ${docList(t.hardCopies || (t.hardCopy?[t.hardCopy]:[]))}</div>
             <div><strong>Formula Worksheet:</strong> ${t.formula?(t.formula.fromLibrary?`<a href="${escapeHtml(t.formula.link||'#')}" target="_blank" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a> <span class="item-sub">(from ${escapeHtml(t.originLocation)} library)</span>`:`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a>`):'<span class="item-sub">— (not needed)</span>'}</div>
-            ${t.billing==='CreditCard'?`<div><strong>Credit Card Auth Form:</strong> ${t.ccForm?`<a href="#" data-cc="${t.id}" style="color:var(--primary)">${escapeHtml(t.ccForm.name)}</a> <button class="btn btn-secondary btn-sm" data-cc-print="${t.id}" style="margin-left:6px">View / Print for Billing</button>`:(t.ccOnFileInPaladin?'<span class="item-sub">On file in Paladin</span>':'<span style="color:var(--danger)">Missing</span>')}</div>`:''}
+            ${t.billing==='CreditCard'?`<div><strong>Credit Card Auth Form:</strong> ${t.ccForm?`<a href="#" data-cc="${t.id}" style="color:var(--primary)">${escapeHtml(t.ccForm.name)}</a> <button class="btn btn-secondary btn-sm" data-cc-print="${t.id}" style="margin-left:6px">View / Print for Billing</button>`:(t.ccOnFileInPaladin?'<span class="item-sub">On file</span>':'<span style="color:var(--danger)">Missing</span>')}</div>`:''}
             ${(t.status==='Canceled' && !t.cancelAcknowledged)?`<div style="margin-top:10px;padding:10px 12px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:6px"><strong style="color:var(--danger)">⚠ This transfer was canceled and has not been acknowledged.</strong> Go to <em>Action Items</em> to acknowledge before this transfer can be shipped.</div>`:''}
           </div>
           </div>
@@ -1170,19 +1369,37 @@ function renderModal() {
 
 function renderItems(t) {
   const wrap = document.getElementById('itemsList');
-  wrap.innerHTML = t.items.map(i => `
+  const canFillReceiving = CURRENT_USER.role === 'admin' || CURRENT_USER.location === t.fillLocation;
+  wrap.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:6px 14px;background:var(--primary-bg);border-radius:6px">
+      <span style="font-size:12px;color:var(--primary-dark);font-weight:600;text-transform:uppercase;letter-spacing:.03em">Total Rx in transfer</span>
+      <span style="font-size:18px;font-weight:700;color:var(--primary-dark)">${t.items.length}</span>
+    </div>
+  ` + t.items.map(i => `
     <div class="item-row">
       <div class="item-head">
-        <div><span class="item-title">${escapeHtml(i.drug||'(no drug name)')}</span> <span class="item-sub">· ${escapeHtml(i.qty||'')} · Rx ${escapeHtml(i.rxNumber||'—')}</span></div>
+        <div><span class="item-title">${escapeHtml(i.drug||'(no drug name)')}</span> <span class="item-sub">${i.qty?'· '+escapeHtml(i.qty):''} · Origin Rx ${escapeHtml(i.rxNumber||'—')}</span></div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:11px;color:var(--gray-600);text-transform:uppercase;font-weight:600">Receiving Rx #:</label>
+          ${canFillReceiving
+            ? `<input data-rcvrx="${i.id}" value="${escapeHtml(i.receivingRxNumber||'')}" placeholder="Type here" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;width:140px" />`
+            : `<span style="font-family:monospace;font-size:13px;color:var(--gray-700)">${escapeHtml(i.receivingRxNumber||'—')}</span>`}
+        </div>
       </div>
       <div style="font-size:12px;color:var(--gray-600);line-height:1.6">
         <div><strong>Dr.</strong> ${escapeHtml(i.doctorName||'—')} · ${escapeHtml(i.doctorPhone||'')} · DEA ${escapeHtml(i.doctorDEA||'—')}</div>
         <div><strong>Addr:</strong> ${escapeHtml(i.doctorAddr||'—')}</div>
-        ${i.receiptAttached?'<div><strong>Receipt:</strong> Attached</div>':''}
         ${i.notes?`<div style="margin-top:4px;color:var(--gray-700)"><strong>Notes:</strong> ${escapeHtml(i.notes)}</div>`:''}
       </div>
     </div>
   `).join('');
+  wrap.querySelectorAll('[data-rcvrx]').forEach(el => {
+    el.addEventListener('change', () => {
+      const id = +el.dataset.rcvrx;
+      const item = t.items.find(x => x.id === id);
+      if (item) item.receivingRxNumber = el.value.trim();
+    });
+  });
 }
 
 function renderComments(t) {
@@ -1227,12 +1444,18 @@ function editShip(t) {
   overlay.querySelector('#editClose').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#editCancel').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#editSave').addEventListener('click', () => {
+    const prevTracking = t.trackingNumber;
     t.txEmailedDate = overlay.querySelector('#e-tx').value || null;
     t.dateReceivedAtErie = overlay.querySelector('#e-rcvErie').value || null;
     t.dateShipped = overlay.querySelector('#e-dateShipped').value || null;
-    t.trackingNumber = overlay.querySelector('#e-tracking').value;
+    t.trackingNumber = overlay.querySelector('#e-tracking').value.trim();
     t.dateReceivedByPatient = overlay.querySelector('#e-rcvPt').value || null;
     t.paid = overlay.querySelector('#e-paid').value;
+    // Auto-advance to Shipped when a tracking number is first entered
+    if (t.trackingNumber && !prevTracking && !['Shipped','Delivered','Canceled'].includes(t.status)) {
+      t.status = 'Shipped';
+      if (!t.dateShipped) t.dateShipped = new Date().toISOString().slice(0,10);
+    }
     overlay.remove();
     renderModal();
     render();
@@ -1523,6 +1746,174 @@ function openShipment(id) {
       if (hit) openShipment(s.id);
     });
   }
+}
+
+// =====================================================================
+// + Refill tab — search for an existing transfer, review defaults, pick which Rx to refill
+// =====================================================================
+function renderRefillTab() {
+  if (!state.refill) state.refill = { query: '', searchBy: 'patient', pickedId: null, includedItems: {}, editingDefaults: false };
+  const root = document.getElementById('view-refill');
+  const r = state.refill;
+  const picked = r.pickedId ? TRANSFERS.find(t => t.id === r.pickedId) : null;
+
+  if (picked) return renderRefillReview(picked);
+
+  // Search phase
+  const q = r.query.trim().toLowerCase();
+  let matches = [];
+  if (q.length >= 2) {
+    matches = visibleTransfers().filter(t => {
+      if (r.searchBy === 'patient') return (t.patientName||'').toLowerCase().includes(q);
+      if (r.searchBy === 'originRx') return t.items.some(i => (i.rxNumber||'').toLowerCase().includes(q));
+      if (r.searchBy === 'receivingRx') return t.items.some(i => (i.receivingRxNumber||'').toLowerCase().includes(q));
+      return false;
+    }).slice(0, 50);
+  }
+
+  root.innerHTML = `
+    <div class="page-header"><div class="page-title">Refill an Existing Transfer</div></div>
+    <div class="card"><div class="card-body">
+      <p style="color:var(--gray-600);margin-bottom:14px">Search for the transfer you want to refill. You can search by patient name, the origin Rx number from the sending pharmacy, or the receiving Rx number assigned at the fill location.</p>
+      <div class="form-grid">
+        <div class="form-group"><label>Search by</label>
+          <select id="rf-by">
+            <option value="patient" ${r.searchBy==='patient'?'selected':''}>Patient name</option>
+            <option value="originRx" ${r.searchBy==='originRx'?'selected':''}>Origin Rx #</option>
+            <option value="receivingRx" ${r.searchBy==='receivingRx'?'selected':''}>Receiving Rx # (fill location)</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Search</label><input id="rf-q" value="${escapeHtml(r.query)}" placeholder="${r.searchBy==='patient'?'e.g. Smith, John':'Type the Rx number'}" autofocus /></div>
+      </div>
+      <div style="margin-top:14px">
+        ${q.length < 2 ? '<div class="item-sub">Type at least 2 characters to search.</div>' : matches.length === 0
+          ? `<div class="empty"><h3>No matches</h3><p>No transfers found for "${escapeHtml(r.query)}" by ${r.searchBy === 'patient' ? 'patient' : 'Rx #'}.</p></div>`
+          : `<table style="box-shadow:none;font-size:13px"><thead><tr><th>Patient</th><th>Origin → Fill</th><th>Drugs</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
+              ${matches.map(t => `<tr>
+                <td><strong>${escapeHtml(t.patientName)}</strong>${t.transferType==='Refill'?' <span class="badge badge-verified" style="font-size:10px">Refill</span>':''}</td>
+                <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+                <td>${escapeHtml(t.items.map(i=>i.drug).filter(Boolean).join(', ').slice(0,80) || '(no drugs listed)')}</td>
+                <td>${fmtDate(t.createdAt)}</td>
+                <td><span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span></td>
+                <td><button class="btn btn-primary btn-sm" data-pick="${t.id}">Refill this →</button></td>
+              </tr>`).join('')}
+            </tbody></table>`}
+      </div>
+    </div></div>
+  `;
+  document.getElementById('rf-by').onchange = e => { r.searchBy = e.target.value; renderRefillTab(); };
+  document.getElementById('rf-q').oninput = e => { r.query = e.target.value; renderRefillTab(); };
+  root.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
+    r.pickedId = +b.dataset.pick;
+    r.includedItems = {};
+    const t = TRANSFERS.find(x => x.id === r.pickedId);
+    if (t) t.items.forEach(i => r.includedItems[i.id] = true);
+    renderRefillTab();
+  });
+}
+
+function renderRefillReview(t) {
+  const root = document.getElementById('view-refill');
+  const r = state.refill;
+  const editing = r.editingDefaults;
+  // Defaults can be edited; persist mutations into r.defaults so they survive checkbox re-renders
+  if (!r.defaults) r.defaults = {
+    originLocation: t.originLocation, fillLocation: t.fillLocation,
+    shipTo: t.shipTo, deliveryCharge: t.deliveryCharge||'', coldItem: !!t.coldItem,
+    shipAddr1: t.shipAddr1||'', shipAddr2: t.shipAddr2||'', shipCity: t.shipCity||'', shipState: t.shipState||'', shipZip: t.shipZip||'',
+    billing: t.billing, ccOnFileInPaladin: !!t.ccOnFileInPaladin
+  };
+  const def = r.defaults;
+  const includedCount = Object.values(r.includedItems).filter(Boolean).length;
+
+  root.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Refill: ${escapeHtml(t.patientName)}</div>
+      <button class="btn btn-secondary btn-sm" id="rf-back">← Back to search</button>
+    </div>
+
+    <div class="card"><div class="card-header">Shipping & Payment Defaults <button class="btn btn-secondary btn-sm" id="rf-editToggle">${editing?'Done editing':'Edit'}</button></div><div class="card-body">
+      ${editing ? `
+        <div class="form-grid">
+          <div class="form-group"><label>Origin Location</label><select data-def="originLocation">${LOCATIONS.map(l=>`<option ${l===def.originLocation?'selected':''}>${l}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Fill Location</label><select data-def="fillLocation">${LOCATIONS.map(l=>`<option ${l===def.fillLocation?'selected':''}>${l}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Ship To</label><select data-def="shipTo">${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===def.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Billing</label><select data-def="billing">${['HealNow','CreditCard','PayInStore'].map(s=>`<option ${s===def.billing?'selected':''}>${s}</option>`).join('')}</select></div>
+          <div class="form-group full"><label>Address Line 1</label><input data-def="shipAddr1" value="${escapeHtml(def.shipAddr1)}" /></div>
+          <div class="form-group full"><label>Address Line 2</label><input data-def="shipAddr2" value="${escapeHtml(def.shipAddr2)}" /></div>
+          <div class="form-group"><label>City</label><input data-def="shipCity" value="${escapeHtml(def.shipCity)}" /></div>
+          <div class="form-group"><label>State / Zip</label><div style="display:flex;gap:6px"><input data-def="shipState" value="${escapeHtml(def.shipState)}" style="width:60px" /><input data-def="shipZip" value="${escapeHtml(def.shipZip)}" /></div></div>
+          <div class="form-group"><div class="checkbox-row"><input type="checkbox" data-def="coldItem" ${def.coldItem?'checked':''} /><label>Cold item</label></div></div>
+          <div class="form-group"><div class="checkbox-row"><input type="checkbox" data-def="ccOnFileInPaladin" ${def.ccOnFileInPaladin?'checked':''} /><label>Credit card on file</label></div></div>
+        </div>
+      ` : `
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 24px;font-size:13px;line-height:1.7">
+          <div><strong>Origin → Fill:</strong> ${escapeHtml(def.originLocation)} → ${escapeHtml(def.fillLocation)}</div>
+          <div><strong>Ship To:</strong> ${escapeHtml(def.shipTo)}</div>
+          <div><strong>Billing:</strong> ${escapeHtml(def.billing)}${def.ccOnFileInPaladin?' (CC on file)':''}</div>
+          <div><strong>Cold:</strong> ${def.coldItem?'Yes':'No'}</div>
+          <div style="grid-column:1/-1"><strong>Address:</strong> ${escapeHtml([def.shipAddr1, def.shipAddr2, def.shipCity, def.shipState, def.shipZip].filter(Boolean).join(', ')) || '<span class="item-sub">— none —</span>'}</div>
+        </div>
+      `}
+    </div></div>
+
+    <div class="card"><div class="card-header">Prescriptions in Original Transfer <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— pick which to include in the refill</span></div><div class="card-body">
+      <p style="color:var(--gray-600);margin-bottom:10px">${t.items.length} prescription${t.items.length>1?'s were':' was'} on the original transfer. Check the ones you want to refill. PK transfer sheet, hard copy, and any new Rx numbers will be re-uploaded/assigned at the next step.</p>
+      ${t.items.map(i => `
+        <div class="checkbox-row" style="padding:10px;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px">
+          <input type="checkbox" data-incl="${i.id}" ${r.includedItems[i.id]?'checked':''} />
+          <div style="flex:1">
+            <strong>${escapeHtml(i.drug||'(no drug name)')}</strong> <span class="item-sub">${i.qty?'· '+escapeHtml(i.qty):''} · Origin Rx ${escapeHtml(i.rxNumber||'—')}${i.receivingRxNumber?' · Recv Rx '+escapeHtml(i.receivingRxNumber):''}</span>
+            ${i.doctorName?`<div class="item-sub">Dr. ${escapeHtml(i.doctorName)}</div>`:''}
+          </div>
+        </div>
+      `).join('')}
+    </div></div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div class="item-sub">${includedCount} of ${t.items.length} Rx selected</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" id="rf-cancel">Cancel</button>
+        <button class="btn btn-primary" id="rf-continue" ${includedCount===0?'disabled style="opacity:.5;cursor:not-allowed"':''}>Continue to refill form →</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('rf-back').onclick = () => { state.refill = null; renderRefillTab(); };
+  document.getElementById('rf-cancel').onclick = () => { state.refill = null; renderRefillTab(); };
+  document.getElementById('rf-editToggle').onclick = () => { r.editingDefaults = !r.editingDefaults; renderRefillTab(); };
+  root.querySelectorAll('[data-def]').forEach(el => el.onchange = () => {
+    const k = el.dataset.def;
+    def[k] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  root.querySelectorAll('[data-incl]').forEach(cb => cb.onchange = e => {
+    r.includedItems[+cb.dataset.incl] = e.target.checked;
+    renderRefillTab();
+  });
+  document.getElementById('rf-continue').onclick = () => {
+    // Build the draft from source + edited defaults + only included items
+    const draft = draftFromRefill(t);
+    Object.assign(draft, {
+      originLocation: def.originLocation, fillLocation: def.fillLocation,
+      shipTo: def.shipTo, coldItem: def.coldItem,
+      shipAddr1: def.shipAddr1, shipAddr2: def.shipAddr2, shipCity: def.shipCity, shipState: def.shipState, shipZip: def.shipZip,
+      billing: def.billing, ccOnFileInPaladin: def.ccOnFileInPaladin
+    });
+    const keepIds = new Set(Object.entries(r.includedItems).filter(([,v])=>v).map(([k])=>+k));
+    // draft.items currently has fresh IDs; we need to map source IDs → which to keep
+    draft.items = t.items.filter(i => keepIds.has(i.id)).map(i => ({
+      id: nextId(),
+      drug: i.drug, qty: i.qty,
+      rxNumber: '', receivingRxNumber: '',
+      receiptAttached: false,
+      doctorName: i.doctorName, doctorAddr: i.doctorAddr, doctorPhone: i.doctorPhone, doctorDEA: i.doctorDEA,
+      notes: ''
+    }));
+    if (draft.items.length === 0) draft.items = [freshItem()];
+    state.draft = draft;
+    state.refill = null;
+    document.querySelector('.tab[data-tab=new]').click();
+  };
 }
 
 // =====================================================================
