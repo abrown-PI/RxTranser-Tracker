@@ -2090,7 +2090,7 @@ function renderBulkUpload() {
     </div>
 
     <div class="card"><div class="card-body">
-      <p style="color:var(--gray-600);margin-bottom:14px">Upload multiple PK transfer sheet PDFs at once. Each PDF becomes a draft transfer that you can review, edit, and approve. Drafts with missing required fields will be flagged for review.</p>
+      <p style="color:var(--gray-600);margin-bottom:14px">Upload PDFs — each <strong>"PATIENT Rx TRANSFER INFORMATION"</strong> page becomes a draft transfer. Pages after a transfer header (hard copies, order forms) get attached to that transfer until the next header. You'll review each draft, edit if needed, and approve. Drafts with missing required fields stay flagged until you fill them in.</p>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
         <label class="btn btn-primary" style="cursor:pointer;margin:0">
           📁 Select PDFs to upload
@@ -2166,35 +2166,105 @@ function renderBulkUpload() {
   };
 }
 
+// Extract text from a PDF page-by-page. Returns [{ pageNum, text }] or null if pdf.js
+// is unavailable / the file isn't a parseable PDF.
+async function extractPdfTextPerPage(file) {
+  if (!window.pdfjsLib || !file) return null;
+  try {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pages = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const tc = await page.getTextContent();
+      pages.push({ pageNum: p, text: tc.items.map(i => i.str).join(' ') });
+    }
+    return pages;
+  } catch (e) { console.warn('extractPdfTextPerPage failed', e); return null; }
+}
+
+// Group pages of a PDF into transfers. A page that contains the "PATIENT Rx TRANSFER
+// INFORMATION" header starts a new transfer; subsequent pages (until the next header)
+// are treated as hard-copy/order-form attachments for that transfer.
+function groupPdfPagesIntoTransfers(pages) {
+  const re = /PATIENT\s*Rx\s*TRANSFER\s*INFORMATION/i;
+  const groups = [];
+  let current = null;
+  pages.forEach(p => {
+    if (re.test(p.text)) {
+      if (current) groups.push(current);
+      current = { transferPage: p, hardCopyPages: [] };
+    } else if (current) {
+      current.hardCopyPages.push(p);
+    }
+    // pages before any transfer marker are skipped (rare — usually the file starts with one)
+  });
+  if (current) groups.push(current);
+  return groups;
+}
+
 async function processBulkFiles(rawFiles) {
   const hint = document.getElementById('bulk-pickHint');
   if (hint) hint.textContent = `Processing ${rawFiles.length} file(s)…`;
   let _bulkId = (state.bulkQueue || []).reduce((m,b) => Math.max(m, b.id), 1000);
   const newDrafts = [];
   for (const file of rawFiles) {
-    const draft = freshDraft();
-    draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
-    let parseError = null;
-    let parsed = null;
-    if (/\.pdf$/i.test(file.name)) {
-      const text = await extractPdfText(file);
-      if (text) parsed = parseTransferSheet(text); else parseError = 'Could not read PDF text — may be an image-only scan.';
-    } else {
-      parseError = 'Not a PDF — auto-parse not supported for this file type.';
+    if (!/\.pdf$/i.test(file.name)) {
+      // Non-PDF: keep the old single-draft behavior
+      const draft = freshDraft();
+      draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
+      newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: 'Not a PDF — auto-parse not supported for this file type.', parsed: null });
+      continue;
     }
-    if (parsed) {
-      if (parsed.patientName) draft.patientName = parsed.patientName;
-      if (parsed.patientDOB) draft.patientDOB = parsed.patientDOB;
-      if (parsed.shipAddr1) draft.shipAddr1 = parsed.shipAddr1;
-      if (parsed.shipCity) draft.shipCity = parsed.shipCity;
-      if (parsed.shipState) draft.shipState = parsed.shipState;
-      if (parsed.shipZip) draft.shipZip = parsed.shipZip;
-      const first = draft.items[0];
-      if (parsed.rxNumber) first.rxNumber = parsed.rxNumber;
-      if (parsed.drug) first.drug = parsed.drug;
-      if (parsed.qty) first.qty = parsed.qty;
+
+    const pages = await extractPdfTextPerPage(file);
+    if (!pages || pages.length === 0) {
+      const draft = freshDraft();
+      draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
+      newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: 'Could not read PDF text — may be image-only.', parsed: null });
+      continue;
     }
-    newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError, parsed });
+
+    const groups = groupPdfPagesIntoTransfers(pages);
+
+    if (groups.length === 0) {
+      // No "PATIENT Rx TRANSFER INFORMATION" markers found — fall back to one draft for the whole file
+      const draft = freshDraft();
+      draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
+      newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: 'No transfer info pages detected in this PDF.', parsed: null });
+      continue;
+    }
+
+    // Create one draft per detected transfer
+    groups.forEach((g, idx) => {
+      const draft = freshDraft();
+      const parsed = parseTransferSheet(g.transferPage.text);
+      const transferPageRange = `page ${g.transferPage.pageNum}`;
+      const hardCopyPageRange = g.hardCopyPages.length ? `pages ${g.hardCopyPages.map(p => p.pageNum).join(',')}` : null;
+      draft.pkSheets = [{ name: `${file.name} [${transferPageRange}]`, size: file.size, type: file.type }];
+      if (hardCopyPageRange) {
+        draft.hardCopies = [{ name: `${file.name} [${hardCopyPageRange}]`, size: file.size, type: file.type }];
+      }
+      if (parsed) {
+        if (parsed.patientName) draft.patientName = parsed.patientName;
+        if (parsed.patientDOB) draft.patientDOB = parsed.patientDOB;
+        if (parsed.shipAddr1) draft.shipAddr1 = parsed.shipAddr1;
+        if (parsed.shipCity) draft.shipCity = parsed.shipCity;
+        if (parsed.shipState) draft.shipState = parsed.shipState;
+        if (parsed.shipZip) draft.shipZip = parsed.shipZip;
+        const first = draft.items[0];
+        if (parsed.rxNumber) first.rxNumber = parsed.rxNumber;
+        if (parsed.drug) first.drug = parsed.drug;
+        if (parsed.qty) first.qty = parsed.qty;
+      }
+      newDrafts.push({
+        id: ++_bulkId,
+        draft,
+        sourceFile: `${file.name} (${idx+1}/${groups.length})`,
+        parseError: parsed ? null : 'Transfer page found but fields could not be parsed.',
+        parsed
+      });
+    });
   }
   // Detect same-patient/same-day groups within this batch
   const today = new Date().toISOString().slice(0,10);
