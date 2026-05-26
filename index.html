@@ -1485,8 +1485,9 @@ function submitDraft() {
     }
   }
   TRANSFERS.unshift(t);
+  apiSaveTransfer(t);
   state.draft = null;
-  alert('Transfer submitted. (Mock — would notify ' + t.fillLocation + ' via Teams webhook.)');
+  alert('Transfer submitted.');
   document.querySelector('.tab[data-tab=transfers]').click();
 }
 
@@ -1585,7 +1586,9 @@ function renderModal() {
     if (newStatus === 'Canceled' && t.status !== 'Canceled') {
       onTransferCanceled(t);
     }
-    t.status = newStatus; renderModal(); render();
+    t.status = newStatus;
+    apiUpdateTransfer(t);
+    renderModal(); render();
   });
   document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
   document.querySelectorAll('[data-cc-print]').forEach(b => b.onclick = () => {
@@ -1638,7 +1641,10 @@ function renderItems(t) {
     el.addEventListener('change', () => {
       const id = +el.dataset.rcvrx;
       const item = t.items.find(x => x.id === id);
-      if (item) item.receivingRxNumber = el.value.trim();
+      if (item) {
+        item.receivingRxNumber = el.value.trim();
+        apiUpdateTransfer(t);
+      }
     });
   });
 }
@@ -1697,6 +1703,7 @@ function editShip(t) {
       t.status = 'Shipped';
       if (!t.dateShipped) t.dateShipped = new Date().toISOString().slice(0,10);
     }
+    apiUpdateTransfer(t);
     overlay.remove();
     renderModal();
     render();
@@ -2004,9 +2011,12 @@ function openShipment(id) {
   const rec = document.getElementById('sm-receive');
   if (rec) rec.onclick = () => {
     s.status = 'Received'; s.receivedDate = new Date().toISOString().slice(0,10); s.receivedBy = CURRENT_USER.name;
-    s.transferIds.forEach(id => { const t = TRANSFERS.find(x => x.id === id); if (t) t.status = 'Delivered'; });
+    s.transferIds.forEach(id => {
+      const t = TRANSFERS.find(x => x.id === id);
+      if (t) { t.status = 'Delivered'; apiUpdateTransfer(t); }
+    });
     close();
-    alert('Marked received. (Mock — would notify origin via Teams.)');
+    alert('Marked received.');
     render();
   };
   const photoEl = document.getElementById('sm-photo');
@@ -2244,6 +2254,7 @@ function approveBulkDraft(id, skipAlert) {
     comments: []
   };
   TRANSFERS.unshift(t);
+  apiSaveTransfer(t);
   state.bulkQueue = state.bulkQueue.filter(x => x.id !== id);
   if (!skipAlert) {
     alert(`Approved: ${t.patientName} added to transfers.`);
@@ -2508,6 +2519,7 @@ function renderActionItems() {
     t.cancelAcknowledged = true;
     t.acknowledgedBy = CURRENT_USER.name;
     t.acknowledgedAt = new Date().toISOString();
+    apiUpdateTransfer(t);
     renderActionItems();
     render();
   });
@@ -2781,6 +2793,7 @@ function openFedexPullModal() {
       t.trackingNumber = m.ship.trackingNumber;
       t.dateShipped = m.ship.shipDate || t.dateShipped || new Date().toISOString().slice(0,10);
       if (!['Shipped','Delivered','Canceled'].includes(t.status)) t.status = 'Shipped';
+      apiUpdateTransfer(t);
       // Also create a shipment record if one doesn't already exist for this tracking #
       if (!SHIPMENTS.some(s => s.trackingNumber === m.ship.trackingNumber)) {
         SHIPMENTS.unshift({
@@ -2844,7 +2857,11 @@ async function refreshActiveTracking() {
         // Cascade to linked transfers
         s.transferIds.forEach(tid => {
           const t = TRANSFERS.find(x => x.id === tid);
-          if (t && t.status !== 'Delivered') { t.status = 'Delivered'; if (!t.dateReceivedByPatient) t.dateReceivedByPatient = s.deliveredDate; }
+          if (t && t.status !== 'Delivered') {
+            t.status = 'Delivered';
+            if (!t.dateReceivedByPatient) t.dateReceivedByPatient = s.deliveredDate;
+            apiUpdateTransfer(t);
+          }
         });
       } else if (code) {
         s.status = 'In Transit';
@@ -2856,12 +2873,60 @@ async function refreshActiveTracking() {
   } catch (e) { console.warn('FedEx refresh failed', e); }
 }
 
+// =====================================================================
+// Persistence — read transfers from Table Storage on load, write on mutate
+// =====================================================================
+// All mutation calls go through these helpers so we keep the source of truth
+// in the backend. If the API is unreachable, we surface the error but don't
+// block the user (the in-memory copy continues to work for the session).
+async function apiLoadTransfers() {
+  try {
+    const r = await fetch('/api/transfers');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    return data.transfers || [];
+  } catch (e) { console.error('Failed to load transfers from API', e); return null; }
+}
+async function apiSaveTransfer(t) {
+  try {
+    const r = await fetch('/api/transfers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(t)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + await r.text());
+  } catch (e) { console.error('apiSaveTransfer failed', e); alert('Could not save to server: ' + e.message); }
+}
+async function apiUpdateTransfer(t) {
+  try {
+    const r = await fetch('/api/transfers/' + encodeURIComponent(t.id), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(t)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + await r.text());
+  } catch (e) { console.error('apiUpdateTransfer failed', e); }
+}
+async function apiDeleteTransfer(id) {
+  try {
+    await fetch('/api/transfers/' + encodeURIComponent(id), { method: 'DELETE' });
+  } catch (e) { console.error('apiDeleteTransfer failed', e); }
+}
+
 // init
 populateUserSwitcher();
 bindGlobalSearch();
 applyRoleVisibility();
 render();
 startFedexAutoRefresh();
+
+// Load persisted transfers from Table Storage and merge into the in-memory array, then re-render.
+(async () => {
+  const loaded = await apiLoadTransfers();
+  if (loaded && loaded.length) {
+    const existingIds = new Set(TRANSFERS.map(t => t.id));
+    loaded.forEach(t => { if (!existingIds.has(t.id)) TRANSFERS.unshift(t); });
+    render();
+  }
+})();
 </script>
 </body>
 </html>
