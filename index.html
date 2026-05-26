@@ -764,7 +764,7 @@ function renderTransfers() {
             <td>${fmtDate(t.createdAt)}</td>
             <td>${fmtDate(t.dateShipped)}</td>
             <td>${escapeHtml(t.trackingNumber||'—')}</td>
-            <td>${escapeHtml(t.submittedBy)}</td>
+            <td>${escapeHtml(t.submittedBy)}<div style="margin-top:4px"><a href="#" data-ask="${t.id}" style="font-size:11px;color:var(--primary);text-decoration:none">❓ Ask question</a></div></td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -781,7 +781,12 @@ function renderTransfers() {
   if (clearDates) clearDates.onclick = () => { state.dateFrom = ''; state.dateTo = ''; renderTransfers(); };
   root.querySelectorAll('tbody tr').forEach(tr => tr.addEventListener('click', e => {
     if (e.target.classList.contains('print-pick')) return;
+    if (e.target.dataset && e.target.dataset.ask) return; // let the ask link handle it
     openTransfer(+tr.dataset.id);
+  }));
+  root.querySelectorAll('[data-ask]').forEach(a => a.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    openAskQuestionModal(+a.dataset.ask);
   }));
   root.querySelectorAll('.print-pick').forEach(cb => cb.onchange = e => {
     const id = +cb.dataset.pick;
@@ -996,9 +1001,17 @@ function renderAdmin() {
       </tbody></table>
     </div></div>
 
-    <div class="card"><div class="card-header">Teams Webhooks (per location)</div><div class="card-body">
-      ${LOCATIONS.map(l => `<div class="form-group" style="margin-bottom:8px"><label>${l}</label><input placeholder="https://pharmacyinnovations.webhook.office.com/webhookb2/..." /></div>`).join('')}
-      <div class="item-sub">Mockup — saving webhooks will wire up in the backend step.</div>
+    <div class="card"><div class="card-header">Teams Webhooks (per location) <span class="item-sub" id="tw-status" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">When a question is asked on a transfer, the app posts to the webhook configured for the receiving location(s). URLs are stored server-side and never returned to the browser — type/paste them here once, then save.</p>
+      ${LOCATIONS.map(l => `
+        <div class="form-group" style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
+          <label style="min-width:140px;font-weight:600">${escapeHtml(l)}</label>
+          <input id="tw-${escapeHtml(l).replace(/\s+/g,'_')}" data-loc="${escapeHtml(l)}" type="password" placeholder="https://...webhook.office.com/... (paste full URL)" style="flex:1" autocomplete="off" />
+          <span class="item-sub tw-state" data-loc-state="${escapeHtml(l)}"></span>
+        </div>
+      `).join('')}
+      <button class="btn btn-primary btn-sm" id="tw-save" style="margin-top:10px">Save webhook URLs</button>
+      <span class="item-sub" id="tw-saveResult" style="margin-left:10px"></span>
     </div></div>
   `;
   root.querySelectorAll('[data-ui]').forEach(sel => sel.onchange = e => { USERS[+sel.dataset.ui][sel.dataset.k] = sel.value; });
@@ -1028,6 +1041,47 @@ function renderAdmin() {
     root.querySelectorAll('[data-sla]').forEach(el => SLA_RULES[el.dataset.sla] = +el.value || SLA_RULES[el.dataset.sla]);
     alert('SLA rules updated.');
     render();
+  };
+  // Teams webhooks — load configured indicators (URLs never come back), save changes via PUT
+  (async () => {
+    try {
+      const r = await fetch('/api/settings');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      document.getElementById('tw-status').textContent = '— loaded';
+      const cfg = data.teamsWebhooksConfigured || {};
+      root.querySelectorAll('[data-loc-state]').forEach(el => {
+        const loc = el.dataset.locState;
+        el.innerHTML = cfg[loc] ? '<span style="color:var(--success)">● configured</span>' : '<span style="color:var(--gray-400)">○ not set</span>';
+      });
+    } catch (e) {
+      document.getElementById('tw-status').textContent = '— load failed (' + e.message + ')';
+    }
+  })();
+  document.getElementById('tw-save').onclick = async () => {
+    const teamsWebhooks = {};
+    root.querySelectorAll('[data-loc]').forEach(el => {
+      const v = el.value.trim();
+      if (v) teamsWebhooks[el.dataset.loc] = v;
+    });
+    const result = document.getElementById('tw-saveResult');
+    result.innerHTML = '<span class="item-sub">Saving…</span>';
+    try {
+      const r = await fetch('/api/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamsWebhooks })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const cfg = data.teamsWebhooksConfigured || {};
+      result.innerHTML = '<span style="color:var(--success)">✓ Saved</span>';
+      root.querySelectorAll('[data-loc-state]').forEach(el => {
+        const loc = el.dataset.locState;
+        el.innerHTML = cfg[loc] ? '<span style="color:var(--success)">● configured</span>' : '<span style="color:var(--gray-400)">○ not set</span>';
+      });
+      // Clear the password fields so the URLs aren't kept in the DOM after save
+      root.querySelectorAll('[data-loc]').forEach(el => { el.value = ''; });
+    } catch (e) { result.innerHTML = '<span style="color:var(--danger)">Save failed: ' + escapeHtml(e.message) + '</span>'; }
   };
 }
 
@@ -1516,6 +1570,7 @@ function renderModal() {
             <span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span>
             ${t.transferType==='Refill'?'<span class="badge badge-verified">Refill</span>':'<span class="badge badge-new">New Rx</span>'}
             ${t.coldItem?'<span class="badge badge-cold">Cold item</span>':''}
+            <button class="btn btn-secondary btn-sm" id="askQBtn" title="Ask the other team a question about this transfer">❓ Ask Question</button>
             <button class="btn btn-primary btn-sm" id="refillBtn" title="Start a new transfer pre-filled from this one">📋 Refill this Rx</button>
             <div class="spacer" style="flex:1"></div>
             <label style="font-size:12px;color:var(--gray-600)">Update status</label>
@@ -1602,11 +1657,15 @@ function renderModal() {
     closeModal();
     document.querySelector('.tab[data-tab=new]').click();
   });
-  document.getElementById('postComment').addEventListener('click', () => {
+  document.getElementById('askQBtn').addEventListener('click', () => openAskQuestionModal(t.id));
+  document.getElementById('postComment').addEventListener('click', async () => {
     const body = document.getElementById('newCommentBody').value.trim();
     if (!body) return;
     const scope = document.getElementById('newCommentScope').value;
+    const notify = document.getElementById('notifyTeams').checked;
     t.comments.push({ id: nextId(), itemId: scope ? +scope : null, author: CURRENT_USER.name, ts: new Date().toISOString(), body });
+    apiUpdateTransfer(t);
+    if (notify) await notifyTeamsAboutQuestion(t, body);
     renderModal();
   });
 }
@@ -2989,6 +3048,7 @@ render();
 startFedexAutoRefresh();
 
 // Load persisted transfers from Table Storage and merge into the in-memory array, then re-render.
+// Also handles ?transfer=ID deep-links (e.g. from Teams notifications) by opening the matching detail modal.
 (async () => {
   const loaded = await apiLoadTransfers();
   if (loaded && loaded.length) {
@@ -2996,7 +3056,97 @@ startFedexAutoRefresh();
     loaded.forEach(t => { if (!existingIds.has(t.id)) TRANSFERS.unshift(t); });
     render();
   }
+  const params = new URLSearchParams(window.location.search);
+  const tid = params.get('transfer');
+  if (tid) {
+    const t = TRANSFERS.find(x => String(x.id) === String(tid));
+    if (t) openTransfer(t.id);
+  }
 })();
+
+// Teams notification: routes a question to the OTHER side(s) of the transfer.
+async function notifyTeamsAboutQuestion(transfer, question) {
+  const locations = new Set();
+  // Notify the side(s) the asker is NOT at
+  if (transfer.originLocation && transfer.originLocation !== CURRENT_USER.location) locations.add(transfer.originLocation);
+  if (transfer.fillLocation && transfer.fillLocation !== CURRENT_USER.location) locations.add(transfer.fillLocation);
+  if (locations.size === 0) {
+    // Asker is at both origin and fill (rare) — notify both anyway
+    if (transfer.originLocation) locations.add(transfer.originLocation);
+    if (transfer.fillLocation) locations.add(transfer.fillLocation);
+  }
+  const portalUrl = window.location.origin + window.location.pathname + '?transfer=' + encodeURIComponent(transfer.id);
+  try {
+    const r = await fetch('/api/notify-teams', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [...locations],
+        transferId: transfer.id,
+        patientName: transfer.patientName,
+        drug: (transfer.items[0] && transfer.items[0].drug) || '',
+        askedBy: CURRENT_USER.name,
+        askedLocation: CURRENT_USER.location,
+        question,
+        portalUrl
+      })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    return data;
+  } catch (e) { console.warn('Teams notification failed', e); return { sent: [], skipped: [], failed: [{ error: e.message }] }; }
+}
+
+// Opens a quick "Ask a Question" modal for a specific transfer. Posts a comment + notifies Teams.
+function openAskQuestionModal(transferId) {
+  const t = TRANSFERS.find(x => x.id === transferId);
+  if (!t) return;
+  const root = document.getElementById('modalRoot');
+  const otherSides = new Set();
+  if (t.originLocation && t.originLocation !== CURRENT_USER.location) otherSides.add(t.originLocation);
+  if (t.fillLocation && t.fillLocation !== CURRENT_USER.location) otherSides.add(t.fillLocation);
+  root.innerHTML = `<div class="modal-overlay" id="aqOverlay"><div class="modal" style="max-width:560px">
+    <div class="modal-header"><div><div class="modal-title">Ask a Question</div><div class="item-sub">About: ${escapeHtml(t.patientName)} · ${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</div></div><button class="modal-close" id="aqClose">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>Your question</label><textarea id="aq-body" rows="4" placeholder="What do you need to know about this transfer?" style="width:100%;padding:9px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;min-height:90px"></textarea></div>
+      <div style="margin-top:10px;padding:10px 12px;background:var(--primary-bg);border-radius:6px;font-size:12px">
+        <strong>Will notify:</strong> ${[...otherSides].map(l => `<span class="badge badge-verified">${escapeHtml(l)}</span>`).join(' ') || '<span class="item-sub">No other locations — question saves to transfer discussion only.</span>'}
+      </div>
+      <div id="aq-result" style="margin-top:10px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="aqCancel">Cancel</button>
+      <button class="btn btn-primary" id="aqSend">Send Question</button>
+    </div>
+  </div></div>`;
+  const close = () => root.innerHTML = '';
+  document.getElementById('aqClose').onclick = close;
+  document.getElementById('aqCancel').onclick = close;
+  document.getElementById('aqOverlay').onclick = e => { if (e.target.id === 'aqOverlay') close(); };
+  document.getElementById('aq-body').focus();
+  document.getElementById('aqSend').onclick = async () => {
+    const body = document.getElementById('aq-body').value.trim();
+    if (!body) { alert('Please type a question first.'); return; }
+    // Save as a comment on the transfer
+    t.comments = t.comments || [];
+    t.comments.push({
+      id: nextId(), itemId: null, author: CURRENT_USER.name,
+      ts: new Date().toISOString(), body: '❓ ' + body, isQuestion: true
+    });
+    apiUpdateTransfer(t);
+    const resEl = document.getElementById('aq-result');
+    resEl.innerHTML = '<span class="item-sub">Sending to Teams…</span>';
+    const result = await notifyTeamsAboutQuestion(t, body);
+    if (result.sent && result.sent.length) {
+      resEl.innerHTML = `<div style="background:var(--success-bg);border:1px solid var(--success);padding:8px 12px;border-radius:6px;font-size:12px"><strong style="color:var(--success)">✓ Sent to:</strong> ${result.sent.map(escapeHtml).join(', ')}${result.skipped&&result.skipped.length?` <span class="item-sub">(skipped: ${result.skipped.join(', ')} — no webhook configured)</span>`:''}</div>`;
+    } else if (result.skipped && result.skipped.length) {
+      resEl.innerHTML = `<div style="background:var(--warning-bg);border:1px solid var(--warning);padding:8px 12px;border-radius:6px;font-size:12px">Question saved to the transfer's discussion, but no Teams webhook configured for ${result.skipped.join(', ')}. Set up in Admin → Teams Webhooks.</div>`;
+    } else {
+      resEl.innerHTML = '<div class="item-sub">Question saved. (No Teams notification sent.)</div>';
+    }
+    setTimeout(close, 2000);
+    render();
+  };
+}
 </script>
 </body>
 </html>
