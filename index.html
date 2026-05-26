@@ -204,7 +204,7 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 <div class="tabs">
   <button class="tab active" data-tab="transfers">Transfers</button>
   <button class="tab" data-tab="new">+ New Transfer</button>
-  <button class="tab" data-tab="pharmreview">Pharmacist Review <span id="reviewBadge" style="background:var(--warning);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
+  <button class="tab" data-tab="actions">Action Items <span id="actionsBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
   <button class="tab" data-tab="shipments">Shipments <span id="incomingBadge" style="background:var(--warning);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
   <button class="tab" data-tab="sla">SLA Alerts <span id="slaBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
   <button class="tab" data-tab="stats">Reports</button>
@@ -214,7 +214,7 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 <div class="container">
   <div id="view-transfers"></div>
   <div id="view-new" style="display:none"></div>
-  <div id="view-pharmreview" style="display:none"></div>
+  <div id="view-actions" style="display:none"></div>
   <div id="view-shipments" style="display:none"></div>
   <div id="view-sla" style="display:none"></div>
   <div id="view-stats" style="display:none"></div>
@@ -296,7 +296,7 @@ let TRANSFERS = (typeof IMPORT_DATA !== 'undefined' ? IMPORT_DATA : []).map(d =>
   shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
   billing: (d.paid === 'HealNow' || d.paid === 'Healnow') ? 'HealNow' : (d.paid === 'Credit Card' || d.paid === 'CC') ? 'CreditCard' : (d.paid === 'Pay at Store' || d.paid === 'Pay In Store') ? 'PayInStore' : 'HealNow',
   ccOnFileInPaladin: false,
-  semaDrAuthorized: d.semaDrAuthorized || 'NA',
+  ccForm: null,
   txEmailedDate: d.txEmailedDate, dateReceivedAtErie: d.dateReceivedAtErie,
   patientStatus: d.patientStatus || 'Pending', coldItem: d.coldItem,
   anticipatedShipDate: d.anticipatedShipDate, dateShipped: d.dateShipped,
@@ -305,6 +305,7 @@ let TRANSFERS = (typeof IMPORT_DATA !== 'undefined' ? IMPORT_DATA : []).map(d =>
   status: d.status,
   submittedBy: d.originLocation + ' Tech', assignedTo: d.dateReceivedAtErie ? 'Erie Sterile' : null,
   createdAt: d.createdAt,
+  transferType: 'New',
   pkSheet: null, formula: null, hardCopy: null,
   items: [mkItem(d.id * 10, d.drug || '', d.qty || '', '', '', '', d.status === 'Delivered' || d.status === 'Shipped')],
   comments: []
@@ -410,11 +411,36 @@ function bindGlobalSearch() {
 // =====================================================================
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtDate(s) { if (!s) return '—'; const d = new Date(s); if (isNaN(d)) return s; return d.toLocaleDateString(); }
+function docList(files) {
+  if (!files || !files.length) return '<span class="item-sub">— none attached</span>';
+  return files.map(f => `<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(f.name)}</a>`).join(', ');
+}
+// Open one or more attached documents in a print window. Each file's dataUrl is rendered;
+// PDFs get embedded, images get an <img>. After load, the browser print dialog opens.
+function printDocs(items) {
+  const w = window.open('', '_blank');
+  if (!w) { alert('Pop-up blocked — please allow pop-ups for this site so the print queue can open.'); return; }
+  const html = ['<!DOCTYPE html><html><head><title>Print</title><style>body{margin:0;font-family:sans-serif}.doc{page-break-after:always;padding:14px}.doc:last-child{page-break-after:auto}h2{font-size:14px;margin:0 0 8px;color:#333}img,embed,iframe{max-width:100%;border:0;display:block}</style></head><body>'];
+  items.forEach(it => {
+    html.push(`<div class="doc"><h2>${escapeHtml(it.title)}</h2>`);
+    if (!it.dataUrl) {
+      html.push(`<div style="color:#999;font-size:12px">[ No preview available — ${escapeHtml(it.name||'document')} was not stored with data ]</div>`);
+    } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
+      html.push(`<img src="${it.dataUrl}" />`);
+    } else {
+      html.push(`<embed src="${it.dataUrl}" type="application/pdf" style="width:100%;height:90vh" />`);
+    }
+    html.push('</div>');
+  });
+  html.push('<script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script></body></html>');
+  w.document.write(html.join(''));
+  w.document.close();
+}
 
 function render() {
   if (state.tab === 'transfers') renderTransfers();
   else if (state.tab === 'new') renderNewForm();
-  else if (state.tab === 'pharmreview') renderPharmReview();
+  else if (state.tab === 'actions') renderActionItems();
   else if (state.tab === 'shipments') renderShipments();
   else if (state.tab === 'sla') renderSLA();
   else if (state.tab === 'stats') renderStats();
@@ -428,10 +454,10 @@ function updateIncomingBadge() {
   const count = SHIPMENTS.filter(s => s.toLocation === CURRENT_USER.location && s.status !== 'Received').length;
   const b = document.getElementById('incomingBadge');
   if (b) { if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; } }
-  const rb = document.getElementById('reviewBadge');
-  if (rb) {
-    const n = TRANSFERS.filter(t => (CURRENT_USER.role === 'admin' || t.fillLocation === CURRENT_USER.location) && t.items.some(i => !i.txFormVerified) && !['Delivered','Canceled','Shipped'].includes(t.status)).length;
-    if (n > 0) { rb.textContent = n; rb.style.display = 'inline-block'; } else { rb.style.display = 'none'; }
+  const ab = document.getElementById('actionsBadge');
+  if (ab) {
+    const n = visibleTransfers().filter(t => t.status === 'Canceled' && !t.cancelAcknowledged).length;
+    if (n > 0) { ab.textContent = n; ab.style.display = 'inline-block'; } else { ab.style.display = 'none'; }
   }
 }
 function updateSLABadge() {
@@ -455,33 +481,44 @@ function renderTransfers() {
     return true;
   });
 
+  if (!state.printSelection) state.printSelection = new Set();
+
   root.innerHTML = `
     <div class="page-header">
       <div class="page-title">All Transfers <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${filtered.length})</span></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="item-sub" id="printSelCount">${state.printSelection.size} selected</span>
+        <button class="btn btn-secondary btn-sm" id="printClear" ${state.printSelection.size===0?'disabled style="opacity:.5"':''}>Clear</button>
+        <button class="btn btn-primary" id="printSelected" ${state.printSelection.size===0?'disabled style="opacity:.5;cursor:not-allowed"':''}>🖨 Print Selected (${state.printSelection.size})</button>
+      </div>
     </div>
     <div class="filters">
       <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:260px" />
       <select id="f-status"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===state.filterStatus?'selected':''}>${s}</option>`).join('')}</select>
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
+      <div style="flex:1"></div>
+      <label class="checkbox-row" style="font-size:12px"><input type="checkbox" id="selectAllPrint" /> Select all visible for print</label>
     </div>
     ${filtered.length === 0 ? `<div class="empty"><h3>No transfers match</h3><p>Try clearing filters.</p></div>` : `
     <table>
       <thead><tr>
+        <th style="width:30px"></th>
         <th>Patient</th><th>From → Fill</th><th>Ship To</th><th>Items</th><th>Status</th><th>SLA</th>
         <th>Tx Emailed</th><th>Ship Date</th><th>Tracking</th><th>Submitted</th>
       </tr></thead>
       <tbody>
         ${filtered.map(t => {
-          const unver = t.items.filter(i => !i.txFormVerified).length;
           const sla = slaStatus(t);
           const rowClass = sla.state === 'breach' ? 'row-sla-breach' : (sla.state === 'warn' ? 'row-sla-warn' : '');
           const slaCell = sla.state === 'breach' ? `<span class="pill-danger">⚠ Overdue ${Math.round(sla.hoursOver)}h</span>` : sla.state === 'warn' ? `<span class="pill-warn">Near SLA</span>` : sla.state === 'ok' ? `<span class="sla-ok">On track</span>` : '<span class="item-sub">—</span>';
+          const cancelWarn = (t.status === 'Canceled' && !t.cancelAcknowledged) ? '<span class="pill-danger" style="margin-left:4px">⚠ unack</span>' : '';
           return `<tr class="${rowClass}" data-id="${t.id}">
-            <td><strong>${escapeHtml(t.patientName)}</strong>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div></td>
+            <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
+            <td><strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div></td>
             <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
             <td>${escapeHtml(t.shipTo)}${t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:''}</td>
-            <td>${t.items.length}${unver?` <span class="pill-warn">${unver} unverified</span>`:''}</td>
+            <td>${t.items.length}</td>
             <td><span class="badge ${STATUS_BADGE[t.status]}">${escapeHtml(t.status)}</span></td>
             <td>${slaCell}</td>
             <td>${fmtDate(t.txEmailedDate)}</td>
@@ -497,7 +534,57 @@ function renderTransfers() {
   document.getElementById('f-status').addEventListener('change', e => { state.filterStatus = e.target.value; renderTransfers(); });
   document.getElementById('f-origin').addEventListener('change', e => { state.filterOrigin = e.target.value; renderTransfers(); });
   document.getElementById('f-fill').addEventListener('change', e => { state.filterFill = e.target.value; renderTransfers(); });
-  root.querySelectorAll('tbody tr').forEach(tr => tr.addEventListener('click', () => openTransfer(+tr.dataset.id)));
+  root.querySelectorAll('tbody tr').forEach(tr => tr.addEventListener('click', e => {
+    if (e.target.classList.contains('print-pick')) return;
+    openTransfer(+tr.dataset.id);
+  }));
+  root.querySelectorAll('.print-pick').forEach(cb => cb.onchange = e => {
+    const id = +cb.dataset.pick;
+    if (cb.checked) state.printSelection.add(id); else state.printSelection.delete(id);
+    renderTransfers();
+  });
+  const selAll = document.getElementById('selectAllPrint');
+  if (selAll) selAll.onchange = () => {
+    if (selAll.checked) filtered.forEach(t => state.printSelection.add(t.id));
+    else filtered.forEach(t => state.printSelection.delete(t.id));
+    renderTransfers();
+  };
+  const clr = document.getElementById('printClear');
+  if (clr) clr.onclick = () => { state.printSelection.clear(); renderTransfers(); };
+  const psbtn = document.getElementById('printSelected');
+  if (psbtn) psbtn.onclick = () => batchPrintTransfers([...state.printSelection]);
+}
+
+// Batch-print PK transfer sheets + hard copies for selected transfers.
+// After the print window opens, auto-advance any 'New' or 'Tx Verified' transfers to 'In Progress'.
+function batchPrintTransfers(ids) {
+  if (!ids.length) return;
+  const transfers = ids.map(id => TRANSFERS.find(t => t.id === id)).filter(Boolean);
+  const docs = [];
+  transfers.forEach(t => {
+    const pks = t.pkSheets || (t.pkSheet ? [t.pkSheet] : []);
+    const hcs = t.hardCopies || (t.hardCopy ? [t.hardCopy] : []);
+    pks.forEach((f, idx) => docs.push({ title: `${t.patientName} — PK Transfer Sheet${pks.length>1?' '+(idx+1):''}`, name: f.name, type: f.type, dataUrl: f.dataUrl }));
+    hcs.forEach((f, idx) => docs.push({ title: `${t.patientName} — Hard Copy${hcs.length>1?' '+(idx+1):''}`, name: f.name, type: f.type, dataUrl: f.dataUrl }));
+    if (pks.length === 0 && hcs.length === 0) {
+      docs.push({ title: `${t.patientName} — (no documents attached)`, name: '', type: '', dataUrl: null });
+    }
+  });
+  printDocs(docs);
+  // Auto-advance status
+  let advanced = 0;
+  transfers.forEach(t => {
+    if (['New','Tx Verified'].includes(t.status)) { t.status = 'In Progress'; advanced++; }
+  });
+  state.printSelection.clear();
+  if (advanced) {
+    setTimeout(() => {
+      alert(`Print queue opened. ${advanced} transfer(s) auto-advanced to "In Progress".`);
+      render();
+    }, 300);
+  } else {
+    render();
+  }
 }
 
 function renderStats() {
@@ -564,15 +651,6 @@ function renderStats() {
       <table style="box-shadow:none"><thead><tr><th>Location</th><th>Transfers</th><th>Bar</th></tr></thead><tbody>
         ${Object.entries(byOrigin).sort((a,b)=>b[1]-a[1]).map(([loc,n]) => { const pct = scope.length ? 100*n/scope.length : 0; return `<tr><td><strong>${escapeHtml(loc)}</strong></td><td>${n}</td><td><div style="background:var(--primary-bg);height:16px;border-radius:3px;width:${pct*3}%;max-width:300px"></div></td></tr>`; }).join('')}
       </tbody></table>
-    </div></div>
-
-    <div class="card"><div class="card-header">Unverified items (hard-copy check pending)</div><div class="card-body">
-      ${(() => {
-        const items = [];
-        scope.forEach(t => t.items.filter(i=>!i.txFormVerified && !['Delivered','Canceled'].includes(t.status)).forEach(i => items.push({t,i})));
-        if (!items.length) return '<div class="empty"><h3>All clear</h3></div>';
-        return items.map(({t,i}) => `<div class="item-row unverified"><div class="item-head"><div><strong>${escapeHtml(i.drug)}</strong> <span class="item-sub">· ${escapeHtml(t.patientName)} · Rx ${escapeHtml(i.rxNumber||'—')}</span></div><button class="btn btn-secondary btn-sm" data-open="${t.id}">Open</button></div><div class="item-sub">Dr. ${escapeHtml(i.doctorName||'—')} · ${escapeHtml(i.doctorAddr||'—')}</div></div>`).join('');
-      })()}
     </div></div>
 
     <div style="margin-top:16px;text-align:right">
@@ -693,9 +771,20 @@ function renderNewForm() {
   const root = document.getElementById('view-new');
   if (!state.draft) state.draft = freshDraft();
   const d = state.draft;
+  const refillSource = d.refillOfId ? TRANSFERS.find(x => x.id === d.refillOfId) : null;
   root.innerHTML = `
-    <div class="page-header"><div class="page-title">New Transfer Request</div></div>
+    <div class="page-header"><div class="page-title">${d.transferType === 'Refill' ? 'Refill Transfer Request' : 'New Transfer Request'}</div></div>
     <div class="card"><div class="card-body">
+      ${refillSource ? `<div style="background:var(--primary-bg);border:1px solid var(--primary-light);padding:10px 14px;border-radius:6px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div style="font-size:13px"><strong>Refill of:</strong> ${escapeHtml(refillSource.patientName)} · ${escapeHtml(refillSource.items.map(i=>i.drug).filter(Boolean).join(', ').slice(0,80))} · originally submitted ${fmtDate(refillSource.createdAt)}</div>
+        <button class="btn btn-secondary btn-sm" id="clearRefill">Clear refill link</button>
+      </div>` : ''}
+      <div style="display:flex;gap:18px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-200)">
+        <label style="font-size:13px;font-weight:600;color:var(--gray-700)">Transfer Type:</label>
+        <label class="checkbox-row"><input type="radio" name="transferType" value="New" ${d.transferType==='New'?'checked':''} /> New Prescription</label>
+        <label class="checkbox-row"><input type="radio" name="transferType" value="Refill" ${d.transferType==='Refill'?'checked':''} /> Refill</label>
+        <div class="hint" style="margin-left:auto">Refills don't require a hard copy scan.</div>
+      </div>
       <div class="section-title">Patient</div>
       <div class="form-grid">
         <div class="form-group"><label>Patient Name</label><input id="f-patientName" value="${escapeHtml(d.patientName)}" /></div>
@@ -724,19 +813,31 @@ function renderNewForm() {
       <div class="form-grid">
         <div class="form-group"><label>Billing Method</label><select id="f-billing">${['HealNow','CreditCard','PayInStore'].map(s=>`<option ${s===d.billing?'selected':''}>${s}</option>`).join('')}</select></div>
         <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-ccPaladin" ${d.ccOnFileInPaladin?'checked':''} /><label for="f-ccPaladin">Credit card on file in Paladin</label></div><div class="hint">Never store the actual card number here.</div></div>
-        <div class="form-group"><label>Sema Dr Authorized</label><select id="f-sema">${['NA','Yes','No'].map(s=>`<option ${s===d.semaDrAuthorized?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="form-group full" id="f-ccFormBox" style="display:${d.billing==='CreditCard'?'':'none'}">
+          <label>Signed Credit Card Authorization Form ${d.ccOnFileInPaladin?'<span class="hint" style="text-transform:none;font-weight:400">(optional — card already on file)</span>':'<span style="color:var(--danger)">*</span>'}</label>
+          <input type="file" id="f-ccForm" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" />
+          <div class="hint" id="f-ccForm-name">${d.ccForm?escapeHtml(d.ccForm.name):'Upload the patient-signed authorization form. Billing team will retrieve this from the app.'}</div>
+        </div>
         <div class="form-group"><label>Anticipated Ship Date</label><input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" /></div>
       </div></div>
 
-      <div class="section"><div class="section-title">Required Documents</div>
+      <div class="section"><div class="section-title">Documents</div>
       <div class="form-grid">
-        <div class="form-group"><label>PK Transfer Sheet <span style="color:var(--danger)">*</span></label><input type="file" id="f-pkSheet" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" /><div class="hint" id="f-pkSheet-name">${d.pkSheet?escapeHtml(d.pkSheet.name):'Required — printed PK transfer form'}</div></div>
-        <div class="form-group full"><label>Formula Worksheet <span style="color:var(--danger)">*</span></label>
+        <div class="form-group full"><label>PK Transfer Sheet(s) <span style="color:var(--danger)">*</span></label>
+          <input type="file" id="f-pkSheet" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" multiple />
+          <div class="hint" id="f-pkSheet-name">${(d.pkSheets&&d.pkSheets.length)?d.pkSheets.map(f=>escapeHtml(f.name)).join(', '):'Required — printed PK transfer form. Select multiple files to attach more than one.'}</div>
+        </div>
+        <div class="form-group full"><label>Hard Copy Scan(s) <span class="hint" style="text-transform:none;font-weight:400">(optional for refills)</span></label>
+          <input type="file" id="f-hardCopy" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" multiple />
+          <div class="hint" id="f-hardCopy-name">${(d.hardCopies&&d.hardCopies.length)?d.hardCopies.map(f=>escapeHtml(f.name)).join(', '):'Required for new prescriptions; optional for refills. Select multiple files to attach more than one.'}</div>
+        </div>
+        <div class="form-group full"><label>Formula Worksheet <span class="hint" style="text-transform:none;font-weight:400">(optional — only if a special formula is needed)</span></label>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
-            <label class="checkbox-row"><input type="radio" name="formulaMode" value="library" ${(!d.formula||d.formula.fromLibrary)?'checked':''} /> From ${escapeHtml(d.originLocation)} library</label>
+            <label class="checkbox-row"><input type="radio" name="formulaMode" value="none" ${!d.formula?'checked':''} /> None</label>
+            <label class="checkbox-row"><input type="radio" name="formulaMode" value="library" ${(d.formula&&d.formula.fromLibrary)?'checked':''} /> From ${escapeHtml(d.originLocation)} library</label>
             <label class="checkbox-row"><input type="radio" name="formulaMode" value="upload" ${(d.formula&&!d.formula.fromLibrary)?'checked':''} /> Upload new</label>
           </div>
-          <div id="formulaLibraryBox">
+          <div id="formulaLibraryBox" style="display:none">
             <select id="f-formulaLibrary" style="width:100%">
               <option value="">— Select a saved formula —</option>
               ${FORMULAS.filter(f => f.location === d.originLocation).map(f => `<option value="${f.id}" ${d.formula&&d.formula.libraryId===f.id?'selected':''}>${escapeHtml(f.name)}</option>`).join('')}
@@ -746,10 +847,9 @@ function renderNewForm() {
           <div id="formulaUploadBox" style="display:none">
             <input type="file" id="f-formula" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.xlsx,.xls" />
             <div style="margin-top:6px" class="checkbox-row"><input type="checkbox" id="f-formulaSaveLib" ${d.formula&&d.formula.saveToLibrary?'checked':''} /><label for="f-formulaSaveLib">Save to my location's library for reuse</label></div>
-            <div class="hint" id="f-formula-name">${d.formula&&!d.formula.fromLibrary?escapeHtml(d.formula.name):'Required — compounding formula worksheet'}</div>
+            <div class="hint" id="f-formula-name">${d.formula&&!d.formula.fromLibrary?escapeHtml(d.formula.name):'Compounding formula worksheet'}</div>
           </div>
         </div>
-        <div class="form-group full"><label>Hard Copy Scan (optional)</label><input type="file" id="f-hardCopy" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" /><div class="hint" id="f-hardCopy-name">${d.hardCopy?escapeHtml(d.hardCopy.name):'Optional — scan of original hard copy for reference'}</div></div>
       </div></div>
 
       <div class="section"><div class="section-title">Items / Prescriptions</div>
@@ -768,20 +868,56 @@ function renderNewForm() {
   document.getElementById('addItemBtn').addEventListener('click', () => { state.draft.items.push(freshItem()); renderDraftItems(); });
   document.getElementById('resetDraft').addEventListener('click', () => { state.draft = freshDraft(); renderNewForm(); });
   document.getElementById('submitDraft').addEventListener('click', submitDraft);
+  document.querySelectorAll('input[name=transferType]').forEach(r => r.onchange = e => { state.draft.transferType = e.target.value; });
+  const clr = document.getElementById('clearRefill');
+  if (clr) clr.onclick = () => { state.draft.refillOfId = null; renderNewForm(); };
 }
 
 function freshDraft() {
   return {
+    transferType: 'New', refillOfId: null,
     patientName: '', patientDOB: '', patientAllergies: '',
     originLocation: CURRENT_USER.location, fillLocation: 'Erie',
     shipTo: 'Patient', deliveryCharge: '',
     shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
-    billing: 'HealNow', ccOnFileInPaladin: false,
-    semaDrAuthorized: 'NA',
+    billing: 'HealNow', ccOnFileInPaladin: false, ccForm: null,
     coldItem: false,
     anticipatedShipDate: '',
-    pkSheet: null, formula: null, hardCopy: null,
+    pkSheets: [], formula: null, hardCopies: [],
     items: [freshItem()]
+  };
+}
+
+// Build a new draft pre-filled from an existing transfer (refill workflow).
+// Files are intentionally NOT carried over — fresh PK sheet uploads each refill.
+function draftFromRefill(source) {
+  return {
+    transferType: 'Refill',
+    refillOfId: source.id,
+    patientName: source.patientName,
+    patientDOB: source.patientDOB || '',
+    patientAllergies: source.patientAllergies || 'NKA',
+    originLocation: source.originLocation,
+    fillLocation: source.fillLocation,
+    shipTo: source.shipTo,
+    deliveryCharge: source.deliveryCharge || '',
+    shipAddr1: source.shipAddr1 || '', shipAddr2: source.shipAddr2 || '',
+    shipCity: source.shipCity || '', shipState: source.shipState || '', shipZip: source.shipZip || '',
+    billing: source.billing,
+    ccOnFileInPaladin: !!source.ccOnFileInPaladin,
+    ccForm: null,
+    coldItem: !!source.coldItem,
+    anticipatedShipDate: '',
+    pkSheets: [], formula: null, hardCopies: [],
+    items: source.items.map(i => ({
+      id: nextId(),
+      drug: i.drug, qty: i.qty,
+      rxNumber: '',
+      receiptAttached: false,
+      doctorName: i.doctorName, doctorAddr: i.doctorAddr,
+      doctorPhone: i.doctorPhone, doctorDEA: i.doctorDEA,
+      notes: ''
+    }))
   };
 }
 function freshItem() { return { id: nextId(), drug: '', qty: '', rxNumber: '', receiptAttached: false, doctorName: '', doctorAddr: '', doctorPhone: '', doctorDEA: '', txFormVerified: false, notes: '' }; }
@@ -819,21 +955,40 @@ function renderDraftItems() {
 }
 
 function bindDraftInputs() {
-  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','semaDrAuthorized','anticipatedShipDate'];
+  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate'];
   fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => state.draft[f] = el.value); });
   ['coldItem','ccPaladin'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('change', () => { state.draft[f==='ccPaladin'?'ccOnFileInPaladin':f] = el.checked; }); });
-  [['pkSheet','pkSheet'],['hardCopy','hardCopy']].forEach(([elId,key]) => {
+
+  // Show/hide CC form upload based on billing
+  const billingSel = document.getElementById('f-billing');
+  const ccBox = document.getElementById('f-ccFormBox');
+  if (billingSel && ccBox) billingSel.addEventListener('change', () => { ccBox.style.display = billingSel.value === 'CreditCard' ? '' : 'none'; });
+
+  const ccForm = document.getElementById('f-ccForm');
+  if (ccForm) ccForm.addEventListener('change', () => {
+    const file = ccForm.files[0];
+    if (!file) { state.draft.ccForm = null; return; }
+    const rd = new FileReader();
+    rd.onload = ev => {
+      state.draft.ccForm = { name: file.name, size: file.size, type: file.type, dataUrl: ev.target.result };
+      document.getElementById('f-ccForm-name').textContent = `${file.name} (${(file.size/1024).toFixed(0)} KB)`;
+    };
+    rd.readAsDataURL(file);
+  });
+
+  // Multi-file uploads: PK sheets and hard copies
+  [['pkSheet','pkSheets'],['hardCopy','hardCopies']].forEach(([elId,key]) => {
     const el = document.getElementById('f-'+elId);
     if (!el) return;
     el.addEventListener('change', () => {
-      const file = el.files[0];
-      state.draft[key] = file ? { name: file.name, size: file.size, type: file.type } : null;
+      const files = [...el.files].map(f => ({ name: f.name, size: f.size, type: f.type }));
+      state.draft[key] = files;
       const lbl = document.getElementById('f-'+elId+'-name');
-      if (lbl) lbl.textContent = file ? `${file.name} (${(file.size/1024).toFixed(0)} KB)` : '';
+      if (lbl) lbl.textContent = files.length ? files.map(f => `${f.name} (${(f.size/1024).toFixed(0)} KB)`).join(', ') : '';
     });
   });
 
-  // Formula mode toggle + inputs
+  // Formula mode toggle + inputs (none / library / upload)
   const libBox = document.getElementById('formulaLibraryBox');
   const upBox = document.getElementById('formulaUploadBox');
   document.querySelectorAll('input[name=formulaMode]').forEach(r => r.onchange = e => {
@@ -843,7 +998,7 @@ function bindDraftInputs() {
     state.draft.formula = null;
   });
   // initial display
-  const initialMode = state.draft.formula && !state.draft.formula.fromLibrary ? 'upload' : 'library';
+  const initialMode = state.draft.formula ? (state.draft.formula.fromLibrary ? 'library' : 'upload') : 'none';
   libBox.style.display = initialMode === 'library' ? '' : 'none';
   upBox.style.display = initialMode === 'upload' ? '' : 'none';
 
@@ -870,9 +1025,8 @@ function submitDraft() {
   const d = state.draft;
   const missing = [];
   if (!d.patientName) missing.push('Patient name');
-  if (!d.items.length || !d.items[0].drug) missing.push('At least one Rx with drug name');
-  if (!d.pkSheet) missing.push('PK Transfer Sheet upload');
-  if (!d.formula) missing.push('Formula Worksheet (select from library or upload)');
+  if (!d.pkSheets || !d.pkSheets.length) missing.push('At least one PK Transfer Sheet upload');
+  if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "on file in Paladin")');
   if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
   const t = {
     ...d,
@@ -921,7 +1075,9 @@ function renderModal() {
         <div class="modal-body">
           <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
             <span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span>
+            ${t.transferType==='Refill'?'<span class="badge badge-verified">Refill</span>':'<span class="badge badge-new">New Rx</span>'}
             ${t.coldItem?'<span class="badge badge-cold">Cold item</span>':''}
+            <button class="btn btn-primary btn-sm" id="refillBtn" title="Start a new transfer pre-filled from this one">📋 Refill this Rx</button>
             <div class="spacer" style="flex:1"></div>
             <label style="font-size:12px;color:var(--gray-600)">Update status</label>
             <select class="status-select" id="statusSelect">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select>
@@ -947,9 +1103,11 @@ function renderModal() {
 
           <div class="section"><div class="section-title">Attached Documents</div>
           <div style="font-size:13px;line-height:1.9">
-            <div><strong>PK Transfer Sheet:</strong> ${t.pkSheet?`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.pkSheet.name)}</a>`:'<span style="color:var(--danger)">Missing</span>'}</div>
-            <div><strong>Formula Worksheet:</strong> ${t.formula?(t.formula.fromLibrary?`<a href="${escapeHtml(t.formula.link||'#')}" target="_blank" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a> <span class="item-sub">(from ${escapeHtml(t.originLocation)} library)</span>`:`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a>`):'<span style="color:var(--danger)">Missing</span>'}</div>
-            <div><strong>Hard Copy Scan:</strong> ${t.hardCopy?`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.hardCopy.name)}</a>`:'—'}</div>
+            <div><strong>PK Transfer Sheet${(t.pkSheets&&t.pkSheets.length>1)?'s':''}:</strong> ${docList(t.pkSheets || (t.pkSheet?[t.pkSheet]:[]))}</div>
+            <div><strong>Hard Copy Scan${(t.hardCopies&&t.hardCopies.length>1)?'s':''}:</strong> ${docList(t.hardCopies || (t.hardCopy?[t.hardCopy]:[]))}</div>
+            <div><strong>Formula Worksheet:</strong> ${t.formula?(t.formula.fromLibrary?`<a href="${escapeHtml(t.formula.link||'#')}" target="_blank" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a> <span class="item-sub">(from ${escapeHtml(t.originLocation)} library)</span>`:`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a>`):'<span class="item-sub">— (not needed)</span>'}</div>
+            ${t.billing==='CreditCard'?`<div><strong>Credit Card Auth Form:</strong> ${t.ccForm?`<a href="#" data-cc="${t.id}" style="color:var(--primary)">${escapeHtml(t.ccForm.name)}</a> <button class="btn btn-secondary btn-sm" data-cc-print="${t.id}" style="margin-left:6px">View / Print for Billing</button>`:(t.ccOnFileInPaladin?'<span class="item-sub">On file in Paladin</span>':'<span style="color:var(--danger)">Missing</span>')}</div>`:''}
+            ${(t.status==='Canceled' && !t.cancelAcknowledged)?`<div style="margin-top:10px;padding:10px 12px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:6px"><strong style="color:var(--danger)">⚠ This transfer was canceled and has not been acknowledged.</strong> Go to <em>Action Items</em> to acknowledge before this transfer can be shipped.</div>`:''}
           </div>
           </div>
 
@@ -986,15 +1144,21 @@ function renderModal() {
   document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
   document.getElementById('statusSelect').addEventListener('change', e => {
     const newStatus = e.target.value;
-    if (newStatus !== 'New' && newStatus !== 'Canceled') {
-      const unver = t.items.filter(i => !i.txFormVerified).length;
-      if (unver && newStatus !== 'New') {
-        if (!confirm(`${unver} item(s) have not been verified against the hard copy. Move to "${newStatus}" anyway?`)) { e.target.value = t.status; return; }
-      }
+    if (newStatus === 'Canceled' && t.status !== 'Canceled') {
+      onTransferCanceled(t);
     }
     t.status = newStatus; renderModal(); render();
   });
   document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
+  document.querySelectorAll('[data-cc-print]').forEach(b => b.onclick = () => {
+    if (!t.ccForm) { alert('No CC form attached.'); return; }
+    printDocs([{ title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: t.ccForm.dataUrl }]);
+  });
+  document.getElementById('refillBtn').addEventListener('click', () => {
+    state.draft = draftFromRefill(t);
+    closeModal();
+    document.querySelector('.tab[data-tab=new]').click();
+  });
   document.getElementById('postComment').addEventListener('click', () => {
     const body = document.getElementById('newCommentBody').value.trim();
     if (!body) return;
@@ -1007,10 +1171,9 @@ function renderModal() {
 function renderItems(t) {
   const wrap = document.getElementById('itemsList');
   wrap.innerHTML = t.items.map(i => `
-    <div class="item-row ${i.txFormVerified?'verified':'unverified'}">
+    <div class="item-row">
       <div class="item-head">
         <div><span class="item-title">${escapeHtml(i.drug||'(no drug name)')}</span> <span class="item-sub">· ${escapeHtml(i.qty||'')} · Rx ${escapeHtml(i.rxNumber||'—')}</span></div>
-        <label class="checkbox-row" style="font-size:12px"><input type="checkbox" data-verify="${i.id}" ${i.txFormVerified?'checked':''} /> PK form matches hard copy</label>
       </div>
       <div style="font-size:12px;color:var(--gray-600);line-height:1.6">
         <div><strong>Dr.</strong> ${escapeHtml(i.doctorName||'—')} · ${escapeHtml(i.doctorPhone||'')} · DEA ${escapeHtml(i.doctorDEA||'—')}</div>
@@ -1020,11 +1183,6 @@ function renderItems(t) {
       </div>
     </div>
   `).join('');
-  wrap.querySelectorAll('[data-verify]').forEach(cb => cb.addEventListener('change', e => {
-    const item = t.items.find(x => x.id === +cb.dataset.verify);
-    item.txFormVerified = e.target.checked;
-    renderModal();
-  }));
 }
 
 function renderComments(t) {
@@ -1166,6 +1324,7 @@ function openCreateShipment() {
     const availableTransfers = visibleTransfers().filter(t => {
       if (SHIPMENTS.some(s => s.transferIds.includes(t.id) && s.status !== 'Canceled')) return false;
       if (['Delivered','Canceled','Shipped'].includes(t.status)) return false;
+      if (t.canceledAt && !t.cancelAcknowledged) return false;
       if (destType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === toLoc;
       return t.shipTo === 'Patient';
     });
@@ -1178,12 +1337,11 @@ function openCreateShipment() {
       ${availableTransfers.length === 0 ? '<div class="item-sub">No open transfers match this destination.</div>' : `
       <div style="max-height:300px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:6px">
         ${availableTransfers.map(t => {
-          const unver = t.items.filter(i => !i.txFormVerified).length;
           return `<div class="checkbox-row" style="padding:10px;border-bottom:1px solid var(--gray-100)">
             <input type="checkbox" class="cm-t" value="${t.id}" />
             <div style="flex:1">
               <strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}
-              <div class="item-sub">${t.items.length} Rx · ${t.items.map(i=>escapeHtml(i.drug)).join(', ').slice(0,80)}${unver?` · <span class="pill-warn">${unver} unverified</span>`:''}</div>
+              <div class="item-sub">${t.items.length} Rx · ${t.items.map(i=>escapeHtml(i.drug)).join(', ').slice(0,80)}</div>
             </div>
           </div>`;
         }).join('')}
@@ -1368,87 +1526,67 @@ function openShipment(id) {
 }
 
 // =====================================================================
-// Pharmacist Review tab — verify each script against hard copy
+// Action Items tab — cancellations and other items needing acknowledgment
 // =====================================================================
-function renderPharmReview() {
-  const root = document.getElementById('view-pharmreview');
-  if (!state.reviewFilter) state.reviewFilter = { fill: '', origin: '' };
-  const isAdmin = CURRENT_USER.role === 'admin';
-  // Non-admins: locked to their location as fill location (they can only verify where they're the filler)
-  if (!isAdmin) state.reviewFilter.fill = CURRENT_USER.location;
-  const matchesFilter = t => {
-    if (state.reviewFilter.fill && t.fillLocation !== state.reviewFilter.fill) return false;
-    if (state.reviewFilter.origin && t.originLocation !== state.reviewFilter.origin) return false;
-    return true;
-  };
-  const queue = TRANSFERS.filter(t => matchesFilter(t) && !['Delivered','Canceled','Shipped'].includes(t.status) && t.items.some(i => !i.txFormVerified));
-  const ready = TRANSFERS.filter(t => matchesFilter(t) && t.status === 'New' && t.items.every(i => i.txFormVerified));
+function onTransferCanceled(t) {
+  t.canceledAt = new Date().toISOString();
+  t.canceledBy = CURRENT_USER.name;
+  t.cancelAcknowledged = false;
+  // Stub: in production this fires the Teams/email notification
+  console.log('[Notify] Transfer canceled — would send Teams/email alert to Erie staff for ' + t.patientName);
+}
+
+function renderActionItems() {
+  const root = document.getElementById('view-actions');
+  const canceled = visibleTransfers().filter(t => t.status === 'Canceled' && !t.cancelAcknowledged)
+    .sort((a,b) => new Date(b.canceledAt||b.createdAt) - new Date(a.canceledAt||a.createdAt));
+  const acknowledged = visibleTransfers().filter(t => t.status === 'Canceled' && t.cancelAcknowledged)
+    .sort((a,b) => new Date(b.acknowledgedAt||0) - new Date(a.acknowledgedAt||0)).slice(0, 20);
+
   root.innerHTML = `
-    <div class="page-header"><div class="page-title">Pharmacist Review${isAdmin?'':' — '+escapeHtml(CURRENT_USER.location)} <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${queue.length})</span></div></div>
-    <p style="color:var(--gray-600);margin-bottom:14px">Pharmacist step: verify each script on the printed PK transfer sheet matches the hard copy (doctor name, address, DEA, drug, qty). Check off each Rx. Once every item on a transfer is verified, click <strong>Mark Transfer Verified</strong> to advance it to <em>Tx Verified</em> status.${isAdmin?'':' You see only transfers where your pharmacy is the filling location.'}</p>
-    <div class="filters">
-      ${isAdmin?`<label style="font-size:12px;color:var(--gray-600)">Fill location:</label>
-      <select id="pr-fill"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===state.reviewFilter.fill?'selected':''}>${l}</option>`).join('')}</select>`:''}
-      <label style="font-size:12px;color:var(--gray-600);margin-left:8px">Origin:</label>
-      <select id="pr-origin"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===state.reviewFilter.origin?'selected':''}>${l}</option>`).join('')}</select>
-      ${isAdmin?`<button class="btn btn-secondary btn-sm" id="pr-mine">My location only</button>`:''}
-    </div>
-    ${queue.length === 0 ? `<div class="empty"><h3>Nothing to review</h3><p>All transfers at your location are verified.</p></div>` : queue.map(t => {
-      const unver = t.items.filter(i => !i.txFormVerified).length;
-      return `<div class="card">
-        <div class="card-header">
-          <div><strong>${escapeHtml(t.patientName)}</strong> <span class="item-sub">· DOB ${fmtDate(t.patientDOB)} · ${escapeHtml(t.originLocation)} → fill at ${escapeHtml(t.fillLocation)}</span></div>
-          <div><span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}</div>
-        </div>
-        <div class="card-body">
-          <div style="font-size:13px;margin-bottom:10px">
-            <strong>PK Transfer Sheet:</strong> ${t.pkSheet?`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.pkSheet.name)}</a>`:'<span style="color:var(--danger)">Missing</span>'} ·
-            <strong>Formula:</strong> ${t.formula?(t.formula.fromLibrary?`<a href="${escapeHtml(t.formula.link||'#')}" target="_blank" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a>`:escapeHtml(t.formula.name)):'<span style="color:var(--danger)">Missing</span>'} ·
-            <strong>Hard Copy:</strong> ${t.hardCopy?`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.hardCopy.name)}</a>`:'<span class="item-sub">not attached</span>'}
-          </div>
-          ${t.items.map(i => `<div class="item-row ${i.txFormVerified?'verified':'unverified'}">
-            <div class="item-head">
-              <div><span class="item-title">${escapeHtml(i.drug)}</span> <span class="item-sub">· ${escapeHtml(i.qty||'')} · Rx ${escapeHtml(i.rxNumber||'—')}</span></div>
-              <label class="checkbox-row" style="font-size:12px"><input type="checkbox" data-verifypr="${t.id}:${i.id}" ${i.txFormVerified?'checked':''} /> Verified against hard copy</label>
-            </div>
-            <div style="font-size:12px;color:var(--gray-600);line-height:1.6">
-              <div><strong>Dr.</strong> ${escapeHtml(i.doctorName||'—')} · ${escapeHtml(i.doctorPhone||'')} · DEA ${escapeHtml(i.doctorDEA||'—')}</div>
-              <div><strong>Addr:</strong> ${escapeHtml(i.doctorAddr||'—')}</div>
-              ${i.verifiedBy?`<div style="color:var(--success)">✔ Verified by ${escapeHtml(i.verifiedBy)} on ${fmtDate(i.verifiedAt)}</div>`:''}
-            </div>
-          </div>`).join('')}
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
-            <div class="item-sub">${unver} of ${t.items.length} item(s) still need verification</div>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-secondary btn-sm" data-open-pr="${t.id}">Open full transfer</button>
-              <button class="btn ${unver===0?'btn-primary':'btn-secondary'} btn-sm" data-advance="${t.id}" ${unver>0?'disabled style="opacity:.5;cursor:not-allowed"':''}>Mark Transfer Verified</button>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }).join('')}
-    ${ready.length?`<div class="section-title" style="margin-top:24px">Ready to mark verified (${ready.length})</div>${ready.map(t=>`<div class="item-row verified"><div class="item-head"><div><strong>${escapeHtml(t.patientName)}</strong> <span class="item-sub">· all items verified</span></div><button class="btn btn-primary btn-sm" data-advance="${t.id}">Mark Transfer Verified</button></div></div>`).join('')}`:''}
+    <div class="page-header"><div class="page-title">Action Items <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${canceled.length} pending)</span></div></div>
+    <p style="color:var(--gray-600);margin-bottom:14px">Items that need to be acknowledged so they don't get accidentally processed. A canceled transfer cannot be added to a shipment until someone here acknowledges it. In production, cancellations also trigger a Teams/email alert to Erie staff.</p>
+
+    <div class="card"><div class="card-header">Canceled — Needs Acknowledgment (${canceled.length})</div><div class="card-body">
+      ${canceled.length === 0 ? `<div class="empty"><h3>🎉 All clear</h3><p>No canceled transfers awaiting acknowledgment.</p></div>` : `
+      <table style="box-shadow:none"><thead><tr>
+        <th>Patient</th><th>Origin → Fill</th><th>Canceled By</th><th>When</th><th>Items</th><th></th>
+      </tr></thead><tbody>
+        ${canceled.map(t => `<tr style="background:var(--danger-bg)">
+          <td><strong>${escapeHtml(t.patientName)}</strong>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}</td>
+          <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+          <td>${escapeHtml(t.canceledBy||'—')}</td>
+          <td>${t.canceledAt?new Date(t.canceledAt).toLocaleString():'—'}</td>
+          <td>${t.items.length} Rx — ${escapeHtml(t.items.map(i=>i.drug).filter(Boolean).join(', ').slice(0,80))}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-secondary btn-sm" data-open-ack="${t.id}">Open</button>
+            <button class="btn btn-primary btn-sm" data-ack="${t.id}">Acknowledge</button>
+          </td>
+        </tr>`).join('')}
+      </tbody></table>`}
+    </div></div>
+
+    ${acknowledged.length ? `<div class="card"><div class="card-header">Recently Acknowledged (${acknowledged.length})</div><div class="card-body">
+      <table style="box-shadow:none"><thead><tr><th>Patient</th><th>Canceled</th><th>Acknowledged By</th><th>When</th></tr></thead><tbody>
+        ${acknowledged.map(t => `<tr data-open="${t.id}" style="cursor:pointer">
+          <td><strong>${escapeHtml(t.patientName)}</strong></td>
+          <td>${t.canceledAt?new Date(t.canceledAt).toLocaleString():'—'}</td>
+          <td>${escapeHtml(t.acknowledgedBy||'—')}</td>
+          <td>${t.acknowledgedAt?new Date(t.acknowledgedAt).toLocaleString():'—'}</td>
+        </tr>`).join('')}
+      </tbody></table>
+    </div></div>` : ''}
   `;
-  root.querySelectorAll('[data-verifypr]').forEach(cb => cb.onchange = e => {
-    const [tid, iid] = cb.dataset.verifypr.split(':').map(Number);
-    const t = TRANSFERS.find(x => x.id === tid);
-    const it = t.items.find(x => x.id === iid);
-    it.txFormVerified = e.target.checked;
-    if (e.target.checked) { it.verifiedBy = CURRENT_USER.name; it.verifiedAt = new Date().toISOString(); } else { delete it.verifiedBy; delete it.verifiedAt; }
-    renderPharmReview();
-  });
-  root.querySelectorAll('[data-advance]').forEach(b => b.onclick = () => {
-    const t = TRANSFERS.find(x => x.id === +b.dataset.advance);
-    if (t.items.some(i => !i.txFormVerified)) { alert('All items must be verified first.'); return; }
-    t.status = 'Tx Verified'; t.pharmacistVerifiedBy = CURRENT_USER.name; t.pharmacistVerifiedAt = new Date().toISOString();
-    renderPharmReview();
-    alert('Transfer marked verified. (Mock — would notify the assigned tech via Teams.)');
+  root.querySelectorAll('[data-open-ack]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openAck));
+  root.querySelectorAll('[data-open]').forEach(tr => tr.onclick = () => openTransfer(+tr.dataset.open));
+  root.querySelectorAll('[data-ack]').forEach(b => b.onclick = () => {
+    const t = TRANSFERS.find(x => x.id === +b.dataset.ack);
+    t.cancelAcknowledged = true;
+    t.acknowledgedBy = CURRENT_USER.name;
+    t.acknowledgedAt = new Date().toISOString();
+    renderActionItems();
     render();
   });
-  root.querySelectorAll('[data-open-pr]').forEach(b => b.onclick = () => openTransfer(+b.dataset['openPr']));
-  const prFill = document.getElementById('pr-fill'); if (prFill) prFill.onchange = e => { state.reviewFilter.fill = e.target.value; renderPharmReview(); };
-  document.getElementById('pr-origin').onchange = e => { state.reviewFilter.origin = e.target.value; renderPharmReview(); };
-  const prMine = document.getElementById('pr-mine'); if (prMine) prMine.onclick = () => { state.reviewFilter = { fill: CURRENT_USER.location, origin: '' }; renderPharmReview(); };
 }
 
 // init
