@@ -1,6 +1,8 @@
 {
   "name": "rxtransfer-tracker-api",
   "version": "1.0.0",
-  "description": "Azure Functions backend for FedEx integration",
-  "dependencies": {}
+  "description": "Azure Functions backend for FedEx integration + Table Storage persistence",
+  "dependencies": {
+    "@azure/data-tables": "^13.2.2"
+  }
 }
