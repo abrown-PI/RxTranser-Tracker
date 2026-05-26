@@ -583,8 +583,8 @@ function renderTransfers() {
   document.getElementById('f-dateFrom').addEventListener('change', e => { state.dateFrom = e.target.value; renderTransfers(); });
   document.getElementById('f-dateTo').addEventListener('change', e => { state.dateTo = e.target.value; renderTransfers(); });
   document.getElementById('f-sortBy').addEventListener('change', e => { state.sortBy = e.target.value; renderTransfers(); });
-  const clr = document.getElementById('clearDateRange');
-  if (clr) clr.onclick = () => { state.dateFrom = ''; state.dateTo = ''; renderTransfers(); };
+  const clearDates = document.getElementById('clearDateRange');
+  if (clearDates) clearDates.onclick = () => { state.dateFrom = ''; state.dateTo = ''; renderTransfers(); };
   root.querySelectorAll('tbody tr').forEach(tr => tr.addEventListener('click', e => {
     if (e.target.classList.contains('print-pick')) return;
     openTransfer(+tr.dataset.id);
