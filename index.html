@@ -238,6 +238,14 @@ if (window.pdfjsLib) {
 // =====================================================================
 const LOCATIONS = ['Erie', 'Lancaster', 'Greenville', 'Houston', 'Tucson', 'Flower Mound', 'Denton', 'Corinth', 'Jamestown', 'Virginia Beach', 'Seminole'];
 
+// Short pharmacy codes used in bulk shipment IDs (BULK-YYYYMMDD-CODE-NNN).
+// Sourced from the canonical PI pharmacy roster.
+const PHARMACY_CODES = {
+  'Erie': 'ER', 'Lancaster': 'CPL', 'Greenville': 'GV', 'Houston': 'HST',
+  'Tucson': 'TUC', 'Flower Mound': 'FM', 'Denton': 'DEN', 'Corinth': 'COR',
+  'Jamestown': 'JMST', 'Virginia Beach': 'VB', 'Seminole': 'SEM'
+};
+
 // Pharmacy mailing addresses for the Ship-to-Pharmacy auto-fill.
 // Cities/states are pre-populated from the canonical roster; street/zip are editable in Admin.
 let PHARMACY_ADDRESSES = {
@@ -439,6 +447,192 @@ function docList(files) {
   if (!files || !files.length) return '<span class="item-sub">— none attached</span>';
   return files.map(f => `<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(f.name)}</a>`).join(', ');
 }
+// Build a bulk shipment ID like BULK-20260529-CPL-001.
+// Sequence is per-day per-destination to make collisions unlikely without a real DB.
+function generateBulkShipmentId(toLocation, dateISO) {
+  const code = PHARMACY_CODES[toLocation] || (toLocation || 'XX').replace(/\s+/g,'').slice(0,3).toUpperCase();
+  const dateStr = (dateISO || new Date().toISOString()).slice(0,10).replace(/-/g,'');
+  // Count existing bulks today to this destination for the sequence
+  const prefix = `BULK-${dateStr}-${code}-`;
+  const existing = SHIPMENTS.filter(s => (s.bulkShipmentId||'').startsWith(prefix)).length;
+  const seq = String(existing + 1).padStart(3, '0');
+  return prefix + seq;
+}
+
+// Generate a single-page printable packing slip for a bulk pharmacy shipment, including a
+// Code128 barcode of the bulk ID for the receiving pharmacy to scan.
+// Uses JsBarcode loaded from CDN if available, falls back to plain text otherwise.
+function printPackingSlip(shipment) {
+  const manifest = shipment.transferIds.map(tid => TRANSFERS.find(t => t.id === tid)).filter(Boolean);
+  const w = window.open('', '_blank');
+  if (!w) { alert('Pop-up blocked — allow pop-ups for this site.'); return; }
+  const today = new Date().toLocaleString();
+  const bulkId = shipment.bulkShipmentId || ('SHIP-' + shipment.id);
+  const addr = PHARMACY_ADDRESSES[shipment.toLocation] || {};
+  const html = `<!DOCTYPE html><html><head><title>Packing Slip — ${escapeHtml(bulkId)}</title>
+<style>
+  @page { size: letter; margin: 0.5in; }
+  body { font-family: 'Arial', sans-serif; color: #111; font-size: 12px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2a6ebb; padding-bottom: 10px; margin-bottom: 14px; }
+  .brand { font-weight: 700; color: #2a6ebb; font-size: 20px; }
+  .brand-sub { font-size: 11px; color: #555; }
+  .doc-title { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; text-align: right; }
+  .bulk-id { font-family: monospace; font-size: 22px; font-weight: 700; letter-spacing: .04em; }
+  .barcode-wrap { text-align: center; margin: 14px 0; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; font-size: 12px; margin-bottom: 14px; }
+  .meta strong { color: #555; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th { background: #2a6ebb; color: white; padding: 6px 8px; text-align: left; font-weight: 600; }
+  td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  .footer { margin-top: 20px; font-size: 10px; color: #666; text-align: center; padding-top: 10px; border-top: 1px solid #e2e8f0; }
+  .receive-box { margin-top: 18px; padding: 12px; background: #fffbeb; border: 1px solid #d97706; border-radius: 6px; font-size: 11px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"><\/script>
+</head><body>
+<div class="header">
+  <div>
+    <div class="brand">Pharmacy Innovations</div>
+    <div class="brand-sub">Inter-Pharmacy Bulk Shipment Packing Slip</div>
+    <div style="margin-top:8px"><strong>From:</strong> ${escapeHtml(shipment.fromLocation)} — Sterile Compounding</div>
+    <div><strong>To:</strong> ${escapeHtml(shipment.toLocation)}${addr.addr1?` · ${escapeHtml(addr.addr1)}, ${escapeHtml(addr.city||'')}, ${escapeHtml(addr.state||'')} ${escapeHtml(addr.zip||'')}`:''}</div>
+  </div>
+  <div>
+    <div class="doc-title">Packing Slip</div>
+    <div style="text-align:right;margin-top:4px;font-size:11px;color:#555">Printed ${escapeHtml(today)}</div>
+  </div>
+</div>
+
+<div class="barcode-wrap">
+  <svg id="barcode"></svg>
+  <div class="bulk-id">${escapeHtml(bulkId)}</div>
+  <div style="font-size:10px;color:#555;margin-top:4px">Scan at receiving pharmacy to check in this box</div>
+</div>
+
+<div class="meta">
+  <div><strong>Carrier:</strong> ${escapeHtml(shipment.carrier||'—')}</div>
+  <div><strong>Tracking:</strong> ${escapeHtml(shipment.trackingNumber||'(label not yet generated)')}</div>
+  <div><strong>Ship Date:</strong> ${escapeHtml(shipment.shipDate||'—')}</div>
+  <div><strong>Total Rx in box:</strong> ${manifest.reduce((n,t) => n + t.items.length, 0)}</div>
+</div>
+
+<table>
+  <thead><tr><th style="width:30%">Patient</th><th>Drug</th><th>Qty</th><th>Origin Rx #</th><th>Receiving Rx #</th><th>Cold</th></tr></thead>
+  <tbody>
+    ${manifest.flatMap(t => t.items.map((i, idx) => `<tr>
+      <td>${idx === 0 ? `<strong>${escapeHtml(t.patientName)}</strong>${t.patientDOB?`<div style="font-size:10px;color:#666">DOB ${escapeHtml(new Date(t.patientDOB).toLocaleDateString())}</div>`:''}` : ''}</td>
+      <td>${escapeHtml(i.drug||'—')}</td>
+      <td>${escapeHtml(i.qty||'')}</td>
+      <td style="font-family:monospace">${escapeHtml(i.rxNumber||'—')}</td>
+      <td style="font-family:monospace">${escapeHtml(i.receivingRxNumber||'—')}</td>
+      <td>${t.coldItem && idx === 0 ? '❄' : ''}</td>
+    </tr>`)).join('')}
+  </tbody>
+</table>
+
+<div class="receive-box">
+  <strong>At receiving pharmacy:</strong> Scan the barcode above (or the carrier label) in the PI Transfer Tracker → Shipments tab to check in the box. Verify each Rx is present and undamaged. Report any issues immediately.
+</div>
+
+<div class="footer">PI Transfer Tracker · Bulk Shipment ${escapeHtml(bulkId)} · ${manifest.length} transfer${manifest.length!==1?'s':''}, ${manifest.reduce((n,t) => n + t.items.length, 0)} Rx</div>
+<script>
+window.onload = function() {
+  try {
+    if (window.JsBarcode) {
+      JsBarcode("#barcode", "${escapeHtml(bulkId)}", { format: "CODE128", width: 2, height: 60, displayValue: false, margin: 4 });
+    }
+  } catch(e){}
+  setTimeout(function(){ window.print(); }, 500);
+};
+<\/script>
+</body></html>`;
+  w.document.write(html);
+  w.document.close();
+}
+
+// Generate a one-page printable Credit Card Authorization Form pre-filled with patient + Rx
+// info from the transfer (or draft). Opens in a new window and triggers print. Patient signs,
+// then the signed paper gets scanned and uploaded back into the transfer via the existing
+// 'Signed Credit Card Authorization Form' file input.
+function printCCAuthForm(source) {
+  const w = window.open('', '_blank');
+  if (!w) { alert('Pop-up blocked — allow pop-ups for this site so the form can print.'); return; }
+  const name = source.patientName || '';
+  const dob = source.patientDOB ? new Date(source.patientDOB).toLocaleDateString() : '';
+  const drugs = (source.items || []).map(i => i.drug).filter(Boolean).join(', ');
+  const tid = source.id || '(new transfer)';
+  const today = new Date().toLocaleDateString();
+  const html = `<!DOCTYPE html><html><head><title>CC Authorization — ${escapeHtml(name)}</title>
+<style>
+  @page { size: letter; margin: 0.6in; }
+  body { font-family: 'Arial', sans-serif; color: #111; font-size: 13px; line-height: 1.5; }
+  .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #2a6ebb; padding-bottom: 8px; margin-bottom: 18px; }
+  .brand { font-weight: 700; color: #2a6ebb; font-size: 18px; }
+  .brand-sub { font-size: 11px; color: #555; }
+  .doc-title { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #2a6ebb; margin: 18px 0 8px; border-bottom: 1px solid #cfdbed; padding-bottom: 3px; }
+  .row { display: flex; gap: 18px; margin-bottom: 10px; }
+  .field { flex: 1; }
+  .field label { display: block; font-size: 10px; text-transform: uppercase; color: #555; letter-spacing: .03em; margin-bottom: 1px; }
+  .field .filled { padding: 3px 0; border-bottom: 1px solid #999; min-height: 18px; font-weight: 600; }
+  .field .blank { padding: 3px 0; border-bottom: 1px solid #999; min-height: 22px; }
+  .acknowledgment { font-size: 12px; line-height: 1.5; background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 12px; border-radius: 4px; margin: 14px 0; }
+  .sig-row { display: flex; gap: 24px; margin-top: 30px; }
+  .sig { flex: 2; }
+  .sig-date { flex: 1; }
+  .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #666; text-align: center; }
+  .small { font-size: 10px; color: #777; }
+</style></head><body>
+<div class="header">
+  <div>
+    <div class="brand">Pharmacy Innovations</div>
+    <div class="brand-sub">Compounding · Inter-Pharmacy Transfer</div>
+  </div>
+  <div style="text-align:right">
+    <div class="doc-title">Credit Card Authorization</div>
+    <div class="small">Transfer ID: ${escapeHtml(String(tid))} · Printed ${escapeHtml(today)}</div>
+  </div>
+</div>
+
+<h2>Patient</h2>
+<div class="row">
+  <div class="field" style="flex:2"><label>Patient Name</label><div class="filled">${escapeHtml(name || '')}</div></div>
+  <div class="field"><label>Date of Birth</label><div class="filled">${escapeHtml(dob || '')}</div></div>
+</div>
+${drugs ? `<div class="row"><div class="field"><label>Prescription(s)</label><div class="filled">${escapeHtml(drugs)}</div></div></div>` : ''}
+
+<h2>Cardholder &amp; Card Information</h2>
+<div class="row">
+  <div class="field" style="flex:2"><label>Cardholder Name (as on card)</label><div class="blank"></div></div>
+  <div class="field"><label>Billing Zip</label><div class="blank"></div></div>
+</div>
+<div class="row">
+  <div class="field" style="flex:3"><label>Credit Card Number</label><div class="blank"></div></div>
+  <div class="field"><label>Expiration (MM / YY)</label><div class="blank"></div></div>
+  <div class="field"><label>CVV</label><div class="blank"></div></div>
+</div>
+
+<div class="acknowledgment">
+  <strong>Authorization.</strong> I authorize Pharmacy Innovations to charge the credit card above for the
+  prescription(s) listed and any associated shipping/handling charges. I understand my card information will be
+  retained on file at the originating pharmacy only as needed to complete this order, in accordance with Pharmacy
+  Innovations' privacy policy.
+</div>
+
+<div class="sig-row">
+  <div class="sig"><label class="small" style="text-transform:uppercase;letter-spacing:.04em;color:#555">Cardholder Signature</label><div class="blank" style="min-height:36px"></div></div>
+  <div class="sig-date"><label class="small" style="text-transform:uppercase;letter-spacing:.04em;color:#555">Date</label><div class="blank" style="min-height:36px"></div></div>
+</div>
+
+<div class="footer">
+  Once signed, scan and upload this form to the transfer in the PI Transfer Tracker — or hand to the billing team.
+  <strong>Do not email or text this form.</strong>
+</div>
+<script>window.onload=function(){setTimeout(function(){window.print();},400);};</script>
+</body></html>`;
+  w.document.write(html);
+  w.document.close();
+}
+
 // Open one or more attached documents in a print window. Each file's dataUrl is rendered;
 // PDFs get embedded, images get an <img>. After load, the browser print dialog opens.
 function printDocs(items) {
@@ -860,6 +1054,10 @@ function renderNewForm() {
         <div style="font-size:13px"><strong>Refill of:</strong> ${escapeHtml(refillSource.patientName)} · ${escapeHtml(refillSource.items.map(i=>i.drug).filter(Boolean).join(', ').slice(0,80))} · originally submitted ${fmtDate(refillSource.createdAt)}</div>
         <button class="btn btn-secondary btn-sm" id="clearRefill">Clear refill link</button>
       </div>` : ''}
+      <div style="background:var(--info-bg);border:1px solid var(--info);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;line-height:1.5">
+        <strong style="color:var(--info)">Save paper:</strong> Enter all patient, shipping, and billing info below — no need for the paper Patient Approval form anymore.
+        <strong>The only time you'll need paper</strong> is the Credit Card Authorization (when billing = Credit Card and the card is NOT on file). The CC form prints a single page that the patient signs and you scan back in.
+      </div>
       <div style="display:flex;gap:18px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-200)">
         <label style="font-size:13px;font-weight:600;color:var(--gray-700)">Transfer Type:</label>
         <label class="checkbox-row"><input type="radio" name="transferType" value="New" ${d.transferType==='New'?'checked':''} /> New Prescription</label>
@@ -896,7 +1094,10 @@ function renderNewForm() {
         <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-ccPaladin" ${d.ccOnFileInPaladin?'checked':''} /><label for="f-ccPaladin">Credit card on file</label></div><div class="hint">Never store the actual card number here.</div></div>
         <div class="form-group full" id="f-ccFormBox" style="display:${d.billing==='CreditCard'?'':'none'}">
           <label>Signed Credit Card Authorization Form ${d.ccOnFileInPaladin?'<span class="hint" style="text-transform:none;font-weight:400">(optional — card already on file)</span>':'<span style="color:var(--danger)">*</span>'}</label>
-
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <button type="button" class="btn btn-secondary btn-sm" id="f-printCCForm">🖨 Print blank CC Auth Form</button>
+            <span class="hint">Print → patient signs → scan → upload below</span>
+          </div>
           <input type="file" id="f-ccForm" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" />
           <div class="hint" id="f-ccForm-name">${d.ccForm?escapeHtml(d.ccForm.name):'Upload the patient-signed authorization form. Billing team will retrieve this from the app.'}</div>
         </div>
@@ -1187,6 +1388,8 @@ function bindDraftInputs() {
   const billingSel = document.getElementById('f-billing');
   const ccBox = document.getElementById('f-ccFormBox');
   if (billingSel && ccBox) billingSel.addEventListener('change', () => { ccBox.style.display = billingSel.value === 'CreditCard' ? '' : 'none'; });
+  const printCCBtn = document.getElementById('f-printCCForm');
+  if (printCCBtn) printCCBtn.addEventListener('click', () => printCCAuthForm(state.draft));
 
   const ccForm = document.getElementById('f-ccForm');
   if (ccForm) ccForm.addEventListener('change', () => {
@@ -1341,7 +1544,7 @@ function renderModal() {
             <div><strong>PK Transfer Sheet${(t.pkSheets&&t.pkSheets.length>1)?'s':''}:</strong> ${docList(t.pkSheets || (t.pkSheet?[t.pkSheet]:[]))}</div>
             <div><strong>Hard Copy Scan${(t.hardCopies&&t.hardCopies.length>1)?'s':''}:</strong> ${docList(t.hardCopies || (t.hardCopy?[t.hardCopy]:[]))}</div>
             <div><strong>Formula Worksheet:</strong> ${t.formula?(t.formula.fromLibrary?`<a href="${escapeHtml(t.formula.link||'#')}" target="_blank" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a> <span class="item-sub">(from ${escapeHtml(t.originLocation)} library)</span>`:`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a>`):'<span class="item-sub">— (not needed)</span>'}</div>
-            ${t.billing==='CreditCard'?`<div><strong>Credit Card Auth Form:</strong> ${t.ccForm?`<a href="#" data-cc="${t.id}" style="color:var(--primary)">${escapeHtml(t.ccForm.name)}</a> <button class="btn btn-secondary btn-sm" data-cc-print="${t.id}" style="margin-left:6px">View / Print for Billing</button>`:(t.ccOnFileInPaladin?'<span class="item-sub">On file</span>':'<span style="color:var(--danger)">Missing</span>')}</div>`:''}
+            ${t.billing==='CreditCard'?`<div><strong>Credit Card Auth Form:</strong> ${t.ccForm?`<a href="#" data-cc="${t.id}" style="color:var(--primary)">${escapeHtml(t.ccForm.name)}</a> <button class="btn btn-secondary btn-sm" data-cc-print="${t.id}" style="margin-left:6px">View / Print Signed Form</button>`:(t.ccOnFileInPaladin?'<span class="item-sub">On file</span>':'<span style="color:var(--danger)">Missing</span>')} <button class="btn btn-secondary btn-sm" id="modal-printCCBlank" style="margin-left:6px">🖨 Print blank form</button></div>`:''}
             ${(t.status==='Canceled' && !t.cancelAcknowledged)?`<div style="margin-top:10px;padding:10px 12px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:6px"><strong style="color:var(--danger)">⚠ This transfer was canceled and has not been acknowledged.</strong> Go to <em>Action Items</em> to acknowledge before this transfer can be shipped.</div>`:''}
           </div>
           </div>
@@ -1389,6 +1592,8 @@ function renderModal() {
     if (!t.ccForm) { alert('No CC form attached.'); return; }
     printDocs([{ title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: t.ccForm.dataUrl }]);
   });
+  const printBlankCCBtn = document.getElementById('modal-printCCBlank');
+  if (printBlankCCBtn) printBlankCCBtn.addEventListener('click', () => printCCAuthForm(t));
   document.getElementById('refillBtn').addEventListener('click', () => {
     state.draft = draftFromRefill(t);
     closeModal();
@@ -1549,7 +1754,7 @@ function renderShipments() {
         <td><strong>${escapeHtml(s.fromLocation)}</strong> → ${escapeHtml(s.toLocation)}</td>
         <td>${escapeHtml(s.destinationType)}</td>
         <td>${escapeHtml(s.carrier)}${s.labelGenerated?' <span class="badge badge-verified" style="font-size:10px">Label auto-generated</span>':''}</td>
-        <td style="font-family:monospace;font-size:12px">${escapeHtml(s.trackingNumber||'—')}</td>
+        <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<div style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</div>`:''}${escapeHtml(s.trackingNumber||'—')}</td>
         <td>${s.transferIds.map(transferSummary).join('<br>')}</td>
         <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>${s.receivedBy?`<div class="item-sub">by ${escapeHtml(s.receivedBy)}</div>`:''}</td>
         <td>${fmtDate(s.shipDate)}</td>
@@ -1577,9 +1782,12 @@ function renderShipments() {
     if (e.key !== 'Enter') return;
     const q = scan.value.trim();
     if (!q) return;
-    const match = SHIPMENTS.find(s => (s.trackingNumber||'').replace(/\s/g,'') === q.replace(/\s/g,''));
+    // Try bulk shipment ID first, then tracking number
+    const qNorm = q.replace(/\s/g,'').toUpperCase();
+    const match = SHIPMENTS.find(s => (s.bulkShipmentId||'').toUpperCase() === qNorm)
+               || SHIPMENTS.find(s => (s.trackingNumber||'').replace(/\s/g,'') === q.replace(/\s/g,''));
     if (match) { scan.value=''; document.getElementById('shipScanHint').textContent = ''; openShipment(match.id); }
-    else { document.getElementById('shipScanHint').textContent = `✗ No shipment with tracking "${q}"`; document.getElementById('shipScanHint').style.color = 'var(--danger)'; }
+    else { document.getElementById('shipScanHint').textContent = `✗ No shipment with that barcode "${q}"`; document.getElementById('shipScanHint').style.color = 'var(--danger)'; }
   });
 }
 
@@ -1683,24 +1891,36 @@ function openCreateShipment() {
     const tracking = document.getElementById('cm-tracking').value.trim();
     if (!picks.length) { alert('Select at least one transfer.'); return; }
     if (!tracking) { alert('Tracking number required.'); return; }
+    const destType = document.getElementById('cm-destType').value;
+    const toLoc = document.getElementById('cm-to').value;
+    const shipDate = new Date().toISOString().slice(0,10);
     const s = {
       id: nextId(),
       fromLocation: document.getElementById('cm-from').value,
-      toLocation: document.getElementById('cm-to').value,
-      destinationType: document.getElementById('cm-destType').value,
+      toLocation: toLoc,
+      destinationType: destType,
       carrier: document.getElementById('cm-carrier').value,
       trackingNumber: tracking, labelGenerated: false,
       status: 'In Transit',
-      shipDate: new Date().toISOString().slice(0,10),
+      shipDate,
       deliveredDate: null, receivedDate: null, receivedBy: null,
       transferIds: picks,
+      // Bulk shipments to a pharmacy get a printable BULK-* ID + packing slip
+      bulkShipmentId: destType === 'Pharmacy' ? generateBulkShipmentId(toLoc, shipDate) : null,
+      isBulk: destType === 'Pharmacy',
       createdAt: new Date().toISOString(), createdBy: CURRENT_USER.name,
       unpacked: {}, damagePhotos: []
     };
     SHIPMENTS.unshift(s);
     picks.forEach(id => { const t = TRANSFERS.find(x => x.id === id); if (t) { t.status = 'Shipped'; t.dateShipped = s.shipDate; t.trackingNumber = s.trackingNumber; } });
     close();
-    alert('Shipment created. (Mock — would notify ' + s.toLocation + ' via Teams webhook with manifest.)');
+    if (s.isBulk) {
+      if (confirm(`Bulk shipment ${s.bulkShipmentId} created with ${picks.length} transfer(s). Print packing slip now?`)) {
+        printPackingSlip(s);
+      }
+    } else {
+      alert('Shipment created. (Mock — would notify ' + s.toLocation + ' via Teams webhook with manifest.)');
+    }
     render();
   };
   renderUI();
@@ -1719,7 +1939,7 @@ function openShipment(id) {
   const allUnpacked = allItems.length > 0 && unpackedCount === allItems.length;
 
   root.innerHTML = `<div class="modal-overlay" id="smOverlay"><div class="modal">
-    <div class="modal-header"><div><div class="modal-title">Shipment ${escapeHtml(s.trackingNumber)}</div><div class="item-sub">${escapeHtml(s.fromLocation)} → ${escapeHtml(s.toLocation)} · ${escapeHtml(s.carrier)}</div></div><button class="modal-close" id="smClose">&times;</button></div>
+    <div class="modal-header"><div><div class="modal-title">${s.bulkShipmentId?escapeHtml(s.bulkShipmentId):'Shipment ' + escapeHtml(s.trackingNumber)}</div><div class="item-sub">${escapeHtml(s.fromLocation)} → ${escapeHtml(s.toLocation)} · ${escapeHtml(s.carrier)}${s.bulkShipmentId?` · Tracking ${escapeHtml(s.trackingNumber||'(pending)')}`:''}</div></div><div style="display:flex;gap:8px;align-items:center">${s.isBulk?'<button class="btn btn-secondary btn-sm" id="reprintSlip">🖨 Reprint Packing Slip</button>':''}<button class="modal-close" id="smClose">&times;</button></div></div>
     <div class="modal-body">
       <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
         <span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>
@@ -1771,6 +1991,8 @@ function openShipment(id) {
   const close = () => root.innerHTML = '';
   document.getElementById('smClose').onclick = close;
   document.getElementById('smCloseBtn').onclick = close;
+  const reprintBtn = document.getElementById('reprintSlip');
+  if (reprintBtn) reprintBtn.onclick = () => printPackingSlip(s);
   document.getElementById('smOverlay').onclick = e => { if (e.target.id === 'smOverlay') close(); };
   root.querySelectorAll('[data-open-t]').forEach(b => b.onclick = () => { close(); openTransfer(+b.dataset['openT']); });
   root.querySelectorAll('[data-unpack]').forEach(cb => cb.onchange = e => { s.unpacked[+cb.dataset.unpack] = e.target.checked; openShipment(s.id); });
@@ -2353,12 +2575,13 @@ function scoreMatch(fedexShip, transfer) {
     if (transfer.shipZip && r.zip && transfer.shipZip === r.zip) score += 10;
     if (transfer.shipCity && r.city && transfer.shipCity.toUpperCase() === r.city.toUpperCase()) score += 5;
   }
-  // Date proximity — FedEx ship date should be within a week of when our transfer entered "Ready to Ship" or "In Progress"
+  // Date proximity — tighter window for pharmacy bulk ships (weekly), wider for patient
   const fDate = fedexShip.shipDate ? new Date(fedexShip.shipDate) : null;
   const tDate = transfer.createdAt ? new Date(transfer.createdAt) : null;
   if (fDate && tDate) {
     const daysOff = Math.abs(fDate - tDate) / 86400000;
-    if (daysOff <= 14) score += Math.max(0, 10 - daysOff);
+    const window = transfer.shipTo === 'Pharmacy' ? 3 : 10;
+    if (daysOff <= window) score += Math.max(0, 10 - daysOff);
   }
   return score;
 }
