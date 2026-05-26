@@ -494,16 +494,25 @@ function updateSLABadge() {
 
 function renderTransfers() {
   const root = document.getElementById('view-transfers');
+  if (!state.sortBy) state.sortBy = 'dateDesc';
   const filtered = visibleTransfers().filter(t => {
     if (state.filterStatus && t.status !== state.filterStatus) return false;
     if (state.filterOrigin && t.originLocation !== state.filterOrigin) return false;
     if (state.filterFill && t.fillLocation !== state.filterFill) return false;
+    if (state.dateFrom) { if (!t.createdAt || t.createdAt.slice(0,10) < state.dateFrom) return false; }
+    if (state.dateTo) { if (!t.createdAt || t.createdAt.slice(0,10) > state.dateTo) return false; }
     if (state.search) {
       const q = state.search.toLowerCase();
-      const hay = (t.patientName + ' ' + t.trackingNumber + ' ' + t.items.map(i=>i.drug+' '+i.rxNumber).join(' ')).toLowerCase();
+      const hay = (t.patientName + ' ' + t.trackingNumber + ' ' + t.items.map(i=>i.drug+' '+i.rxNumber+' '+(i.receivingRxNumber||'')).join(' ')).toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
+  });
+  filtered.sort((a,b) => {
+    if (state.sortBy === 'patient') return (a.patientName||'').localeCompare(b.patientName||'');
+    if (state.sortBy === 'patientDesc') return (b.patientName||'').localeCompare(a.patientName||'');
+    if (state.sortBy === 'dateAsc') return new Date(a.createdAt) - new Date(b.createdAt);
+    return new Date(b.createdAt) - new Date(a.createdAt); // dateDesc default
   });
 
   if (!state.printSelection) state.printSelection = new Set();
@@ -522,6 +531,18 @@ function renderTransfers() {
       <select id="f-status"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===state.filterStatus?'selected':''}>${s}</option>`).join('')}</select>
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
+      <label style="font-size:12px;color:var(--gray-600)">From</label>
+      <input type="date" id="f-dateFrom" value="${escapeHtml(state.dateFrom||'')}" />
+      <label style="font-size:12px;color:var(--gray-600)">To</label>
+      <input type="date" id="f-dateTo" value="${escapeHtml(state.dateTo||'')}" />
+      ${(state.dateFrom||state.dateTo)?'<button class="btn btn-secondary btn-sm" id="clearDateRange">Clear dates</button>':''}
+      <label style="font-size:12px;color:var(--gray-600);margin-left:8px">Sort</label>
+      <select id="f-sortBy">
+        <option value="dateDesc" ${state.sortBy==='dateDesc'?'selected':''}>Transfer date (newest)</option>
+        <option value="dateAsc" ${state.sortBy==='dateAsc'?'selected':''}>Transfer date (oldest)</option>
+        <option value="patient" ${state.sortBy==='patient'?'selected':''}>Patient name (A→Z)</option>
+        <option value="patientDesc" ${state.sortBy==='patientDesc'?'selected':''}>Patient name (Z→A)</option>
+      </select>
       <div style="flex:1"></div>
       <label class="checkbox-row" style="font-size:12px"><input type="checkbox" id="selectAllPrint" /> Select all visible for print</label>
     </div>
@@ -530,7 +551,7 @@ function renderTransfers() {
       <thead><tr>
         <th style="width:30px"></th>
         <th>Patient</th><th>From → Fill</th><th>Ship To</th><th>Items</th><th>Status</th><th>SLA</th>
-        <th>Tx Emailed</th><th>Ship Date</th><th>Tracking</th><th>Submitted</th>
+        <th>Transfer Date</th><th>Ship Date</th><th>Tracking</th><th>Submitted</th>
       </tr></thead>
       <tbody>
         ${filtered.map(t => {
@@ -546,10 +567,10 @@ function renderTransfers() {
             <td>${t.items.length}</td>
             <td><span class="badge ${STATUS_BADGE[t.status]}">${escapeHtml(t.status)}</span></td>
             <td>${slaCell}</td>
-            <td>${fmtDate(t.txEmailedDate)}</td>
+            <td>${fmtDate(t.createdAt)}</td>
             <td>${fmtDate(t.dateShipped)}</td>
             <td>${escapeHtml(t.trackingNumber||'—')}</td>
-            <td>${escapeHtml(t.submittedBy)}<div class="item-sub">${fmtDate(t.createdAt)}</div></td>
+            <td>${escapeHtml(t.submittedBy)}</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -559,6 +580,11 @@ function renderTransfers() {
   document.getElementById('f-status').addEventListener('change', e => { state.filterStatus = e.target.value; renderTransfers(); });
   document.getElementById('f-origin').addEventListener('change', e => { state.filterOrigin = e.target.value; renderTransfers(); });
   document.getElementById('f-fill').addEventListener('change', e => { state.filterFill = e.target.value; renderTransfers(); });
+  document.getElementById('f-dateFrom').addEventListener('change', e => { state.dateFrom = e.target.value; renderTransfers(); });
+  document.getElementById('f-dateTo').addEventListener('change', e => { state.dateTo = e.target.value; renderTransfers(); });
+  document.getElementById('f-sortBy').addEventListener('change', e => { state.sortBy = e.target.value; renderTransfers(); });
+  const clr = document.getElementById('clearDateRange');
+  if (clr) clr.onclick = () => { state.dateFrom = ''; state.dateTo = ''; renderTransfers(); };
   root.querySelectorAll('tbody tr').forEach(tr => tr.addEventListener('click', e => {
     if (e.target.classList.contains('print-pick')) return;
     openTransfer(+tr.dataset.id);
@@ -816,11 +842,19 @@ function renderAdmin() {
 // =====================================================================
 function renderNewForm() {
   const root = document.getElementById('view-new');
+  if (!state.newMode) state.newMode = 'single';
+  if (state.newMode === 'bulk') return renderBulkUpload();
   if (!state.draft) state.draft = freshDraft();
   const d = state.draft;
   const refillSource = d.refillOfId ? TRANSFERS.find(x => x.id === d.refillOfId) : null;
   root.innerHTML = `
-    <div class="page-header"><div class="page-title">${d.transferType === 'Refill' ? 'Refill Transfer Request' : 'New Transfer Request'}</div></div>
+    <div class="page-header">
+      <div class="page-title">${d.transferType === 'Refill' ? 'Refill Transfer Request' : 'New Transfer Request'}</div>
+      <div style="display:flex;gap:0;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden">
+        <button class="${state.newMode==='single'?'btn btn-primary':'btn btn-secondary'}" id="modeSingle" style="border-radius:0;border:0">Single Transfer</button>
+        <button class="${state.newMode==='bulk'?'btn btn-primary':'btn btn-secondary'}" id="modeBulk" style="border-radius:0;border:0">Bulk Upload</button>
+      </div>
+    </div>
     <div class="card"><div class="card-body">
       ${refillSource ? `<div style="background:var(--primary-bg);border:1px solid var(--primary-light);padding:10px 14px;border-radius:6px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div style="font-size:13px"><strong>Refill of:</strong> ${escapeHtml(refillSource.patientName)} · ${escapeHtml(refillSource.items.map(i=>i.drug).filter(Boolean).join(', ').slice(0,80))} · originally submitted ${fmtDate(refillSource.createdAt)}</div>
@@ -926,6 +960,8 @@ function renderNewForm() {
   document.querySelectorAll('input[name=transferType]').forEach(r => r.onchange = e => { state.draft.transferType = e.target.value; });
   const clr = document.getElementById('clearRefill');
   if (clr) clr.onclick = () => { state.draft.refillOfId = null; renderNewForm(); };
+  document.getElementById('modeSingle').onclick = () => { state.newMode = 'single'; renderNewForm(); };
+  document.getElementById('modeBulk').onclick = () => { state.newMode = 'bulk'; renderNewForm(); };
 }
 
 // =====================================================================
@@ -1541,21 +1577,39 @@ function renderShipments() {
 
 function openCreateShipment() {
   const root = document.getElementById('modalRoot');
+  // Sort state for the Transfers-to-Include picker (persisted on the modal element so it survives renderUI calls)
+  if (!openCreateShipment._sort) openCreateShipment._sort = 'patient';
   const renderUI = () => {
     const destType = document.getElementById('cm-destType')?.value || 'Pharmacy';
     const toLoc = document.getElementById('cm-to')?.value || LOCATIONS[0];
-    const availableTransfers = visibleTransfers().filter(t => {
+    let availableTransfers = visibleTransfers().filter(t => {
       if (SHIPMENTS.some(s => s.transferIds.includes(t.id) && s.status !== 'Canceled')) return false;
       if (['Delivered','Canceled','Shipped'].includes(t.status)) return false;
       if (t.canceledAt && !t.cancelAcknowledged) return false;
       if (destType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === toLoc;
       return t.shipTo === 'Patient';
     });
+    const sortBy = openCreateShipment._sort;
+    availableTransfers.sort((a,b) => {
+      if (sortBy === 'patient') return (a.patientName||'').localeCompare(b.patientName||'');
+      if (sortBy === 'dateAsc') return new Date(a.createdAt) - new Date(b.createdAt);
+      return new Date(b.createdAt) - new Date(a.createdAt); // dateDesc default
+    });
     const box = document.getElementById('cm-transfersBox');
     if (!box) return;
     box.innerHTML = `
-      <div style="margin-bottom:6px;font-size:13px;color:var(--gray-600)">
-        ${destType === 'Pharmacy' ? `Open transfers headed back to <strong>${escapeHtml(toLoc)}</strong>:` : 'Open transfers shipping directly to patients:'}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;flex-wrap:wrap">
+        <div style="font-size:13px;color:var(--gray-600)">
+          ${destType === 'Pharmacy' ? `Open transfers headed back to <strong>${escapeHtml(toLoc)}</strong>:` : 'Open transfers shipping directly to patients:'}
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:12px;color:var(--gray-600)">Sort by:</label>
+          <select id="cm-sort" style="font-size:12px;padding:4px 6px">
+            <option value="patient" ${sortBy==='patient'?'selected':''}>Patient name</option>
+            <option value="dateDesc" ${sortBy==='dateDesc'?'selected':''}>Transfer date (newest first)</option>
+            <option value="dateAsc" ${sortBy==='dateAsc'?'selected':''}>Transfer date (oldest first)</option>
+          </select>
+        </div>
       </div>
       ${availableTransfers.length === 0 ? '<div class="item-sub">No open transfers match this destination.</div>' : `
       <div style="max-height:300px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:6px">
@@ -1565,6 +1619,7 @@ function openCreateShipment() {
             <div style="flex:1">
               <strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}
               <div class="item-sub">${t.items.length} Rx · ${t.items.map(i=>escapeHtml(i.drug)).join(', ').slice(0,80)}</div>
+              <div class="item-sub">Transfer date: ${fmtDate(t.createdAt)}</div>
             </div>
           </div>`;
         }).join('')}
@@ -1573,6 +1628,8 @@ function openCreateShipment() {
     `;
     const sa = document.getElementById('cm-selectAll');
     if (sa) sa.onclick = e => { e.preventDefault(); document.querySelectorAll('.cm-t').forEach(c => c.checked = true); };
+    const sortSel = document.getElementById('cm-sort');
+    if (sortSel) sortSel.onchange = e => { openCreateShipment._sort = e.target.value; renderUI(); };
   };
 
   root.innerHTML = `<div class="modal-overlay" id="cmOverlay"><div class="modal" style="max-width:720px">
@@ -1749,8 +1806,254 @@ function openShipment(id) {
 }
 
 // =====================================================================
-// + Refill tab — search for an existing transfer, review defaults, pick which Rx to refill
+// Bulk upload + review queue
+// Each uploaded PDF becomes one draft entry in state.bulkQueue. The user
+// reviews/edits each, then approves or rejects. Approved drafts become
+// real transfers; the queue persists in memory until cleared.
 // =====================================================================
+function bulkDraftStatus(b) {
+  if (b.parseError) return 'failed';
+  const d = b.draft;
+  if (!d.patientName || !d.pkSheets.length) return 'partial';
+  // Items considered "complete" if at least one row has an Rx# or drug
+  if (!d.items.some(i => i.rxNumber || i.drug)) return 'partial';
+  return 'ok';
+}
+function bulkDraftMissing(b) {
+  const m = [];
+  const d = b.draft;
+  if (!d.patientName) m.push('patient name');
+  if (!d.pkSheets.length) m.push('PK sheet upload');
+  if (!d.items.some(i => i.rxNumber || i.drug)) m.push('at least one Rx');
+  if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) m.push('CC auth form (or check on-file)');
+  return m;
+}
+
+function renderBulkUpload() {
+  const root = document.getElementById('view-new');
+  if (!state.bulkQueue) state.bulkQueue = [];
+  const q = state.bulkQueue;
+  const editing = q.find(b => b.id === state.bulkEditingId);
+
+  if (editing) return renderBulkEditor(editing);
+
+  const stats = { ok: 0, partial: 0, failed: 0 };
+  q.forEach(b => stats[bulkDraftStatus(b)]++);
+
+  root.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Bulk Upload Transfers</div>
+      <div style="display:flex;gap:0;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden">
+        <button class="${state.newMode==='single'?'btn btn-primary':'btn btn-secondary'}" id="modeSingle" style="border-radius:0;border:0">Single Transfer</button>
+        <button class="${state.newMode==='bulk'?'btn btn-primary':'btn btn-secondary'}" id="modeBulk" style="border-radius:0;border:0">Bulk Upload</button>
+      </div>
+    </div>
+
+    <div class="card"><div class="card-body">
+      <p style="color:var(--gray-600);margin-bottom:14px">Upload multiple PK transfer sheet PDFs at once. Each PDF becomes a draft transfer that you can review, edit, and approve. Drafts with missing required fields will be flagged for review.</p>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+        <label class="btn btn-primary" style="cursor:pointer;margin:0">
+          📁 Select PDFs to upload
+          <input type="file" id="bulk-pick" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" multiple style="display:none" />
+        </label>
+        <div class="item-sub" id="bulk-pickHint">Hold Ctrl (Windows) or Cmd (Mac) to pick multiple files</div>
+      </div>
+    </div></div>
+
+    ${q.length === 0 ? '' : `
+    <div class="page-header" style="margin-top:24px">
+      <div class="page-title" style="font-size:18px">Review Queue <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${q.length})</span></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="badge badge-shipped">✓ ${stats.ok} ready</span>
+        <span class="badge badge-progress">⚠ ${stats.partial} needs review</span>
+        ${stats.failed?`<span class="badge badge-canceled">✗ ${stats.failed} failed</span>`:''}
+        <button class="btn btn-primary" id="bulk-approveAll" ${stats.ok===0?'disabled style="opacity:.5;cursor:not-allowed"':''}>Approve all ${stats.ok} ready</button>
+        <button class="btn btn-secondary btn-sm" id="bulk-clearAll">Clear queue</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0">
+      <table style="box-shadow:none;font-size:13px">
+        <thead><tr><th>Status</th><th>Patient</th><th>Rx #</th><th>Drug</th><th>From → Fill</th><th>Ship To</th><th>Source PDF</th><th></th></tr></thead>
+        <tbody>
+          ${q.map(b => {
+            const s = bulkDraftStatus(b);
+            const d = b.draft;
+            const firstItem = d.items[0] || {};
+            const badge = s === 'ok' ? '<span class="badge badge-shipped">✓ Ready</span>' : s === 'partial' ? '<span class="badge badge-progress">⚠ Needs Review</span>' : '<span class="badge badge-canceled">✗ Failed</span>';
+            return `<tr ${b.dupGroup?'style="background:var(--info-bg)"':''}>
+              <td>${badge}</td>
+              <td><strong>${escapeHtml(d.patientName||'(no name)')}</strong>${b.dupGroup?`<div class="item-sub" style="color:var(--info)">Group ${b.dupGroup} — possible same patient</div>`:''}</td>
+              <td>${escapeHtml(firstItem.rxNumber||'—')}${d.items.length>1?` <span class="item-sub">+${d.items.length-1}</span>`:''}</td>
+              <td>${escapeHtml(firstItem.drug||'—')}</td>
+              <td>${escapeHtml(d.originLocation)} → ${escapeHtml(d.fillLocation)}</td>
+              <td>${escapeHtml(d.shipTo)}</td>
+              <td><span class="item-sub" style="font-size:11px">${escapeHtml((b.sourceFile||'').slice(0,30))}${(b.sourceFile||'').length>30?'…':''}</span></td>
+              <td style="white-space:nowrap">
+                <button class="btn btn-secondary btn-sm" data-edit="${b.id}">Edit</button>
+                ${s==='ok'?`<button class="btn btn-primary btn-sm" data-approve="${b.id}">Approve</button>`:''}
+                <button class="btn btn-secondary btn-sm" data-reject="${b.id}" title="Remove from queue">✗</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div></div>
+    `}
+  `;
+  document.getElementById('modeSingle').onclick = () => { state.newMode = 'single'; renderNewForm(); };
+  document.getElementById('modeBulk').onclick = () => { state.newMode = 'bulk'; renderNewForm(); };
+  document.getElementById('bulk-pick').onchange = e => processBulkFiles([...e.target.files]);
+
+  root.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => { state.bulkEditingId = +b.dataset.edit; renderNewForm(); });
+  root.querySelectorAll('[data-reject]').forEach(b => b.onclick = () => {
+    state.bulkQueue = state.bulkQueue.filter(x => x.id !== +b.dataset.reject);
+    renderNewForm();
+  });
+  root.querySelectorAll('[data-approve]').forEach(b => b.onclick = () => approveBulkDraft(+b.dataset.approve));
+  const approveAll = document.getElementById('bulk-approveAll');
+  if (approveAll) approveAll.onclick = () => {
+    const ready = state.bulkQueue.filter(b => bulkDraftStatus(b) === 'ok');
+    ready.forEach(b => approveBulkDraft(b.id, true));
+    alert(`Approved ${ready.length} transfer(s) into the tracker.`);
+    renderNewForm();
+    render();
+  };
+  const clearAll = document.getElementById('bulk-clearAll');
+  if (clearAll) clearAll.onclick = () => {
+    if (state.bulkQueue.length && !confirm(`Clear all ${state.bulkQueue.length} pending drafts? Nothing will be saved.`)) return;
+    state.bulkQueue = [];
+    renderNewForm();
+  };
+}
+
+async function processBulkFiles(rawFiles) {
+  const hint = document.getElementById('bulk-pickHint');
+  if (hint) hint.textContent = `Processing ${rawFiles.length} file(s)…`;
+  let _bulkId = (state.bulkQueue || []).reduce((m,b) => Math.max(m, b.id), 1000);
+  const newDrafts = [];
+  for (const file of rawFiles) {
+    const draft = freshDraft();
+    draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
+    let parseError = null;
+    let parsed = null;
+    if (/\.pdf$/i.test(file.name)) {
+      const text = await extractPdfText(file);
+      if (text) parsed = parseTransferSheet(text); else parseError = 'Could not read PDF text — may be an image-only scan.';
+    } else {
+      parseError = 'Not a PDF — auto-parse not supported for this file type.';
+    }
+    if (parsed) {
+      if (parsed.patientName) draft.patientName = parsed.patientName;
+      if (parsed.patientDOB) draft.patientDOB = parsed.patientDOB;
+      if (parsed.shipAddr1) draft.shipAddr1 = parsed.shipAddr1;
+      if (parsed.shipCity) draft.shipCity = parsed.shipCity;
+      if (parsed.shipState) draft.shipState = parsed.shipState;
+      if (parsed.shipZip) draft.shipZip = parsed.shipZip;
+      const first = draft.items[0];
+      if (parsed.rxNumber) first.rxNumber = parsed.rxNumber;
+      if (parsed.drug) first.drug = parsed.drug;
+      if (parsed.qty) first.qty = parsed.qty;
+    }
+    newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError, parsed });
+  }
+  // Detect same-patient/same-day groups within this batch
+  const today = new Date().toISOString().slice(0,10);
+  const groupKey = (d) => `${(d.patientName||'').toLowerCase().trim()}|${today}`;
+  const groups = {};
+  newDrafts.forEach(b => {
+    const k = groupKey(b.draft);
+    if (!b.draft.patientName) return;
+    (groups[k] = groups[k] || []).push(b);
+  });
+  let nextGroup = (state.bulkQueue||[]).reduce((m,b) => Math.max(m, b.dupGroup||0), 0);
+  Object.values(groups).forEach(grp => {
+    if (grp.length > 1) {
+      nextGroup++;
+      grp.forEach(b => b.dupGroup = nextGroup);
+    }
+  });
+  if (!state.bulkQueue) state.bulkQueue = [];
+  state.bulkQueue.push(...newDrafts);
+  // Prompt for merging within groups
+  const newGroups = Object.values(groups).filter(g => g.length > 1);
+  if (newGroups.length) {
+    const msg = newGroups.map(g => `${g[0].draft.patientName} — ${g.length} sheets`).join('\n');
+    if (confirm(`Found ${newGroups.length} possible same-patient/same-day group(s) in this batch:\n\n${msg}\n\nCombine each group into a single multi-Rx transfer?`)) {
+      newGroups.forEach(g => {
+        const keep = g[0];
+        const extras = g.slice(1);
+        extras.forEach(b => {
+          // Move b's PK sheet + items into keep
+          keep.draft.pkSheets.push(...b.draft.pkSheets);
+          b.draft.items.forEach(it => {
+            if (it.rxNumber || it.drug) keep.draft.items.push(it);
+          });
+          state.bulkQueue = state.bulkQueue.filter(x => x.id !== b.id);
+        });
+        // Clean trailing empty item rows
+        keep.draft.items = keep.draft.items.filter((it, idx) => idx === 0 || it.rxNumber || it.drug);
+      });
+    }
+  }
+  renderNewForm();
+}
+
+function approveBulkDraft(id, skipAlert) {
+  const b = state.bulkQueue.find(x => x.id === id);
+  if (!b) return;
+  if (bulkDraftStatus(b) !== 'ok') { alert('Draft has missing required fields. Edit and complete it first.'); return; }
+  const t = {
+    ...b.draft,
+    id: nextId(),
+    title: `${b.draft.patientName} — ${new Date().toLocaleDateString()}`,
+    txEmailedDate: null, dateReceivedAtErie: null,
+    patientStatus: 'Pending', dateShipped: null, trackingNumber: '', paid: 'Pending', dateReceivedByPatient: null,
+    status: 'New',
+    submittedBy: CURRENT_USER.name, assignedTo: null,
+    createdAt: new Date().toISOString(),
+    comments: []
+  };
+  TRANSFERS.unshift(t);
+  state.bulkQueue = state.bulkQueue.filter(x => x.id !== id);
+  if (!skipAlert) {
+    alert(`Approved: ${t.patientName} added to transfers.`);
+    renderNewForm();
+    render();
+  }
+}
+
+// Editor for a single bulk-queue draft. Point state.draft at the queue's draft object so
+// the existing form binding code mutates the queue entry directly. Don't restore state.draft
+// until the user clicks Back/Save — otherwise input handlers (which read state.draft at fire
+// time) would mutate the wrong object.
+function renderBulkEditor(b) {
+  state.draft = b.draft;
+  state.newMode = 'single';
+  renderNewForm();
+  state.newMode = 'bulk';
+  const root = document.getElementById('view-new');
+  const card = root.querySelector('.card');
+  if (card) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'background:var(--warning-bg);border:1px solid var(--warning);padding:10px 14px;border-radius:6px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px';
+    const missing = bulkDraftMissing(b);
+    banner.innerHTML = `
+      <div>
+        <strong>Editing bulk-upload draft</strong>
+        <div class="item-sub">Source: ${escapeHtml(b.sourceFile)}${b.parseError?` · <span style="color:var(--danger)">${escapeHtml(b.parseError)}</span>`:''}</div>
+        ${missing.length?`<div class="item-sub" style="color:var(--warning)">Missing: ${missing.join(', ')}</div>`:''}
+      </div>
+      <button class="btn btn-secondary btn-sm" id="bulk-back">← Back to queue</button>
+    `;
+    card.parentNode.insertBefore(banner, card);
+    const exitEdit = () => { state.draft = null; state.bulkEditingId = null; renderNewForm(); };
+    document.getElementById('bulk-back').onclick = exitEdit;
+    const submitBtn = document.getElementById('submitDraft');
+    if (submitBtn) { submitBtn.textContent = 'Save & return to queue'; submitBtn.onclick = exitEdit; }
+    const resetBtn = document.getElementById('resetDraft');
+    if (resetBtn) resetBtn.style.display = 'none';
+  }
+}
 function renderRefillTab() {
   if (!state.refill) state.refill = { query: '', searchBy: 'patient', pickedId: null, includedItems: {}, editingDefaults: false };
   const root = document.getElementById('view-refill');
