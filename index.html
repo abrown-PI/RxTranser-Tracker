@@ -443,6 +443,15 @@ function bindGlobalSearch() {
 // =====================================================================
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtDate(s) { if (!s) return '—'; const d = new Date(s); if (isNaN(d)) return s; return d.toLocaleDateString(); }
+const BILLING_OPTIONS = [
+  ['HealNow', 'HealNow'],
+  ['CreditCard', 'Credit Card'],
+  ['PayInStore', 'Pay In Store']
+];
+function billingLabel(value) {
+  const found = BILLING_OPTIONS.find(([v]) => v === value);
+  return found ? found[1] : (value || '');
+}
 function docList(files) {
   if (!files || !files.length) return '<span class="item-sub">— none attached</span>';
   return files.map(f => `<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(f.name)}</a>`).join(', ');
@@ -1094,14 +1103,16 @@ function renderNewForm() {
   if (state.newMode === 'bulk') return renderBulkUpload();
   if (!state.draft) state.draft = freshDraft();
   const d = state.draft;
+  const isEditing = !!state.editingTransferId;
   const refillSource = d.refillOfId ? TRANSFERS.find(x => x.id === d.refillOfId) : null;
   root.innerHTML = `
     <div class="page-header">
-      <div class="page-title">${d.transferType === 'Refill' ? 'Refill Transfer Request' : 'New Transfer Request'}</div>
+      <div class="page-title">${isEditing ? `Edit Transfer — ${escapeHtml(d.patientName||'(unnamed)')}` : (d.transferType === 'Refill' ? 'Refill Transfer Request' : 'New Transfer Request')}</div>
+      ${isEditing ? `<button class="btn btn-secondary btn-sm" id="cancelEdit">Cancel edit</button>` : `
       <div style="display:flex;gap:0;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden">
         <button class="${state.newMode==='single'?'btn btn-primary':'btn btn-secondary'}" id="modeSingle" style="border-radius:0;border:0">Single Transfer</button>
         <button class="${state.newMode==='bulk'?'btn btn-primary':'btn btn-secondary'}" id="modeBulk" style="border-radius:0;border:0">Bulk Upload</button>
-      </div>
+      </div>`}
     </div>
     <div class="card"><div class="card-body">
       ${refillSource ? `<div style="background:var(--primary-bg);border:1px solid var(--primary-light);padding:10px 14px;border-radius:6px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
@@ -1144,7 +1155,7 @@ function renderNewForm() {
 
       <div class="section"><div class="section-title">Billing</div>
       <div class="form-grid">
-        <div class="form-group"><label>Billing Method</label><select id="f-billing">${['HealNow','CreditCard','PayInStore'].map(s=>`<option ${s===d.billing?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Billing Method</label><select id="f-billing">${BILLING_OPTIONS.map(([v,l])=>`<option value="${v}" ${v===d.billing?'selected':''}>${l}</option>`).join('')}</select></div>
         <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-ccPaladin" ${d.ccOnFileInPaladin?'checked':''} /><label for="f-ccPaladin">Credit card on file</label></div><div class="hint">Never store the actual card number here.</div></div>
         <div class="form-group full" id="f-ccFormBox" style="display:${d.billing==='CreditCard'?'':'none'}">
           <label>Signed Credit Card Authorization Form ${d.ccOnFileInPaladin?'<span class="hint" style="text-transform:none;font-weight:400">(optional — card already on file)</span>':'<span style="color:var(--danger)">*</span>'}</label>
@@ -1190,6 +1201,11 @@ function renderNewForm() {
       </div></div>
 
       <div class="section">
+        <div class="section-title">Transfer Notes <span class="hint" style="text-transform:none;font-weight:400">(optional — anything the receiving team should know)</span></div>
+        <textarea id="f-transferNotes" placeholder="Special instructions, urgency, billing notes, anything the other pharmacy needs to know..." style="width:100%;padding:9px 10px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;min-height:60px">${escapeHtml(d.transferNotes||'')}</textarea>
+      </div>
+
+      <div class="section">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid var(--primary-bg)">
         <div class="section-title" style="border:none;padding:0;margin:0">Items / Prescriptions</div>
         <div style="display:flex;align-items:center;gap:10px;background:var(--primary-bg);padding:6px 14px;border-radius:6px">
@@ -1202,21 +1218,36 @@ function renderNewForm() {
       </div>
 
       <div class="section" style="margin-top:24px;display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn btn-secondary" id="resetDraft">Reset</button>
-        <button class="btn btn-primary" id="submitDraft">Submit transfer</button>
+        <button class="btn btn-secondary" id="resetDraft">${isEditing?'Discard changes':'Reset'}</button>
+        <button class="btn btn-primary" id="submitDraft">${isEditing?'Save changes':'Submit transfer'}</button>
       </div>
     </div></div>
   `;
   renderDraftItems();
   bindDraftInputs();
   document.getElementById('addItemBtn').addEventListener('click', () => { state.draft.items.push(freshItem()); renderDraftItems(); });
-  document.getElementById('resetDraft').addEventListener('click', () => { state.draft = freshDraft(); renderNewForm(); });
+  document.getElementById('resetDraft').addEventListener('click', () => {
+    if (state.editingTransferId) {
+      if (!confirm('Discard your edits?')) return;
+      state.draft = null; state.editingTransferId = null;
+      document.querySelector('.tab[data-tab=transfers]').click();
+    } else {
+      state.draft = freshDraft(); renderNewForm();
+    }
+  });
   document.getElementById('submitDraft').addEventListener('click', submitDraft);
   document.querySelectorAll('input[name=transferType]').forEach(r => r.onchange = e => { state.draft.transferType = e.target.value; });
   const clr = document.getElementById('clearRefill');
   if (clr) clr.onclick = () => { state.draft.refillOfId = null; renderNewForm(); };
-  document.getElementById('modeSingle').onclick = () => { state.newMode = 'single'; renderNewForm(); };
-  document.getElementById('modeBulk').onclick = () => { state.newMode = 'bulk'; renderNewForm(); };
+  const cancelEdit = document.getElementById('cancelEdit');
+  if (cancelEdit) cancelEdit.onclick = () => {
+    state.draft = null; state.editingTransferId = null;
+    document.querySelector('.tab[data-tab=transfers]').click();
+  };
+  const ms = document.getElementById('modeSingle');
+  if (ms) ms.onclick = () => { state.newMode = 'single'; renderNewForm(); };
+  const mb = document.getElementById('modeBulk');
+  if (mb) mb.onclick = () => { state.newMode = 'bulk'; renderNewForm(); };
 }
 
 // =====================================================================
@@ -1348,7 +1379,8 @@ function freshDraft() {
     coldItem: false,
     anticipatedShipDate: '',
     pkSheets: [], formula: null, hardCopies: [],
-    items: [freshItem()]
+    items: [freshItem()],
+    transferNotes: ''
   };
 }
 
@@ -1417,7 +1449,7 @@ function renderDraftItems() {
 }
 
 function bindDraftInputs() {
-  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate'];
+  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes'];
   fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => state.draft[f] = el.value); });
 
   // Ship-to-Pharmacy auto-fill: when user picks Pharmacy or changes origin, fill ship address from origin pharmacy
@@ -1520,6 +1552,31 @@ function submitDraft() {
   if (!d.pkSheets || !d.pkSheets.length) missing.push('At least one PK Transfer Sheet upload');
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "Credit card on file")');
   if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
+
+  // Edit mode: update the existing transfer in place
+  if (state.editingTransferId) {
+    const existing = TRANSFERS.find(x => x.id === state.editingTransferId);
+    if (!existing) { alert('Original transfer not found.'); return; }
+    // Merge: preserve fields we don't edit in this form (status, tracking, dates, comments)
+    Object.assign(existing, {
+      transferType: d.transferType, refillOfId: d.refillOfId,
+      patientName: d.patientName, patientDOB: d.patientDOB, patientAllergies: d.patientAllergies,
+      originLocation: d.originLocation, fillLocation: d.fillLocation,
+      shipTo: d.shipTo, deliveryCharge: d.deliveryCharge,
+      shipAddr1: d.shipAddr1, shipAddr2: d.shipAddr2, shipCity: d.shipCity, shipState: d.shipState, shipZip: d.shipZip,
+      billing: d.billing, ccOnFileInPaladin: d.ccOnFileInPaladin, ccForm: d.ccForm,
+      coldItem: d.coldItem, anticipatedShipDate: d.anticipatedShipDate,
+      pkSheets: d.pkSheets, formula: d.formula, hardCopies: d.hardCopies,
+      items: d.items, transferNotes: d.transferNotes,
+      lastEditedBy: CURRENT_USER.name, lastEditedAt: new Date().toISOString()
+    });
+    apiUpdateTransfer(existing);
+    state.draft = null; state.editingTransferId = null;
+    alert('Transfer updated.');
+    document.querySelector('.tab[data-tab=transfers]').click();
+    return;
+  }
+
   const t = {
     ...d,
     id: nextId(),
@@ -1570,6 +1627,7 @@ function renderModal() {
             <span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span>
             ${t.transferType==='Refill'?'<span class="badge badge-verified">Refill</span>':'<span class="badge badge-new">New Rx</span>'}
             ${t.coldItem?'<span class="badge badge-cold">Cold item</span>':''}
+            <button class="btn btn-secondary btn-sm" id="editTransferBtn" title="Edit patient, routing, shipping, billing, documents">✏️ Edit Transfer</button>
             <button class="btn btn-secondary btn-sm" id="askQBtn" title="Ask the other team a question about this transfer">❓ Ask Question</button>
             <button class="btn btn-primary btn-sm" id="refillBtn" title="Start a new transfer pre-filled from this one">📋 Refill this Rx</button>
             <div class="spacer" style="flex:1"></div>
@@ -1581,11 +1639,12 @@ function renderModal() {
           <div style="font-size:13px;line-height:1.8">
             <strong>${escapeHtml(t.patientName)}</strong> · DOB ${fmtDate(t.patientDOB)} · Allergies: ${escapeHtml(t.patientAllergies||'—')}
           </div>
+          ${t.transferNotes?`<div class="section"><div class="section-title">Transfer Notes</div><div style="font-size:13px;line-height:1.6;background:var(--warning-bg);border-left:4px solid var(--warning);padding:10px 14px;border-radius:6px;white-space:pre-wrap">${escapeHtml(t.transferNotes)}</div></div>`:''}
 
           <div class="section"><div class="section-title">Shipping & Billing</div>
           <div class="form-grid">
             <div><strong>Ship to:</strong> ${escapeHtml(t.shipTo)}${t.deliveryCharge?` ($${t.deliveryCharge})`:''}</div>
-            <div><strong>Billing:</strong> ${escapeHtml(t.billing)}${t.ccOnFileInPaladin?' (CC on file)':''}</div>
+            <div><strong>Billing:</strong> ${escapeHtml(billingLabel(t.billing))}${t.ccOnFileInPaladin?' (CC on file)':''}</div>
             <div class="form-group full"><strong>Address:</strong><br>${escapeHtml(t.shipAddr1||'—')}${t.shipAddr2?'<br>'+escapeHtml(t.shipAddr2):''}${t.shipCity?'<br>'+escapeHtml(t.shipCity)+', '+escapeHtml(t.shipState)+' '+escapeHtml(t.shipZip):''}</div>
             <div><strong>Anticipated ship:</strong> ${fmtDate(t.anticipatedShipDate)}</div>
             <div><strong>Shipped:</strong> ${fmtDate(t.dateShipped)}</div>
@@ -1658,6 +1717,14 @@ function renderModal() {
     document.querySelector('.tab[data-tab=new]').click();
   });
   document.getElementById('askQBtn').addEventListener('click', () => openAskQuestionModal(t.id));
+  document.getElementById('editTransferBtn').addEventListener('click', () => {
+    // Deep-clone the transfer into the draft so user can cancel without affecting the original
+    state.draft = JSON.parse(JSON.stringify(t));
+    state.editingTransferId = t.id;
+    state.newMode = 'single';
+    closeModal();
+    document.querySelector('.tab[data-tab=new]').click();
+  });
   document.getElementById('postComment').addEventListener('click', async () => {
     const body = document.getElementById('newCommentBody').value.trim();
     if (!body) return;
@@ -1689,11 +1756,7 @@ function renderItems(t) {
             : `<span style="font-family:monospace;font-size:13px;color:var(--gray-700)">${escapeHtml(i.receivingRxNumber||'—')}</span>`}
         </div>
       </div>
-      <div style="font-size:12px;color:var(--gray-600);line-height:1.6">
-        <div><strong>Dr.</strong> ${escapeHtml(i.doctorName||'—')} · ${escapeHtml(i.doctorPhone||'')} · DEA ${escapeHtml(i.doctorDEA||'—')}</div>
-        <div><strong>Addr:</strong> ${escapeHtml(i.doctorAddr||'—')}</div>
-        ${i.notes?`<div style="margin-top:4px;color:var(--gray-700)"><strong>Notes:</strong> ${escapeHtml(i.notes)}</div>`:''}
-      </div>
+      ${i.notes?`<div style="font-size:12px;color:var(--gray-700);line-height:1.6;padding-top:4px"><strong>Notes:</strong> ${escapeHtml(i.notes)}</div>`:''}
     </div>
   `).join('');
   wrap.querySelectorAll('[data-rcvrx]').forEach(el => {
@@ -2511,7 +2574,7 @@ function renderRefillReview(t) {
           <div class="form-group"><label>Origin Location</label><select data-def="originLocation">${LOCATIONS.map(l=>`<option ${l===def.originLocation?'selected':''}>${l}</option>`).join('')}</select></div>
           <div class="form-group"><label>Fill Location</label><select data-def="fillLocation">${LOCATIONS.map(l=>`<option ${l===def.fillLocation?'selected':''}>${l}</option>`).join('')}</select></div>
           <div class="form-group"><label>Ship To</label><select data-def="shipTo">${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===def.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Billing</label><select data-def="billing">${['HealNow','CreditCard','PayInStore'].map(s=>`<option ${s===def.billing?'selected':''}>${s}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Billing</label><select data-def="billing">${BILLING_OPTIONS.map(([v,l])=>`<option value="${v}" ${v===def.billing?'selected':''}>${l}</option>`).join('')}</select></div>
           <div class="form-group full"><label>Address Line 1</label><input data-def="shipAddr1" value="${escapeHtml(def.shipAddr1)}" /></div>
           <div class="form-group full"><label>Address Line 2</label><input data-def="shipAddr2" value="${escapeHtml(def.shipAddr2)}" /></div>
           <div class="form-group"><label>City</label><input data-def="shipCity" value="${escapeHtml(def.shipCity)}" /></div>
@@ -2523,7 +2586,7 @@ function renderRefillReview(t) {
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 24px;font-size:13px;line-height:1.7">
           <div><strong>Origin → Fill:</strong> ${escapeHtml(def.originLocation)} → ${escapeHtml(def.fillLocation)}</div>
           <div><strong>Ship To:</strong> ${escapeHtml(def.shipTo)}</div>
-          <div><strong>Billing:</strong> ${escapeHtml(def.billing)}${def.ccOnFileInPaladin?' (CC on file)':''}</div>
+          <div><strong>Billing:</strong> ${escapeHtml(billingLabel(def.billing))}${def.ccOnFileInPaladin?' (CC on file)':''}</div>
           <div><strong>Cold:</strong> ${def.coldItem?'Yes':'No'}</div>
           <div style="grid-column:1/-1"><strong>Address:</strong> ${escapeHtml([def.shipAddr1, def.shipAddr2, def.shipCity, def.shipState, def.shipZip].filter(Boolean).join(', ')) || '<span class="item-sub">— none —</span>'}</div>
         </div>
