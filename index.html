@@ -235,7 +235,8 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 
 <!-- Sign-in gate overlay: blocks app access until auth completes. Hidden after sign-in. -->
 <div id="authGate" style="display:flex;position:fixed;inset:0;background:linear-gradient(135deg,var(--primary-darker),var(--primary-dark));z-index:9999;align-items:center;justify-content:center;flex-direction:column;color:white;padding:20px">
-  <img src="logo.png" alt="PI" style="height:80px;margin-bottom:28px;filter:brightness(1.1)" />
+  <img src="logo.png" alt="PI" style="height:80px;margin-bottom:12px;filter:brightness(1.1)" />
+  <div style="font-size:16px;font-weight:500;opacity:.9;margin-bottom:24px;letter-spacing:.02em">Inter-Pharmacy Transfer Tracker</div>
   <div style="background:rgba(255,255,255,.1);padding:24px 32px;border-radius:12px;backdrop-filter:blur(8px);text-align:center;max-width:420px;width:100%">
     <div id="gatePrimary">
       <button id="gateSignInBtn" class="btn btn-primary" style="background:white;color:var(--primary-dark);font-weight:600;padding:12px 24px;font-size:15px;width:100%">🔐 Sign in with Microsoft</button>
@@ -1062,19 +1063,34 @@ function renderAdmin() {
   if (CURRENT_USER.role !== 'admin') { root.innerHTML = '<div class="empty"><h3>Admins only</h3><p>Switch to an admin user to view this tab.</p></div>'; return; }
   root.innerHTML = `
     <div class="page-header"><div class="page-title">Admin</div></div>
-    <div class="card"><div class="card-header">Users & Roles</div><div class="card-body">
-      <p class="item-sub" style="margin-bottom:10px">Users appear here after they sign in with their @pharmacyinnovations.net account. From here you can adjust their role, location, or fix display name typos. Admins are managed separately in the <strong>Admin Users</strong> section below.</p>
-      <table style="box-shadow:none"><thead><tr><th>Name</th><th>Email</th><th>Location</th><th>Role</th><th></th></tr></thead><tbody>
-        ${USERS.map((u,i) => `<tr>
-          <td><input data-ui="${i}" data-k="name" value="${escapeHtml(u.name)}" style="width:100%;padding:4px 6px;border:1px solid var(--gray-300);border-radius:3px;font-weight:600" /></td>
-          <td><span style="font-family:monospace;font-size:12px">${escapeHtml(u.email)}</span></td>
-          <td><select data-ui="${i}" data-k="location">${LOCATIONS.map(l=>`<option ${l===u.location?'selected':''}>${l}</option>`).join('')}</select></td>
-          <td><select data-ui="${i}" data-k="role"><option ${u.role==='admin'?'selected':''}>admin</option><option ${u.role==='manager'?'selected':''}>manager</option><option ${u.role==='tech'?'selected':''}>tech</option></select></td>
-          <td>${u===CURRENT_USER?'<span class="item-sub">(you)</span>':`<button class="btn btn-secondary btn-sm" data-rmu="${i}">Remove</button>`}</td>
-        </tr>`).join('')}
-      </tbody></table>
-      <div class="item-sub" style="margin-top:10px"><strong>Tech:</strong> sees only their location's incoming + transfers originating from their location. <strong>Manager:</strong> full read + Reports. <strong>Admin:</strong> everything including user management.</div>
-      <div class="item-sub" style="margin-top:6px"><em>Note: changes here apply for the current session only until we add user-table persistence. The Admin Users list below DOES persist server-side.</em></div>
+    <div class="card"><div class="card-header">Users & Access <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— 365 + local accounts in one place</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px"><strong>Tech:</strong> sees only their location's transfers · <strong>Manager:</strong> full read + Reports · <strong>Admin:</strong> everything including this page.</p>
+      <div id="unified-users" style="margin-bottom:14px"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div style="background:var(--gray-50);padding:12px 14px;border-radius:6px;border:1px solid var(--gray-200)">
+          <div style="font-weight:600;font-size:13px;margin-bottom:8px">+ Pre-authorize a 365 user</div>
+          <p class="hint" style="margin-bottom:8px">Type their @pharmacyinnovations.net email. They'll get the selected role automatically when they first sign in.</p>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input id="ae-new" placeholder="someone@pharmacyinnovations.net" style="flex:1;min-width:180px;padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px" />
+            <select id="ae-role" style="padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px"><option>tech</option><option>manager</option><option selected>admin</option></select>
+            <button class="btn btn-secondary btn-sm" id="ae-add">+ Add</button>
+          </div>
+          <span class="item-sub" id="ae-result" style="display:block;margin-top:6px"></span>
+        </div>
+        <div style="background:var(--gray-50);padding:12px 14px;border-radius:6px;border:1px solid var(--gray-200)">
+          <div style="font-weight:600;font-size:13px;margin-bottom:8px">+ Create local account (no 365 license)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <input id="lu-username" placeholder="username" style="padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px" />
+            <input id="lu-name" placeholder="Display name" style="padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px" />
+            <input id="lu-pin" type="password" inputmode="numeric" placeholder="PIN (4+ chars)" style="padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px" />
+            <select id="lu-location" style="padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select>
+            <select id="lu-role" style="grid-column:1/-1;padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px"><option>tech</option><option>manager</option><option>admin</option></select>
+          </div>
+          <button class="btn btn-primary btn-sm" id="lu-create" style="margin-top:8px">Create Local Account</button>
+          <span class="item-sub" id="lu-result" style="display:block;margin-top:6px"></span>
+        </div>
+      </div>
     </div></div>
 
     <div class="card"><div class="card-header">SLA Rules (hours)</div><div class="card-body">
@@ -1114,32 +1130,6 @@ function renderAdmin() {
       </tbody></table>
     </div></div>
 
-    <div class="card"><div class="card-header">Local Accounts <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— username + PIN for users without a 365 license</span></div><div class="card-body">
-      <p class="item-sub" style="margin-bottom:10px">Create username + PIN accounts for staff who don't have a Microsoft 365 license. They'll click "Sign in without 365 account" on the sign-in page.</p>
-      <div id="lu-list" style="margin-bottom:14px"></div>
-      <div style="background:var(--gray-50);padding:12px 14px;border-radius:6px;border:1px solid var(--gray-200)">
-        <div style="font-weight:600;font-size:13px;margin-bottom:8px">+ Create new local account</div>
-        <div class="form-grid" style="gap:8px">
-          <div class="form-group"><label>Username</label><input id="lu-username" placeholder="firstname.lastname" /></div>
-          <div class="form-group"><label>Display Name</label><input id="lu-name" placeholder="First Last" /></div>
-          <div class="form-group"><label>PIN (min 4 chars)</label><input id="lu-pin" type="password" inputmode="numeric" placeholder="e.g. 4-8 digits" /></div>
-          <div class="form-group"><label>Location</label><select id="lu-location">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Role</label><select id="lu-role"><option>tech</option><option>manager</option><option>admin</option></select></div>
-        </div>
-        <button class="btn btn-primary btn-sm" id="lu-create" style="margin-top:10px">Create Account</button>
-        <span class="item-sub" id="lu-result" style="margin-left:10px"></span>
-      </div>
-    </div></div>
-
-    <div class="card"><div class="card-header">Admin Users <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— emails listed here get admin role on sign-in</span></div><div class="card-body">
-      <p class="item-sub" style="margin-bottom:10px">Any 365 account signing in with an email on this list gets the admin role automatically. Everyone else defaults to tech.</p>
-      <div id="ae-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
-      <div style="display:flex;gap:6px">
-        <input id="ae-new" placeholder="someone@pharmacyinnovations.net" style="flex:1;padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px" />
-        <button class="btn btn-secondary btn-sm" id="ae-add">+ Add</button>
-      </div>
-      <div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="ae-save">Save admin emails</button> <span class="item-sub" id="ae-result" style="margin-left:8px"></span></div>
-    </div></div>
 
     <div class="card"><div class="card-header">Teams Webhooks (per location) <span class="item-sub" id="tw-status" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">When a question is asked on a transfer, the app posts to the webhook configured for the receiving location(s). URLs are stored server-side and never returned to the browser — type/paste them here once, then save.</p>
@@ -1153,8 +1143,143 @@ function renderAdmin() {
       <div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="tw-save">Save webhook URLs</button> <span class="item-sub" id="tw-saveResult" style="margin-left:10px"></span></div>
     </div></div>
   `;
-  root.querySelectorAll('[data-ui]').forEach(sel => sel.onchange = e => { USERS[+sel.dataset.ui][sel.dataset.k] = sel.value; });
-  root.querySelectorAll('[data-rmu]').forEach(b => b.onclick = () => { USERS.splice(+b.dataset.rmu,1); populateUserSwitcher(); renderAdmin(); });
+  // Unified Users & Access — combines 365 users (/api/users), local accounts (/api/local-users),
+  // and admin email list (/api/settings.adminEmails) into one table.
+  let _users365 = [];
+  let _localUsers = [];
+  let _adminEmailsSet = new Set();
+
+  const renderUnifiedUsers = () => {
+    const root = document.getElementById('unified-users');
+    if (!root) return;
+    const rows = [];
+    _users365.forEach(u => {
+      const isAdmin = _adminEmailsSet.has((u.email||'').toLowerCase());
+      // Effective role: admin overrides whatever's stored
+      const role = isAdmin ? 'admin' : (u.role || 'tech');
+      rows.push({ kind: '365', key: u.email, name: u.name, location: u.location, role, last: u.lastSignInAt, isAdmin });
+    });
+    _localUsers.forEach(u => {
+      rows.push({ kind: 'local', key: u.username, name: u.name, location: u.location, role: u.role || 'tech', last: u.lastLoginAt, isLocal: true });
+    });
+    if (rows.length === 0) {
+      root.innerHTML = '<div class="item-sub" style="padding:14px;text-align:center;font-style:italic">No users yet. Add a 365 admin below, or create a local account.</div>';
+      return;
+    }
+    root.innerHTML = `<table style="box-shadow:none;font-size:13px"><thead><tr>
+      <th style="width:60px">Type</th><th>Name</th><th>Email / Username</th><th>Location</th><th>Role</th><th>Last Sign-in</th><th></th>
+    </tr></thead><tbody>${rows.map((r,idx) => `<tr>
+      <td><span class="badge ${r.kind==='365'?'badge-verified':'badge-progress'}" style="font-size:10px">${r.kind==='365'?'365':'Local'}</span></td>
+      <td><input data-row="${idx}" data-k="name" value="${escapeHtml(r.name||'')}" style="width:100%;padding:4px 6px;border:1px solid var(--gray-300);border-radius:3px;font-weight:600" /></td>
+      <td><span style="font-family:monospace;font-size:12px">${escapeHtml(r.key||'')}</span></td>
+      <td><select data-row="${idx}" data-k="location">${LOCATIONS.map(l=>`<option ${l===r.location?'selected':''}>${l}</option>`).join('')}</select></td>
+      <td><select data-row="${idx}" data-k="role"><option ${r.role==='admin'?'selected':''}>admin</option><option ${r.role==='manager'?'selected':''}>manager</option><option ${r.role==='tech'?'selected':''}>tech</option></select></td>
+      <td>${r.last ? new Date(r.last).toLocaleString() : '<span class="item-sub">never</span>'}</td>
+      <td style="white-space:nowrap">${r.kind==='local' ? `<button class="btn btn-secondary btn-sm" data-reset-pin="${idx}">Reset PIN</button> ` : ''}<button class="btn btn-secondary btn-sm" data-rm-row="${idx}">Remove</button></td>
+    </tr>`).join('')}</tbody></table>`;
+    // Wire edits
+    root.querySelectorAll('[data-row]').forEach(el => el.onchange = async () => {
+      const r = rows[+el.dataset.row];
+      const k = el.dataset.k;
+      const v = el.value;
+      if (r.kind === '365') {
+        if (k === 'role') {
+          // Toggle admin emails list based on role choice
+          const email = (r.key||'').toLowerCase();
+          if (v === 'admin') _adminEmailsSet.add(email); else _adminEmailsSet.delete(email);
+          await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminEmails: [..._adminEmailsSet] }) });
+          // Also save the non-admin role choice
+          if (v !== 'admin') await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: v }) });
+        } else {
+          await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [k]: v }) });
+        }
+      } else {
+        // Local user
+        await fetch('/api/local-users/x/' + encodeURIComponent(r.key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [k]: v }) });
+      }
+      loadAllUsers();
+    });
+    root.querySelectorAll('[data-rm-row]').forEach(b => b.onclick = async () => {
+      const r = rows[+b.dataset.rmRow];
+      if (!confirm(`Remove ${r.name || r.key}?`)) return;
+      if (r.kind === '365') {
+        await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'DELETE' });
+        _adminEmailsSet.delete((r.key||'').toLowerCase());
+        await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminEmails: [..._adminEmailsSet] }) });
+      } else {
+        await fetch('/api/local-users/x/' + encodeURIComponent(r.key), { method: 'DELETE' });
+      }
+      loadAllUsers();
+    });
+    root.querySelectorAll('[data-reset-pin]').forEach(b => b.onclick = async () => {
+      const r = rows[+b.dataset.resetPin];
+      const pin = prompt(`New PIN for "${r.key}" (4+ chars):`);
+      if (!pin || pin.length < 4) return;
+      await fetch('/api/local-users/x/' + encodeURIComponent(r.key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }) });
+      alert('PIN updated.');
+    });
+  };
+
+  const loadAllUsers = async () => {
+    try {
+      const [u365R, luR, settingsR] = await Promise.all([
+        fetch('/api/users').then(r => r.json()).catch(() => ({ users: [] })),
+        fetch('/api/local-users').then(r => r.json()).catch(() => ({ users: [] })),
+        fetch('/api/settings').then(r => r.json()).catch(() => ({ adminEmails: [] }))
+      ]);
+      _users365 = u365R.users || [];
+      _localUsers = luR.users || [];
+      _adminEmailsSet = new Set((settingsR.adminEmails || []).map(e => e.toLowerCase()));
+      _adminEmails = [..._adminEmailsSet];
+      renderUnifiedUsers();
+    } catch (e) { console.error('loadAllUsers', e); }
+  };
+  loadAllUsers();
+
+  // Add 365 user (by email, pre-authorize role)
+  const aeAdd = document.getElementById('ae-add');
+  if (aeAdd) aeAdd.onclick = async () => {
+    const email = (document.getElementById('ae-new').value || '').trim().toLowerCase();
+    const role = document.getElementById('ae-role').value;
+    const result = document.getElementById('ae-result');
+    if (!/^.+@.+\..+$/.test(email)) { result.innerHTML = '<span style="color:var(--danger)">Invalid email</span>'; return; }
+    result.innerHTML = '<span class="item-sub">Adding…</span>';
+    try {
+      // Add a placeholder user record (will get filled in on first sign-in)
+      await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, name: email, role: role === 'admin' ? 'tech' : role, location: '' }) });
+      if (role === 'admin') {
+        _adminEmailsSet.add(email);
+        await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminEmails: [..._adminEmailsSet] }) });
+      }
+      result.innerHTML = '<span style="color:var(--success)">✓ Added</span>';
+      document.getElementById('ae-new').value = '';
+      loadAllUsers();
+    } catch (e) { result.innerHTML = '<span style="color:var(--danger)">' + escapeHtml(e.message) + '</span>'; }
+  };
+
+  // Create local account
+  const luCreate = document.getElementById('lu-create');
+  if (luCreate) luCreate.onclick = async () => {
+    const body = {
+      username: document.getElementById('lu-username').value.trim().toLowerCase(),
+      name: document.getElementById('lu-name').value.trim(),
+      pin: document.getElementById('lu-pin').value.trim(),
+      location: document.getElementById('lu-location').value,
+      role: document.getElementById('lu-role').value
+    };
+    const result = document.getElementById('lu-result');
+    if (!body.username || !body.pin) { result.innerHTML = '<span style="color:var(--danger)">Username and PIN required</span>'; return; }
+    if (body.pin.length < 4) { result.innerHTML = '<span style="color:var(--danger)">PIN must be 4+ chars</span>'; return; }
+    result.innerHTML = '<span class="item-sub">Creating…</span>';
+    try {
+      const r = await fetch('/api/local-users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await r.json();
+      if (!r.ok) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(data.error||'Failed')}</span>`; return; }
+      result.innerHTML = '<span style="color:var(--success)">✓ Created</span>';
+      ['lu-username','lu-name','lu-pin'].forEach(id => document.getElementById(id).value = '');
+      loadAllUsers();
+    } catch (e) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(e.message)}</span>`; }
+  };
   root.querySelectorAll('[data-fi]').forEach(el => el.onchange = () => { FORMULAS[+el.dataset.fi][el.dataset.k] = el.value; });
   root.querySelectorAll('[data-pa]').forEach(el => el.onchange = () => {
     const loc = el.dataset.pa, k = el.dataset.k;
@@ -1170,98 +1295,14 @@ function renderAdmin() {
     FORMULAS.push({ id: nextId(), name, location: loc, link, fileName: '', createdBy: CURRENT_USER.name, createdAt: new Date().toISOString() });
     renderAdmin();
   };
-  // Manual user add is gone — users auto-add on first 365 sign-in. Name field is editable
-  // in the table above to fix typos that come from Microsoft account display name.
-
-  // Local accounts (username + PIN) management
-  const renderLocalUsers = (users) => {
-    const list = document.getElementById('lu-list');
-    if (!list) return;
-    if (!users.length) { list.innerHTML = '<div class="item-sub" style="font-style:italic;padding:8px 0">No local accounts yet.</div>'; return; }
-    list.innerHTML = `<table style="box-shadow:none;font-size:13px"><thead><tr><th>Username</th><th>Name</th><th>Location</th><th>Role</th><th>Last Login</th><th></th></tr></thead><tbody>
-      ${users.map(u => `<tr>
-        <td style="font-family:monospace">${escapeHtml(u.username)}</td>
-        <td>${escapeHtml(u.name||'')}</td>
-        <td>${escapeHtml(u.location||'')}</td>
-        <td>${escapeHtml(u.role||'tech')}</td>
-        <td>${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '<span class="item-sub">never</span>'}</td>
-        <td style="white-space:nowrap"><button class="btn btn-secondary btn-sm" data-lu-resetpin="${escapeHtml(u.username)}">Reset PIN</button> <button class="btn btn-secondary btn-sm" data-lu-rm="${escapeHtml(u.username)}">Remove</button></td>
-      </tr>`).join('')}
-    </tbody></table>`;
-    list.querySelectorAll('[data-lu-rm]').forEach(b => b.onclick = async () => {
-      if (!confirm(`Delete local account "${b.dataset.luRm}"?`)) return;
-      await fetch('/api/local-users/x/' + encodeURIComponent(b.dataset.luRm), { method: 'DELETE' });
-      loadLocalUsers();
-    });
-    list.querySelectorAll('[data-lu-resetpin]').forEach(b => b.onclick = async () => {
-      const newPin = prompt(`New PIN for "${b.dataset.luResetpin}" (min 4 chars):`);
-      if (!newPin || newPin.length < 4) return;
-      await fetch('/api/local-users/x/' + encodeURIComponent(b.dataset.luResetpin), {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: newPin })
-      });
-      alert('PIN updated.');
-    });
-  };
-  const loadLocalUsers = async () => {
-    try {
-      const r = await fetch('/api/local-users');
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const data = await r.json();
-      renderLocalUsers(data.users || []);
-    } catch (e) { renderLocalUsers([]); }
-  };
-  loadLocalUsers();
-  const luCreate = document.getElementById('lu-create');
-  if (luCreate) luCreate.onclick = async () => {
-    const body = {
-      username: document.getElementById('lu-username').value.trim().toLowerCase(),
-      name: document.getElementById('lu-name').value.trim(),
-      pin: document.getElementById('lu-pin').value.trim(),
-      location: document.getElementById('lu-location').value,
-      role: document.getElementById('lu-role').value
-    };
-    const result = document.getElementById('lu-result');
-    if (!body.username || !body.pin) { result.innerHTML = '<span style="color:var(--danger)">Username and PIN required</span>'; return; }
-    if (body.pin.length < 4) { result.innerHTML = '<span style="color:var(--danger)">PIN must be 4+ chars</span>'; return; }
-    result.innerHTML = '<span class="item-sub">Creating…</span>';
-    try {
-      const r = await fetch('/api/local-users', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await r.json();
-      if (!r.ok) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(data.error||'Failed')}</span>`; return; }
-      result.innerHTML = '<span style="color:var(--success)">✓ Created</span>';
-      ['lu-username','lu-name','lu-pin'].forEach(id => document.getElementById(id).value = '');
-      loadLocalUsers();
-    } catch (e) {
-      result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(e.message)}</span>`;
-    }
-  };
   document.getElementById('saveSla').onclick = () => {
     root.querySelectorAll('[data-sla]').forEach(el => SLA_RULES[el.dataset.sla] = +el.value || SLA_RULES[el.dataset.sla]);
     alert('SLA rules updated.');
     render();
   };
-  // Local working list of admin emails — gets populated from /api/settings on load.
-  let adminEmailsWorking = [];
-  const renderAdminEmails = () => {
-    const list = document.getElementById('ae-list');
-    if (!list) return;
-    list.innerHTML = adminEmailsWorking.length === 0
-      ? '<div class="item-sub" style="font-style:italic">No admin emails configured yet — only the seed admin (you) has access.</div>'
-      : adminEmailsWorking.map((e, idx) => `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--gray-50);border-radius:4px;font-size:13px">
-          <span style="flex:1;font-family:monospace">${escapeHtml(e)}</span>
-          <button class="btn btn-secondary btn-sm" data-rm-ae="${idx}">Remove</button>
-        </div>`).join('');
-    list.querySelectorAll('[data-rm-ae]').forEach(b => b.onclick = () => {
-      adminEmailsWorking.splice(+b.dataset.rmAe, 1);
-      renderAdminEmails();
-    });
-  };
 
-  // Teams webhooks + admin emails — load configured indicators + initial admin list
+  // Teams webhooks — populate configured indicators (loadAllUsers above also fetches settings,
+  // but for the Teams-only status badges we run a separate small loader here).
   (async () => {
     try {
       const r = await fetch('/api/settings');
@@ -1273,42 +1314,10 @@ function renderAdmin() {
         const loc = el.dataset.locState;
         el.innerHTML = cfg[loc] ? '<span style="color:var(--success)">● configured</span>' : '<span style="color:var(--gray-400)">○ not set</span>';
       });
-      adminEmailsWorking = (data.adminEmails || []).slice();
-      renderAdminEmails();
     } catch (e) {
       document.getElementById('tw-status').textContent = '— load failed (' + e.message + ')';
-      renderAdminEmails();
     }
   })();
-
-  const aeAdd = document.getElementById('ae-add');
-  if (aeAdd) aeAdd.onclick = () => {
-    const input = document.getElementById('ae-new');
-    const val = (input.value || '').trim().toLowerCase();
-    if (!val) return;
-    if (!/^.+@.+\..+$/.test(val)) { alert("That doesn't look like an email address."); return; }
-    if (adminEmailsWorking.includes(val)) { alert('Already in the list.'); return; }
-    adminEmailsWorking.push(val);
-    input.value = '';
-    renderAdminEmails();
-  };
-  const aeSave = document.getElementById('ae-save');
-  if (aeSave) aeSave.onclick = async () => {
-    const result = document.getElementById('ae-result');
-    result.innerHTML = '<span class="item-sub">Saving…</span>';
-    try {
-      const r = await fetch('/api/settings', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminEmails: adminEmailsWorking })
-      });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const data = await r.json();
-      adminEmailsWorking = (data.adminEmails || []).slice();
-      _adminEmails = adminEmailsWorking.map(e => e.toLowerCase());
-      renderAdminEmails();
-      result.innerHTML = '<span style="color:var(--success)">✓ Saved</span>';
-    } catch (e) { result.innerHTML = '<span style="color:var(--danger)">Save failed: ' + escapeHtml(e.message) + '</span>'; }
-  };
   document.getElementById('tw-save').onclick = async () => {
     const teamsWebhooks = {};
     root.querySelectorAll('[data-loc]').forEach(el => {
@@ -3406,7 +3415,8 @@ async function loadAdminEmails() {
 
 // Apply a signed-in Microsoft account to CURRENT_USER. Determines role from the
 // admin emails list (server-stored). Location comes from localStorage preference
-// (set via the location dropdown after first sign-in).
+// (set via the location dropdown after first sign-in). Also persists the user to
+// /api/users so the Admin tab's user list reflects who has signed in.
 function applyMsalAccount(account) {
   const email = (account.username || '').toLowerCase();
   const name = account.name || account.username || 'User';
@@ -3423,6 +3433,11 @@ function applyMsalAccount(account) {
     user.location = savedLocation;
   }
   CURRENT_USER = user;
+  // Best-effort persist user record + last sign-in time (non-blocking)
+  fetch('/api/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, name, location: savedLocation, role: user.role, lastSignInAt: new Date().toISOString() })
+  }).catch(() => {});
   // Swap UI
   document.getElementById('signInArea').style.display = 'none';
   document.getElementById('signedInArea').style.display = 'flex';
