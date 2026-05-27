@@ -114,24 +114,29 @@ module.exports = async function (context, req) {
     let recipients = [];
     let subject = '';
     let html = '';
+    // Per-location emails can be a single string, comma-separated, or an array. Normalize.
+    const toArray = v => {
+      if (!v) return [];
+      if (Array.isArray(v)) return v.filter(Boolean);
+      return String(v).split(/[,\n;]+/).map(s => s.trim()).filter(Boolean);
+    };
+
     if (shipment.destinationType === 'Pharmacy') {
-      const email = locationEmails[shipment.toLocation];
-      if (!email) {
+      recipients = toArray(locationEmails[shipment.toLocation]);
+      if (recipients.length === 0) {
         context.res = { status: 200, body: { skipped: true, reason: `No email configured for ${shipment.toLocation}` } };
         return;
       }
-      recipients = [email];
       subject = `📦 Transfer shipped to ${shipment.toLocation} — ${transfers.length} Rx`;
       html = buildPharmacyShipmentHtml(shipment, transfers);
     } else if (shipment.destinationType === 'Patient') {
       // Notify the FILL location (the pharmacy that sent it) so they have a record
       const t0 = transfers[0] || {};
-      const email = locationEmails[shipment.fromLocation];
-      if (!email) {
+      recipients = toArray(locationEmails[shipment.fromLocation]);
+      if (recipients.length === 0) {
         context.res = { status: 200, body: { skipped: true, reason: `No email configured for ${shipment.fromLocation}` } };
         return;
       }
-      recipients = [email];
       subject = `📦 Transfer shipped to patient ${t0.patientName || ''} — tracking ${shipment.trackingNumber || ''}`;
       html = buildPatientShipmentHtml(shipment, t0);
     } else {

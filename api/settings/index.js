@@ -90,11 +90,17 @@ module.exports = async function (context, req) {
       if (Array.isArray(incoming.dailySummaryRecipients)) {
         dailySummaryRecipients = incoming.dailySummaryRecipients.map(e => String(e).toLowerCase().trim()).filter(Boolean);
       }
-      // Per-location emails — merge incoming object onto current
+      // Per-location emails — store as array of addresses (multiple recipients per location).
+      // Merge incoming object onto current.
       let locationEmails = { ...(current.locationEmails || {}) };
       if (incoming.locationEmails && typeof incoming.locationEmails === 'object') {
-        Object.entries(incoming.locationEmails).forEach(([loc, email]) => {
-          if (email === '' || email == null) delete locationEmails[loc]; else locationEmails[loc] = String(email).trim();
+        Object.entries(incoming.locationEmails).forEach(([loc, val]) => {
+          let arr;
+          if (Array.isArray(val)) arr = val.map(s => String(s).trim().toLowerCase()).filter(Boolean);
+          else if (val) arr = String(val).split(/[,\n;]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+          else arr = [];
+          if (arr.length === 0) delete locationEmails[loc];
+          else locationEmails[loc] = arr;
         });
       }
       const merged = {

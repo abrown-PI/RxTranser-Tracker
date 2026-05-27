@@ -1,17 +1,15 @@
 // POST /api/send-daily-summary
-// Body (optional): { recipients: [...], dryRun: true }
+// Body (optional): { dryRun: true, onlyLocation: "Erie" }
 //
-// Builds an end-of-day summary email per-location showing how many transfers were received
-// today, grouped by origin location, with current status. Sends via Microsoft Graph to the
-// configured recipient list (or any override passed in).
+// For each location with transfer activity today, sends a customized summary email to
+// THAT location's notification recipient list. Skips locations with zero activity.
 //
 // Scheduled by GitHub Actions cron at 5 PM ET daily.
 
 const { TableClient } = require('@azure/data-tables');
-
 const PORTAL_URL = 'https://red-island-0bb34e510.7.azurestaticapps.net';
 
-// --- Mail helper (inlined to avoid cross-folder require issues in Azure SWA) ---
+// --- Mail helper (inlined) ---
 let _tok = null, _tokExp = 0;
 async function getGraphToken() {
   if (_tok && Date.now() < _tokExp) return _tok;
@@ -45,7 +43,6 @@ async function sendMail({ to, subject, html }) {
   return true;
 }
 
-// --- Load all transfers + settings from Table Storage ---
 async function loadTransfers() {
   const conn = process.env.AZURE_STORAGE_CONNECTION;
   const client = TableClient.fromConnectionString(conn, 'transfers');
@@ -61,35 +58,67 @@ async function loadSettings() {
   catch (e) { if (e.statusCode === 404) return {}; throw e; }
 }
 
-function buildSummaryHtml(transfers, dateStr) {
-  const byOrigin = {};
-  transfers.forEach(t => {
+// Per-location email recipients can be stored as a string (legacy, single email),
+// a comma-separated string, or an array. Normalize to an array.
+function normalizeEmails(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return String(value).split(/[,\n;]+/).map(s => s.trim()).filter(Boolean);
+}
+
+function statusBadge(status) {
+  const c = {
+    'New': '#0891b2', 'In Progress': '#d97706', 'Ready to Ship': '#92400e',
+    'Shipped': '#16a34a', 'Delivered': '#1e40af', 'Canceled': '#64748b'
+  }[status] || '#475569';
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:${c}22;color:${c};font-weight:600">${status||'—'}</span>`;
+}
+
+function buildLocationSummaryHtml(locationName, todaysTransfers, dateStr) {
+  // Two sections: transfers WE FILLED today (incoming) and transfers WE ORIGINATED today (outgoing).
+  const incoming = todaysTransfers.filter(t => t.fillLocation === locationName);
+  const outgoing = todaysTransfers.filter(t => t.originLocation === locationName && t.fillLocation !== locationName);
+  const incomingByOrigin = {};
+  incoming.forEach(t => {
     const k = t.originLocation || 'Unknown';
-    if (!byOrigin[k]) byOrigin[k] = [];
-    byOrigin[k].push(t);
+    (incomingByOrigin[k] = incomingByOrigin[k] || []).push(t);
   });
-  const total = transfers.length;
-  const sections = Object.keys(byOrigin).sort().map(loc => {
-    const rows = byOrigin[loc].map(t => `<tr>
-      <td><a href="${PORTAL_URL}/?transfer=${t.id}" style="color:#2a6ebb;text-decoration:none">${t.patientName || '(unnamed)'}</a></td>
-      <td>${(t.items||[]).map(i => i.drug).filter(Boolean).join(', ').slice(0,60) || '—'}</td>
-      <td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;background:#dbeafe;color:#1e40af;font-weight:600">${t.status||'—'}</span></td>
-      <td><a href="${PORTAL_URL}/?transfer=${t.id}" style="color:#2a6ebb;font-size:11px">Open →</a></td>
+
+  const incomingSection = Object.keys(incomingByOrigin).sort().map(loc => {
+    const rows = incomingByOrigin[loc].map(t => `<tr>
+      <td style="padding:6px 10px"><a href="${PORTAL_URL}/?transfer=${t.id}" style="color:#2a6ebb;text-decoration:none">${t.patientName || '(unnamed)'}</a></td>
+      <td style="padding:6px 10px">${(t.items||[]).map(i => i.drug).filter(Boolean).join(', ').slice(0,60) || '—'}</td>
+      <td style="padding:6px 10px">${statusBadge(t.status)}</td>
+      <td style="padding:6px 10px"><a href="${PORTAL_URL}/?transfer=${t.id}" style="color:#2a6ebb;font-size:11px">Open →</a></td>
     </tr>`).join('');
-    return `<h3 style="color:#233f76;margin:18px 0 6px;border-bottom:1px solid #cbd5e1;padding-bottom:4px">From ${loc} (${byOrigin[loc].length})</h3>
+    return `<h3 style="color:#233f76;margin:18px 0 6px;border-bottom:1px solid #cbd5e1;padding-bottom:4px;font-size:15px">From ${loc} (${incomingByOrigin[loc].length})</h3>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="background:#f1f5f9"><th style="text-align:left;padding:6px 10px">Patient</th><th style="text-align:left;padding:6px 10px">Drug</th><th style="text-align:left;padding:6px 10px">Status</th><th style="padding:6px 10px"></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   }).join('');
+
+  const outgoingRows = outgoing.map(t => `<tr>
+    <td style="padding:6px 10px"><a href="${PORTAL_URL}/?transfer=${t.id}" style="color:#2a6ebb;text-decoration:none">${t.patientName || '(unnamed)'}</a></td>
+    <td style="padding:6px 10px">${t.fillLocation || '—'}</td>
+    <td style="padding:6px 10px">${(t.items||[]).map(i => i.drug).filter(Boolean).join(', ').slice(0,60) || '—'}</td>
+    <td style="padding:6px 10px">${statusBadge(t.status)}</td>
+  </tr>`).join('');
+  const outgoingSection = outgoing.length === 0 ? '' : `<h2 style="color:#233f76;margin:24px 0 8px;font-size:16px">Transfers you originated today (${outgoing.length})</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f1f5f9"><th style="text-align:left;padding:6px 10px">Patient</th><th style="text-align:left;padding:6px 10px">Sent to</th><th style="text-align:left;padding:6px 10px">Drug</th><th style="text-align:left;padding:6px 10px">Status</th></tr></thead>
+      <tbody>${outgoingRows}</tbody>
+    </table>`;
+
   return `<!DOCTYPE html><html><body style="font-family:'Segoe UI',sans-serif;color:#0f172a;max-width:720px;margin:0 auto;padding:18px">
     <div style="background:linear-gradient(135deg,#172a4f,#233f76);color:white;padding:18px 22px;border-radius:8px;margin-bottom:14px">
-      <div style="font-weight:600;font-size:18px">Pharmacy Innovations · Daily Transfer Summary</div>
-      <div style="opacity:.85;font-size:13px;margin-top:4px">${dateStr} · ${total} transfer${total===1?'':'s'} today</div>
+      <div style="font-weight:600;font-size:18px">Daily Transfer Summary — ${locationName}</div>
+      <div style="opacity:.85;font-size:13px;margin-top:4px">${dateStr} · ${incoming.length} received · ${outgoing.length} originated</div>
     </div>
-    ${total === 0 ? '<p style="color:#64748b">No transfer activity today.</p>' : sections}
+    ${incoming.length > 0 ? `<h2 style="color:#233f76;margin:6px 0 8px;font-size:16px">Transfers you received today (${incoming.length})</h2>${incomingSection}` : ''}
+    ${outgoingSection}
     <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
-    <p style="font-size:12px;color:#64748b">Need to change recipients? <a href="${PORTAL_URL}/?tab=admin" style="color:#2a6ebb">Sign in to the portal</a> → Admin → Email Notifications</p>
+    <p style="font-size:12px;color:#64748b">Need to change recipients? Sign in to the portal → Admin → Email Notifications</p>
     <p style="font-size:11px;color:#94a3b8">Sent by PI Transfer Tracker · ${PORTAL_URL}</p>
   </body></html>`;
 }
@@ -98,25 +127,57 @@ module.exports = async function (context, req) {
   try {
     const body = req.body || {};
     const dryRun = !!body.dryRun;
+    const onlyLocation = body.onlyLocation || null;
     const settings = await loadSettings();
-    const recipients = body.recipients || settings.dailySummaryRecipients || ['erie@pharmacyinnovations.net', 'alincoln@pharmacyinnovations.net'];
+    const locationEmails = settings.locationEmails || {};
+    const alwaysCc = Array.isArray(settings.dailySummaryRecipients) ? settings.dailySummaryRecipients : [];
 
-    // Today's transfers (created today by createdAt) — Eastern Time approximation
     const allTransfers = await loadTransfers();
     const today = new Date();
     const todayStr = today.toLocaleDateString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric' });
     const ymd = today.toISOString().slice(0, 10);
     const todaysTransfers = allTransfers.filter(t => (t.createdAt || '').slice(0, 10) === ymd);
 
-    const html = buildSummaryHtml(todaysTransfers, todayStr);
-    const subject = `PI Transfer Summary — ${todayStr} (${todaysTransfers.length} transfer${todaysTransfers.length===1?'':'s'})`;
+    // Figure out which locations have activity today
+    const locationsWithActivity = new Set();
+    todaysTransfers.forEach(t => {
+      if (t.fillLocation) locationsWithActivity.add(t.fillLocation);
+      if (t.originLocation) locationsWithActivity.add(t.originLocation);
+    });
 
-    if (dryRun) {
-      context.res = { status: 200, body: { dryRun: true, recipients, transferCount: todaysTransfers.length, htmlPreview: html.slice(0, 2000) } };
-      return;
+    const sent = [];
+    const skipped = [];
+    for (const loc of locationsWithActivity) {
+      if (onlyLocation && loc !== onlyLocation) continue;
+      const recipients = normalizeEmails(locationEmails[loc]);
+      // Build the per-location email
+      const html = buildLocationSummaryHtml(loc, todaysTransfers, todayStr);
+      const involved = todaysTransfers.filter(t => t.fillLocation === loc || t.originLocation === loc);
+      if (involved.length === 0) { skipped.push({ location: loc, reason: 'no transfers involved' }); continue; }
+      const allRecipients = [...new Set([...recipients, ...alwaysCc])];
+      if (allRecipients.length === 0) { skipped.push({ location: loc, reason: 'no recipients configured' }); continue; }
+      const subject = `Daily Transfer Summary — ${loc} · ${todayStr}`;
+      if (dryRun) {
+        sent.push({ location: loc, recipients: allRecipients, transferCount: involved.length, dryRun: true });
+        continue;
+      }
+      try {
+        await sendMail({ to: allRecipients, subject, html });
+        sent.push({ location: loc, recipients: allRecipients, transferCount: involved.length });
+      } catch (e) {
+        skipped.push({ location: loc, reason: 'send failed: ' + e.message });
+      }
     }
-    await sendMail({ to: recipients, subject, html });
-    context.res = { status: 200, body: { sent: true, recipients, transferCount: todaysTransfers.length } };
+
+    context.res = {
+      status: 200,
+      body: {
+        date: todayStr,
+        locationsWithActivity: [...locationsWithActivity],
+        sent,
+        skipped
+      }
+    };
   } catch (err) {
     context.log.error('send-daily-summary error', err);
     context.res = { status: err.statusCode || 500, body: { error: err.message } };
