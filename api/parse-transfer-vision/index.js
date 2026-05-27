@@ -59,13 +59,35 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Step 2: Poll for completion (typically 1-3 seconds for a single page)
+    // Step 2: Poll for completion. Each poll is its own API call counting toward rate limits,
+    // so we treat 429s the same way as the submit: respect Retry-After or exponential backoff.
+    // A transient 5xx is treated the same — keep trying.
     let result = null;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      await new Promise(r => setTimeout(r, 1000));
-      const pollResp = await fetch(operationLocation, {
-        headers: { 'Ocp-Apim-Subscription-Key': key }
-      });
+    let pollErrors = 0;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      await new Promise(r => setTimeout(r, 1500));
+      let pollResp;
+      try {
+        pollResp = await fetch(operationLocation, {
+          headers: { 'Ocp-Apim-Subscription-Key': key }
+        });
+      } catch (e) {
+        pollErrors++;
+        if (pollErrors > 3) {
+          context.res = { status: 502, body: { error: 'Doc Intelligence poll network error', detail: e.message } };
+          return;
+        }
+        continue;
+      }
+      if (pollResp.status === 429 || pollResp.status >= 500) {
+        // Rate limit or transient error — back off and try the SAME poll URL again
+        const retryAfter = parseInt(pollResp.headers.get('Retry-After') || '0', 10);
+        const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(8000, 1000 * (pollErrors + 1));
+        pollErrors++;
+        context.log(`Poll got ${pollResp.status}, backing off ${waitMs}ms`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
       if (!pollResp.ok) {
         const txt = await pollResp.text();
         context.res = { status: 502, body: { error: 'Doc Intelligence poll failed', detail: txt.slice(0, 500) } };
@@ -79,7 +101,7 @@ module.exports = async function (context, req) {
       }
     }
     if (!result) {
-      context.res = { status: 504, body: { error: 'Doc Intelligence timed out (30s)' } };
+      context.res = { status: 504, body: { error: 'Doc Intelligence timed out after 40 polls (60s)' } };
       return;
     }
 
