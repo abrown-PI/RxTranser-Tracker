@@ -501,18 +501,22 @@ function generateBulkShipmentId(toLocation, dateISO) {
 // Generate a single-page printable packing slip for a bulk pharmacy shipment, including a
 // Code128 barcode of the bulk ID for the receiving pharmacy to scan.
 // Uses JsBarcode loaded from CDN if available, falls back to plain text otherwise.
-function printPackingSlip(shipment) {
+function printPackingSlip(shipment, opts) {
+  const preview = !!(opts && opts.preview);
   const manifest = shipment.transferIds.map(tid => TRANSFERS.find(t => t.id === tid)).filter(Boolean);
   const w = window.open('', '_blank');
   if (!w) { alert('Pop-up blocked — allow pop-ups for this site.'); return; }
   const today = new Date().toLocaleString();
   const bulkId = shipment.bulkShipmentId || ('SHIP-' + shipment.id);
   const addr = PHARMACY_ADDRESSES[shipment.toLocation] || {};
+  const logoUrl = location.origin + '/logo.png';
   const html = `<!DOCTYPE html><html><head><title>Packing Slip — ${escapeHtml(bulkId)}</title>
 <style>
   @page { size: letter; margin: 0.5in; }
   body { font-family: 'Arial', sans-serif; color: #111; font-size: 12px; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2a6ebb; padding-bottom: 10px; margin-bottom: 14px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2a6ebb; padding-bottom: 10px; margin-bottom: 14px; gap: 16px; }
+  .header-left { display: flex; align-items: flex-start; gap: 14px; }
+  .header-logo { height: 56px; width: auto; flex-shrink: 0; }
   .brand { font-weight: 700; color: #2a6ebb; font-size: 20px; }
   .brand-sub { font-size: 11px; color: #555; }
   .doc-title { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; text-align: right; }
@@ -529,11 +533,14 @@ function printPackingSlip(shipment) {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"><\/script>
 </head><body>
 <div class="header">
-  <div>
-    <div class="brand">Pharmacy Innovations</div>
-    <div class="brand-sub">Inter-Pharmacy Bulk Shipment Packing Slip</div>
-    <div style="margin-top:8px"><strong>From:</strong> ${escapeHtml(shipment.fromLocation)} — Sterile Compounding</div>
-    <div><strong>To:</strong> ${escapeHtml(shipment.toLocation)}${addr.addr1?` · ${escapeHtml(addr.addr1)}, ${escapeHtml(addr.city||'')}, ${escapeHtml(addr.state||'')} ${escapeHtml(addr.zip||'')}`:''}</div>
+  <div class="header-left">
+    <img src="${logoUrl}" alt="Pharmacy Innovations" class="header-logo" onerror="this.style.display='none'" />
+    <div>
+      <div class="brand">Pharmacy Innovations</div>
+      <div class="brand-sub">Inter-Pharmacy Bulk Shipment Packing Slip</div>
+      <div style="margin-top:8px"><strong>From:</strong> ${escapeHtml(shipment.fromLocation)} — Sterile Compounding</div>
+      <div><strong>To:</strong> ${escapeHtml(shipment.toLocation)}${addr.addr1?` · ${escapeHtml(addr.addr1)}, ${escapeHtml(addr.city||'')}, ${escapeHtml(addr.state||'')} ${escapeHtml(addr.zip||'')}`:''}</div>
+    </div>
   </div>
   <div>
     <div class="doc-title">Packing Slip</div>
@@ -580,7 +587,7 @@ window.onload = function() {
       JsBarcode("#barcode", "${escapeHtml(bulkId)}", { format: "CODE128", width: 2, height: 60, displayValue: false, margin: 4 });
     }
   } catch(e){}
-  setTimeout(function(){ window.print(); }, 500);
+  ${preview ? '' : 'setTimeout(function(){ window.print(); }, 500);'}
 };
 <\/script>
 </body></html>`;
@@ -588,11 +595,15 @@ window.onload = function() {
   w.document.close();
 }
 
-// Generate a one-page printable Credit Card Authorization Form pre-filled with patient + Rx
-// info from the transfer (or draft). Opens in a new window and triggers print. Patient signs,
-// then the signed paper gets scanned and uploaded back into the transfer via the existing
-// 'Signed Credit Card Authorization Form' file input.
-function printCCAuthForm(source) {
+// Generate a one-page Credit Card Authorization Form pre-filled with patient + Rx info.
+// Modes:
+//   'print' (default) — opens in a new window with blank lines, auto-triggers print so it
+//     can be handwritten and scanned back in.
+//   'fill' — opens with fillable <input> fields; user types in their card info and prints
+//     to PDF (or uses Save), then uploads via the existing Signed CC Auth Form file input.
+function printCCAuthForm(source, opts) {
+  const mode = (opts && opts.mode) || 'print';
+  const preview = !!(opts && opts.preview);
   const w = window.open('', '_blank');
   if (!w) { alert('Pop-up blocked — allow pop-ups for this site so the form can print.'); return; }
   const name = source.patientName || '';
@@ -600,11 +611,18 @@ function printCCAuthForm(source) {
   const drugs = (source.items || []).map(i => i.drug).filter(Boolean).join(', ');
   const tid = source.id || '(new transfer)';
   const today = new Date().toLocaleDateString();
+  const logoUrl = location.origin + '/logo.png';
+  const fillable = mode === 'fill';
+  const fieldInput = (placeholder = '') => fillable
+    ? `<input type="text" class="fill-input" placeholder="${escapeHtml(placeholder)}" />`
+    : `<div class="blank"></div>`;
   const html = `<!DOCTYPE html><html><head><title>CC Authorization — ${escapeHtml(name)}</title>
 <style>
   @page { size: letter; margin: 0.6in; }
   body { font-family: 'Arial', sans-serif; color: #111; font-size: 13px; line-height: 1.5; }
-  .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #2a6ebb; padding-bottom: 8px; margin-bottom: 18px; }
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2a6ebb; padding-bottom: 8px; margin-bottom: 18px; gap: 16px; }
+  .header-left { display: flex; align-items: center; gap: 14px; }
+  .header-logo { height: 56px; width: auto; }
   .brand { font-weight: 700; color: #2a6ebb; font-size: 18px; }
   .brand-sub { font-size: 11px; color: #555; }
   .doc-title { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
@@ -614,21 +632,35 @@ function printCCAuthForm(source) {
   .field label { display: block; font-size: 10px; text-transform: uppercase; color: #555; letter-spacing: .03em; margin-bottom: 1px; }
   .field .filled { padding: 3px 0; border-bottom: 1px solid #999; min-height: 18px; font-weight: 600; }
   .field .blank { padding: 3px 0; border-bottom: 1px solid #999; min-height: 22px; }
+  .field .fill-input { width: 100%; box-sizing: border-box; border: none; border-bottom: 1px solid #999; background: #fffef0; padding: 3px 4px; font: inherit; font-weight: 600; min-height: 24px; outline: none; }
+  .field .fill-input:focus { background: #fffae0; border-bottom-color: #2a6ebb; }
   .acknowledgment { font-size: 12px; line-height: 1.5; background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 12px; border-radius: 4px; margin: 14px 0; }
-  .sig-row { display: flex; gap: 24px; margin-top: 30px; }
-  .sig { flex: 2; }
-  .sig-date { flex: 1; }
   .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #666; text-align: center; }
   .small { font-size: 10px; color: #777; }
+  .toolbar { position: sticky; top: 0; background: #233f76; color: white; padding: 10px 14px; margin: -0.4in -0.4in 18px; display: flex; justify-content: space-between; align-items: center; gap: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  .toolbar .tb-msg { font-size: 12px; opacity: .9 }
+  .toolbar button { background: white; color: #233f76; border: none; padding: 8px 14px; border-radius: 4px; font-weight: 600; font-size: 13px; cursor: pointer; }
+  .toolbar button:hover { background: #f1f5f9 }
+  @media print {
+    .toolbar { display: none !important }
+    .field .fill-input { background: white !important; border-bottom-color: #999 !important }
+  }
 </style></head><body>
+${fillable ? `<div class="toolbar">
+  <div class="tb-msg">Fill out the card information below. When done, click <strong>Save as PDF</strong> (choose <em>"Save as PDF"</em> as the destination), then upload the saved file to the transfer.</div>
+  <button type="button" onclick="window.print()">🖨 Save as PDF / Print</button>
+</div>` : ''}
 <div class="header">
-  <div>
-    <div class="brand">Pharmacy Innovations</div>
-    <div class="brand-sub">Compounding · Inter-Pharmacy Transfer</div>
+  <div class="header-left">
+    <img src="${logoUrl}" alt="Pharmacy Innovations" class="header-logo" onerror="this.style.display='none'" />
+    <div>
+      <div class="brand">Pharmacy Innovations</div>
+      <div class="brand-sub">Compounding · Inter-Pharmacy Transfer</div>
+    </div>
   </div>
   <div style="text-align:right">
     <div class="doc-title">Credit Card Authorization</div>
-    <div class="small">Transfer ID: ${escapeHtml(String(tid))} · Printed ${escapeHtml(today)}</div>
+    <div class="small">Transfer ID: ${escapeHtml(String(tid))} · ${fillable?'Generated':'Printed'} ${escapeHtml(today)}</div>
   </div>
 </div>
 
@@ -641,13 +673,13 @@ ${drugs ? `<div class="row"><div class="field"><label>Prescription(s)</label><di
 
 <h2>Cardholder &amp; Card Information</h2>
 <div class="row">
-  <div class="field" style="flex:2"><label>Cardholder Name (as on card)</label><div class="blank"></div></div>
-  <div class="field"><label>Billing Zip</label><div class="blank"></div></div>
+  <div class="field" style="flex:2"><label>Cardholder Name (as on card)</label>${fieldInput('Name on card')}</div>
+  <div class="field"><label>Billing Zip</label>${fieldInput('Zip')}</div>
 </div>
 <div class="row">
-  <div class="field" style="flex:3"><label>Credit Card Number</label><div class="blank"></div></div>
-  <div class="field"><label>Expiration (MM / YY)</label><div class="blank"></div></div>
-  <div class="field"><label>CVV</label><div class="blank"></div></div>
+  <div class="field" style="flex:3"><label>Credit Card Number</label>${fieldInput('XXXX XXXX XXXX XXXX')}</div>
+  <div class="field"><label>Expiration (MM / YY)</label>${fieldInput('MM/YY')}</div>
+  <div class="field"><label>CVV</label>${fieldInput('CVV')}</div>
 </div>
 
 <div class="acknowledgment">
@@ -657,16 +689,11 @@ ${drugs ? `<div class="row"><div class="field"><label>Prescription(s)</label><di
   Innovations' privacy policy.
 </div>
 
-<div class="sig-row">
-  <div class="sig"><label class="small" style="text-transform:uppercase;letter-spacing:.04em;color:#555">Cardholder Signature</label><div class="blank" style="min-height:36px"></div></div>
-  <div class="sig-date"><label class="small" style="text-transform:uppercase;letter-spacing:.04em;color:#555">Date</label><div class="blank" style="min-height:36px"></div></div>
-</div>
-
 <div class="footer">
-  Once signed, scan and upload this form to the transfer in the PI Transfer Tracker — or hand to the billing team.
+  ${fillable ? 'Click <strong>Save as PDF</strong> at the top, then upload the saved file to this transfer.' : 'Scan and upload this completed form to the transfer in the PI Transfer Tracker — or hand to the billing team.'}
   <strong>Do not email or text this form.</strong>
 </div>
-<script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script>
+${(fillable || preview) ? '' : '<script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script>'}
 </body></html>`;
   w.document.write(html);
   w.document.close();
@@ -1169,6 +1196,22 @@ function renderAdmin() {
     </div></div>
 
 
+    <div class="card"><div class="card-header">Document Templates <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— preview what prints from the portal</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:12px">These are the documents the portal can generate. Click <strong>Preview</strong> to open a sample with placeholder data — useful for showing staff what to expect.</p>
+      <table style="box-shadow:none;font-size:13px"><thead><tr><th style="width:240px">Document</th><th>When it's used</th><th style="width:280px">Preview</th></tr></thead><tbody>
+        <tr>
+          <td><strong>Credit Card Authorization</strong><div class="item-sub" style="font-weight:400">Single page, letter</div></td>
+          <td class="item-sub">Generated from any transfer with billing = Credit Card and no card on file. Two modes: print blank for handwriting, or fill on-screen.</td>
+          <td><button class="btn btn-secondary btn-sm" data-doc-preview="cc-print">🖨 Print-blank preview</button> <button class="btn btn-secondary btn-sm" data-doc-preview="cc-fill">✏️ Fill-on-screen preview</button></td>
+        </tr>
+        <tr>
+          <td><strong>Bulk Shipment Packing Slip</strong><div class="item-sub" style="font-weight:400">Single page, letter, with barcode</div></td>
+          <td class="item-sub">Printed when a bulk pharmacy-to-pharmacy shipment is created. Includes manifest of all transfers in the box plus a scannable barcode for receiving.</td>
+          <td><button class="btn btn-secondary btn-sm" data-doc-preview="packing">📦 Packing slip preview</button></td>
+        </tr>
+      </tbody></table>
+    </div></div>
+
     <div class="card"><div class="card-header">Email Notifications</div><div class="card-body">
       <p class="item-sub" style="margin-bottom:14px">Email recipients per pharmacy location. The same list is used for both the <strong>daily summary email</strong> (sent at 5 PM ET, only to locations with activity that day) and the <strong>shipment notification emails</strong> (when a transfer ships to that location).</p>
       <table style="box-shadow:none;font-size:13px"><thead><tr><th style="width:160px">Location</th><th>Notification Emails <span class="hint" style="text-transform:none;font-weight:400">(one per line, or comma-separated)</span></th></tr></thead><tbody>
@@ -1358,6 +1401,46 @@ function renderAdmin() {
     render();
   };
 
+  // Document Templates — preview buttons open sample versions with placeholder data
+  root.querySelectorAll('[data-doc-preview]').forEach(btn => {
+    btn.onclick = () => {
+      const sampleTransfer = {
+        id: 'SAMPLE-1234',
+        patientName: 'Sample Patient',
+        patientDOB: '1980-01-15',
+        items: [{ drug: 'Estradiol 0.5mg', qty: '30', rxNumber: '123456' }]
+      };
+      const sampleShipment = {
+        id: 'SAMPLE',
+        bulkShipmentId: 'BULK-SAMPLE-001',
+        fromLocation: CURRENT_USER.location || 'Erie',
+        toLocation: 'Seminole',
+        carrier: 'FedEx',
+        trackingNumber: '794612345678',
+        shipDate: new Date().toISOString().slice(0,10),
+        transferIds: [1,2,3]
+      };
+      // Add sample transfers to the in-memory list temporarily so printPackingSlip can find them
+      const sampleTransfers = [
+        { id: 1, patientName: 'Jane Doe',   patientDOB: '1972-04-08', coldItem: false, items: [{ drug: 'Estradiol 0.5mg cream', qty: '60g', rxNumber: '100001', receivingRxNumber: '200001' }] },
+        { id: 2, patientName: 'John Smith', patientDOB: '1965-11-22', coldItem: true,  items: [{ drug: 'Testosterone 200mg/ml', qty: '10ml', rxNumber: '100002', receivingRxNumber: '200002' }] },
+        { id: 3, patientName: 'Mary Jones', patientDOB: '1988-07-30', coldItem: false, items: [{ drug: 'Progesterone 100mg', qty: '90', rxNumber: '100003', receivingRxNumber: '200003' }] }
+      ];
+      const kind = btn.dataset.docPreview;
+      if (kind === 'cc-print') {
+        printCCAuthForm(sampleTransfer, { mode: 'print', preview: true });
+      } else if (kind === 'cc-fill') {
+        printCCAuthForm(sampleTransfer, { mode: 'fill', preview: true });
+      } else if (kind === 'packing') {
+        // Temporarily inject samples into TRANSFERS so printPackingSlip's lookup works
+        const saved = TRANSFERS.slice();
+        TRANSFERS.push(...sampleTransfers);
+        try { printPackingSlip(sampleShipment, { preview: true }); }
+        finally { TRANSFERS.length = 0; TRANSFERS.push(...saved); }
+      }
+    };
+  });
+
   // Teams webhooks + email notifications — populate fields from settings
   (async () => {
     try {
@@ -1515,9 +1598,10 @@ function renderNewForm() {
         <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-ccPaladin" ${d.ccOnFileInPaladin?'checked':''} /><label for="f-ccPaladin">Credit card on file</label></div><div class="hint">Never store the actual card number here.</div></div>
         <div class="form-group full" id="f-ccFormBox" style="display:${d.billing==='CreditCard'?'':'none'}">
           <label>Signed Credit Card Authorization Form ${d.ccOnFileInPaladin?'<span class="hint" style="text-transform:none;font-weight:400">(optional — card already on file)</span>':'<span style="color:var(--danger)">*</span>'}</label>
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-            <button type="button" class="btn btn-secondary btn-sm" id="f-printCCForm">🖨 Print blank CC Auth Form</button>
-            <span class="hint">Print → patient signs → scan → upload below</span>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+            <button type="button" class="btn btn-secondary btn-sm" id="f-printCCForm">🖨 Print blank form</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="f-fillCCForm">✏️ Fill on screen</button>
+            <span class="hint">Print + scan, OR fill on screen → Save as PDF → upload below</span>
           </div>
           <input type="file" id="f-ccForm" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" />
           <div class="hint" id="f-ccForm-name">${d.ccForm?escapeHtml(d.ccForm.name):'Upload the patient-signed authorization form. Billing team will retrieve this from the app.'}</div>
@@ -1834,7 +1918,9 @@ function bindDraftInputs() {
   const ccBox = document.getElementById('f-ccFormBox');
   if (billingSel && ccBox) billingSel.addEventListener('change', () => { ccBox.style.display = billingSel.value === 'CreditCard' ? '' : 'none'; });
   const printCCBtn = document.getElementById('f-printCCForm');
-  if (printCCBtn) printCCBtn.addEventListener('click', () => printCCAuthForm(state.draft));
+  if (printCCBtn) printCCBtn.addEventListener('click', () => printCCAuthForm(state.draft, { mode: 'print' }));
+  const fillCCBtn = document.getElementById('f-fillCCForm');
+  if (fillCCBtn) fillCCBtn.addEventListener('click', () => printCCAuthForm(state.draft, { mode: 'fill' }));
 
   const ccForm = document.getElementById('f-ccForm');
   if (ccForm) ccForm.addEventListener('change', () => {
@@ -2306,7 +2392,8 @@ function openCreateShipment() {
     const toLoc = document.getElementById('cm-to')?.value || LOCATIONS[0];
     let availableTransfers = visibleTransfers().filter(t => {
       if (SHIPMENTS.some(s => s.transferIds.includes(t.id) && s.status !== 'Canceled')) return false;
-      if (['Delivered','Canceled','Shipped'].includes(t.status)) return false;
+      // Only In Progress or Ready to Ship are eligible. New transfers must be processed first.
+      if (!['In Progress', 'Ready to Ship'].includes(t.status)) return false;
       if (t.canceledAt && !t.cancelAcknowledged) return false;
       if (destType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === toLoc;
       return t.shipTo === 'Patient';
@@ -3794,15 +3881,29 @@ async function loadAdminEmails() {
   } catch { return []; }
 }
 
-// Apply a signed-in Microsoft account to CURRENT_USER. Determines role from the
-// admin emails list (server-stored). Location comes from localStorage preference
-// (set via the location dropdown after first sign-in). Also persists the user to
-// /api/users so the Admin tab's user list reflects who has signed in.
-function applyMsalAccount(account) {
+// Apply a signed-in Microsoft account to CURRENT_USER. Looks up the user's assigned
+// location from the backend (set by admin in Users & Access). Falls back to localStorage
+// preference (if they manually switched via the dropdown), then to a sensible default.
+async function applyMsalAccount(account) {
   const email = (account.username || '').toLowerCase();
   const name = account.name || account.username || 'User';
   const isAdmin = _adminEmails.includes(email);
-  const savedLocation = localStorage.getItem('userLocation_' + email) || 'Erie';
+
+  // Look up the user's assigned location from backend (source of truth)
+  let backendLocation = null;
+  try {
+    const r = await fetch('/api/users');
+    if (r.ok) {
+      const data = await r.json();
+      const backendUser = (data.users || []).find(u => (u.email || '').toLowerCase() === email);
+      if (backendUser && backendUser.location) backendLocation = backendUser.location;
+    }
+  } catch { /* network error — fall through */ }
+
+  const savedLocation = backendLocation
+    || localStorage.getItem('userLocation_' + email)
+    || 'Erie'; // last-ditch default for brand-new users with no admin-set location yet
+
   // Find or create the user in USERS so existing code that reads from USERS still works
   let user = USERS.find(u => (u.email || '').toLowerCase() === email);
   if (!user) {
@@ -3829,6 +3930,11 @@ function applyMsalAccount(account) {
   locSel.onchange = () => {
     user.location = locSel.value;
     localStorage.setItem('userLocation_' + email, locSel.value);
+    // Persist the change to backend so it survives across browsers + devices
+    fetch('/api/users/' + encodeURIComponent(email), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: locSel.value })
+    }).catch(() => {});
     applyRoleVisibility(); render();
   };
   applyRoleVisibility();
@@ -3851,7 +3957,7 @@ async function doSignIn(m) {
   try {
     const res = await m.loginPopup({ scopes: ['User.Read'], prompt: 'select_account' });
     if (res && res.account) {
-      applyMsalAccount(res.account);
+      await applyMsalAccount(res.account);
       hideAuthGate();
     }
   } catch (e) {
@@ -3951,7 +4057,7 @@ async function initAuth() {
   await loadAdminEmails();
   const accounts = m.getAllAccounts();
   if (accounts.length > 0) {
-    applyMsalAccount(accounts[0]);
+    await applyMsalAccount(accounts[0]);
     hideAuthGate();
   } else if (!localHint) {
     showAuthGate();

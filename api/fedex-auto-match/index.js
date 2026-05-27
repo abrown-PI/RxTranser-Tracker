@@ -222,7 +222,8 @@ module.exports = async function (context, req) {
       body: {
         dryRun,
         openTransfers: openTransfers.length,
-        referencesQueried: references.length,
+        openBulkShipments: openBulkShipments.length,
+        referencesQueried: allRefs.length,
         autoApplied: applied
       }
     };
