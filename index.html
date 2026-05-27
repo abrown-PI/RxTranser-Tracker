@@ -2564,6 +2564,37 @@ async function extractPdfTextPerPage(file) {
   } catch (e) { console.warn('extractPdfTextPerPage failed', e); return null; }
 }
 
+// Rasterize a PDF page to a base64 PNG. Used as input to the Vision OCR endpoint when
+// pdf.js text extraction returns nothing (i.e., the PDF is image-only / scanned).
+// Scale 2 gives ~150 DPI which is the sweet spot for OCR accuracy vs payload size.
+async function rasterizePdfPageToBase64(file, pageNum, scale = 2) {
+  if (!window.pdfjsLib) return null;
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const page = await pdf.getPage(pageNum);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  const dataUrl = canvas.toDataURL('image/png');
+  return dataUrl.split(',')[1]; // strip "data:image/png;base64,"
+}
+
+// Call the backend OCR endpoint with a base64 PNG and return parsed fields.
+async function ocrParsePage(base64Png) {
+  const r = await fetch('/api/parse-transfer-vision', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: base64Png, mediaType: 'image/png' })
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({ error: 'HTTP ' + r.status }));
+    throw new Error(data.error || 'OCR failed');
+  }
+  return r.json();
+}
+
 // Group pages of a PDF into transfers. We try several markers because pdf.js text
 // extraction can be quirky — sometimes words run together ("PATIENTRxTRANSFER") and
 // sometimes there's whitespace + page-break noise between them.
@@ -2621,11 +2652,73 @@ async function processBulkFiles(rawFiles) {
     const groups = groupPdfPagesIntoTransfers(pages);
 
     if (groups.length === 0) {
-      // No transfer markers found — likely an image-only / scanned PDF. Fall back to one draft.
-      const totalChars = pages.reduce((n,p) => n + (p.text||'').length, 0);
+      // pdf.js couldn't find markers (image-only PDF or unrecognized layout) — try OCR fallback.
+      // We rasterize each page to PNG and send to /api/parse-transfer-vision (Azure AI Doc Intel).
+      if (hint) hint.textContent = `Pdf has no extractable text — running OCR on ${pages.length} page(s)…`;
+      const ocrPages = [];
+      let ocrSucceeded = true;
+      for (let p = 1; p <= pages.length; p++) {
+        if (hint) hint.textContent = `OCR page ${p} of ${pages.length}…`;
+        try {
+          const base64 = await rasterizePdfPageToBase64(file, p);
+          const result = await ocrParsePage(base64);
+          ocrPages.push({ pageNum: p, ...result });
+        } catch (e) {
+          console.warn('OCR failed for page ' + p, e);
+          ocrSucceeded = false;
+          break;
+        }
+      }
+      if (ocrSucceeded && ocrPages.length) {
+        // Group OCR'd pages into transfers using the same logic, but on the OCR text + isTransferSheet flag
+        const ocrGroups = [];
+        let current = null;
+        ocrPages.forEach(p => {
+          if (p.isTransferSheet) {
+            if (current) ocrGroups.push(current);
+            current = { transferPage: p, hardCopyPages: [] };
+          } else if (current) {
+            current.hardCopyPages.push(p);
+          }
+        });
+        if (current) ocrGroups.push(current);
+        if (ocrGroups.length > 0) {
+          ocrGroups.forEach((g, idx) => {
+            const draft = freshDraft();
+            const transferPageRange = `page ${g.transferPage.pageNum}`;
+            const hardCopyPageRange = g.hardCopyPages.length ? `pages ${g.hardCopyPages.map(p => p.pageNum).join(',')}` : null;
+            draft.pkSheets = [{ name: `${file.name} [${transferPageRange}, OCR]`, size: file.size, type: file.type }];
+            if (hardCopyPageRange) draft.hardCopies = [{ name: `${file.name} [${hardCopyPageRange}, OCR]`, size: file.size, type: file.type }];
+            const f = g.transferPage;
+            if (f.patientName) draft.patientName = f.patientName;
+            if (f.patientDOB) draft.patientDOB = f.patientDOB;
+            if (f.shipAddr1) draft.shipAddr1 = f.shipAddr1;
+            if (f.shipCity) draft.shipCity = f.shipCity;
+            if (f.shipState) draft.shipState = f.shipState;
+            if (f.shipZip) draft.shipZip = f.shipZip;
+            const first = draft.items[0];
+            if (f.rxNumber) first.rxNumber = f.rxNumber;
+            if (f.drug) first.drug = f.drug;
+            if (f.qty) first.qty = f.qty;
+            newDrafts.push({
+              id: ++_bulkId, draft,
+              sourceFile: `${file.name} (${idx+1}/${ocrGroups.length}, OCR)`,
+              parseError: null, parsed: f
+            });
+          });
+          continue;
+        }
+        // OCR'd but still no transfer-sheet pages detected — fall through to single-draft error case
+        const draft = freshDraft();
+        draft.pkSheets = [{ name: file.name + ' [OCR]', size: file.size, type: file.type }];
+        newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name + ' (OCR)', parseError: 'OCR ran but no transfer header detected on any page.', parsed: null });
+        continue;
+      }
+      // OCR failed (not configured / network / etc.)
+      const totalChars = pages.reduce((n, p) => n + (p.text||'').length, 0);
       const reason = totalChars < 50
-        ? `PDF appears to be scanned images (no extractable text). Tech will need to fill in fields manually.`
-        : `No transfer header detected in ${pages.length} page(s). Check the file format.`;
+        ? `PDF appears to be scanned images and OCR is unavailable. Set ANTHROPIC_API_KEY env var or check Azure AI configuration.`
+        : `No transfer header detected in ${pages.length} page(s). OCR fallback also failed.`;
       const draft = freshDraft();
       draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
       newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: reason, parsed: null });
