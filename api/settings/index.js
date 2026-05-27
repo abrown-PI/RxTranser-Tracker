@@ -52,9 +52,11 @@ function redactWebhooks(settings) {
   Object.keys(webhooks).forEach(loc => {
     configured[loc] = !!webhooks[loc];
   });
+  // Admin emails: NOT secret; return as-is so the UI can show + edit them
   return {
     teamsWebhooksConfigured: configured,
-    askQuestionRouting: settings.askQuestionRouting || 'opposite-side'
+    askQuestionRouting: settings.askQuestionRouting || 'opposite-side',
+    adminEmails: settings.adminEmails || []
   };
 }
 
@@ -76,9 +78,15 @@ module.exports = async function (context, req) {
           if (url === '') delete teamsWebhooks[loc]; else teamsWebhooks[loc] = url;
         });
       }
+      // Admin emails: accept full replacement array if provided (no merge — explicit list)
+      let adminEmails = current.adminEmails || [];
+      if (Array.isArray(incoming.adminEmails)) {
+        adminEmails = incoming.adminEmails.map(e => String(e).toLowerCase().trim()).filter(Boolean);
+      }
       const merged = {
         ...current,
         teamsWebhooks,
+        adminEmails,
         askQuestionRouting: incoming.askQuestionRouting || current.askQuestionRouting || 'opposite-side'
       };
       await writeSettings(merged);

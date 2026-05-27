@@ -197,8 +197,15 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
   <div class="spacer"></div>
   <input type="text" class="global-search" id="globalSearch" placeholder="🔎 Search any patient / Rx / tracking / doctor..." />
   <div id="globalResults" class="global-results" style="display:none"></div>
-  <select class="user-switcher" id="userSwitcher" title="Switch user (demo)"></select>
-  <div class="user" id="userInfo"></div>
+  <select class="user-switcher" id="userSwitcher" title="Switch user (demo only — visible when not signed in)" style="display:none"></select>
+  <div id="signInArea" style="display:flex;align-items:center;gap:10px">
+    <button class="btn btn-secondary btn-sm" id="signInBtn" style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.25);color:white">🔐 Sign in with Microsoft</button>
+  </div>
+  <div id="signedInArea" style="display:none;align-items:center;gap:10px">
+    <select class="user-switcher" id="locationSwitcher" title="Switch your location"></select>
+    <div class="user" id="userInfo"></div>
+    <button class="btn btn-secondary btn-sm" id="signOutBtn" style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.25);color:white;font-size:11px">Sign out</button>
+  </div>
 </nav>
 
 <div class="tabs">
@@ -231,6 +238,7 @@ if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 }
 </script>
+<script src="https://alcdn.msauth.net/browser/3.10.0/js/msal-browser.min.js"></script>
 <script src="data.js"></script>
 <script>
 // =====================================================================
@@ -1083,6 +1091,16 @@ function renderAdmin() {
       </tbody></table>
     </div></div>
 
+    <div class="card"><div class="card-header">Admin Users <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— emails listed here get admin role on sign-in</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">Any 365 account signing in with an email on this list gets the admin role automatically. Everyone else defaults to tech.</p>
+      <div id="ae-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:6px">
+        <input id="ae-new" placeholder="someone@pharmacyinnovations.net" style="flex:1;padding:7px 10px;border:1px solid var(--gray-300);border-radius:6px" />
+        <button class="btn btn-secondary btn-sm" id="ae-add">+ Add</button>
+      </div>
+      <div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="ae-save">Save admin emails</button> <span class="item-sub" id="ae-result" style="margin-left:8px"></span></div>
+    </div></div>
+
     <div class="card"><div class="card-header">Teams Webhooks (per location) <span class="item-sub" id="tw-status" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">When a question is asked on a transfer, the app posts to the webhook configured for the receiving location(s). URLs are stored server-side and never returned to the browser — type/paste them here once, then save.</p>
       ${LOCATIONS.map(l => `
@@ -1124,7 +1142,24 @@ function renderAdmin() {
     alert('SLA rules updated.');
     render();
   };
-  // Teams webhooks — load configured indicators (URLs never come back), save changes via PUT
+  // Local working list of admin emails — gets populated from /api/settings on load.
+  let adminEmailsWorking = [];
+  const renderAdminEmails = () => {
+    const list = document.getElementById('ae-list');
+    if (!list) return;
+    list.innerHTML = adminEmailsWorking.length === 0
+      ? '<div class="item-sub" style="font-style:italic">No admin emails configured yet — only the seed admin (you) has access.</div>'
+      : adminEmailsWorking.map((e, idx) => `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--gray-50);border-radius:4px;font-size:13px">
+          <span style="flex:1;font-family:monospace">${escapeHtml(e)}</span>
+          <button class="btn btn-secondary btn-sm" data-rm-ae="${idx}">Remove</button>
+        </div>`).join('');
+    list.querySelectorAll('[data-rm-ae]').forEach(b => b.onclick = () => {
+      adminEmailsWorking.splice(+b.dataset.rmAe, 1);
+      renderAdminEmails();
+    });
+  };
+
+  // Teams webhooks + admin emails — load configured indicators + initial admin list
   (async () => {
     try {
       const r = await fetch('/api/settings');
@@ -1136,10 +1171,42 @@ function renderAdmin() {
         const loc = el.dataset.locState;
         el.innerHTML = cfg[loc] ? '<span style="color:var(--success)">● configured</span>' : '<span style="color:var(--gray-400)">○ not set</span>';
       });
+      adminEmailsWorking = (data.adminEmails || []).slice();
+      renderAdminEmails();
     } catch (e) {
       document.getElementById('tw-status').textContent = '— load failed (' + e.message + ')';
+      renderAdminEmails();
     }
   })();
+
+  const aeAdd = document.getElementById('ae-add');
+  if (aeAdd) aeAdd.onclick = () => {
+    const input = document.getElementById('ae-new');
+    const val = (input.value || '').trim().toLowerCase();
+    if (!val) return;
+    if (!/^.+@.+\..+$/.test(val)) { alert("That doesn't look like an email address."); return; }
+    if (adminEmailsWorking.includes(val)) { alert('Already in the list.'); return; }
+    adminEmailsWorking.push(val);
+    input.value = '';
+    renderAdminEmails();
+  };
+  const aeSave = document.getElementById('ae-save');
+  if (aeSave) aeSave.onclick = async () => {
+    const result = document.getElementById('ae-result');
+    result.innerHTML = '<span class="item-sub">Saving…</span>';
+    try {
+      const r = await fetch('/api/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminEmails: adminEmailsWorking })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      adminEmailsWorking = (data.adminEmails || []).slice();
+      _adminEmails = adminEmailsWorking.map(e => e.toLowerCase());
+      renderAdminEmails();
+      result.innerHTML = '<span style="color:var(--success)">✓ Saved</span>';
+    } catch (e) { result.innerHTML = '<span style="color:var(--danger)">Save failed: ' + escapeHtml(e.message) + '</span>'; }
+  };
   document.getElementById('tw-save').onclick = async () => {
     const teamsWebhooks = {};
     root.querySelectorAll('[data-loc]').forEach(el => {
@@ -3176,12 +3243,113 @@ async function apiDeleteTransfer(id) {
   } catch (e) { console.error('apiDeleteTransfer failed', e); }
 }
 
+// =====================================================================
+// Microsoft 365 / Entra ID sign-in via MSAL.js
+// =====================================================================
+// Client/Tenant IDs are PUBLIC (anyone signing in can see them); hardcoded for simplicity.
+// If we ever need to rotate them, we'd change here + redeploy.
+const AZURE_AD_CLIENT_ID = 'e07f58ca-4073-417b-99b7-8f4ca12a7fcd';
+const AZURE_AD_TENANT_ID = '14c4fb10-085e-4ac6-a5b3-d49f57a97731';
+
+let _msalInstance = null;
+let _adminEmails = []; // cached after first /api/settings fetch
+
+function getMsal() {
+  if (_msalInstance) return _msalInstance;
+  if (!window.msal) return null;
+  _msalInstance = new msal.PublicClientApplication({
+    auth: {
+      clientId: AZURE_AD_CLIENT_ID,
+      authority: 'https://login.microsoftonline.com/' + AZURE_AD_TENANT_ID,
+      redirectUri: window.location.origin
+    },
+    cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
+  });
+  return _msalInstance;
+}
+
+async function loadAdminEmails() {
+  try {
+    const r = await fetch('/api/settings');
+    if (!r.ok) return [];
+    const data = await r.json();
+    _adminEmails = (data.adminEmails || []).map(e => e.toLowerCase());
+    return _adminEmails;
+  } catch { return []; }
+}
+
+// Apply a signed-in Microsoft account to CURRENT_USER. Determines role from the
+// admin emails list (server-stored). Location comes from localStorage preference
+// (set via the location dropdown after first sign-in).
+function applyMsalAccount(account) {
+  const email = (account.username || '').toLowerCase();
+  const name = account.name || account.username || 'User';
+  const isAdmin = _adminEmails.includes(email);
+  const savedLocation = localStorage.getItem('userLocation_' + email) || 'Erie';
+  // Find or create the user in USERS so existing code that reads from USERS still works
+  let user = USERS.find(u => (u.email || '').toLowerCase() === email);
+  if (!user) {
+    user = { name, email, location: savedLocation, role: isAdmin ? 'admin' : 'tech' };
+    USERS.unshift(user);
+  } else {
+    user.name = name;
+    user.role = isAdmin ? 'admin' : (user.role === 'manager' ? 'manager' : 'tech');
+    user.location = savedLocation;
+  }
+  CURRENT_USER = user;
+  // Swap UI
+  document.getElementById('signInArea').style.display = 'none';
+  document.getElementById('signedInArea').style.display = 'flex';
+  document.getElementById('userInfo').textContent = `${user.name}`;
+  // Location switcher
+  const locSel = document.getElementById('locationSwitcher');
+  locSel.innerHTML = LOCATIONS.map(l => `<option value="${l}" ${l===user.location?'selected':''}>${l}</option>`).join('');
+  locSel.onchange = () => {
+    user.location = locSel.value;
+    localStorage.setItem('userLocation_' + email, locSel.value);
+    applyRoleVisibility(); render();
+  };
+  applyRoleVisibility();
+  render();
+}
+
+async function initAuth() {
+  const m = getMsal();
+  if (!m) return;
+  await m.initialize();
+  // Handle the case where we just came back from a redirect-based login
+  try { await m.handleRedirectPromise(); } catch (e) { console.warn('handleRedirectPromise', e); }
+  await loadAdminEmails();
+  const accounts = m.getAllAccounts();
+  if (accounts.length > 0) {
+    applyMsalAccount(accounts[0]);
+  }
+  document.getElementById('signInBtn').onclick = async () => {
+    try {
+      const res = await m.loginPopup({ scopes: ['User.Read'], prompt: 'select_account' });
+      if (res && res.account) applyMsalAccount(res.account);
+    } catch (e) {
+      // Fall back to redirect if popup fails (e.g., popup blocked)
+      console.warn('loginPopup failed, trying redirect', e);
+      try { await m.loginRedirect({ scopes: ['User.Read'] }); }
+      catch (e2) { alert('Sign-in failed: ' + e2.message); }
+    }
+  };
+  document.getElementById('signOutBtn').onclick = async () => {
+    try { await m.logoutPopup(); }
+    catch { await m.logoutRedirect(); }
+    document.getElementById('signedInArea').style.display = 'none';
+    document.getElementById('signInArea').style.display = 'flex';
+  };
+}
+
 // init
 populateUserSwitcher();
 bindGlobalSearch();
 applyRoleVisibility();
 render();
 startFedexAutoRefresh();
+initAuth();
 
 // Load persisted transfers from Table Storage and merge into the in-memory array, then re-render.
 // Also handles ?transfer=ID deep-links (e.g. from Teams notifications) by opening the matching detail modal.
