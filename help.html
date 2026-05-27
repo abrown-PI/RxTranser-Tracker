@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PI Transfer Tracker — How to Use</title>
+<style>
+@page { size: letter; margin: 0.6in; }
+:root {
+  --primary: #2a6ebb; --primary-dark: #233f76;
+  --gray-100: #f1f5f9; --gray-200: #e2e8f0; --gray-300: #cbd5e1;
+  --gray-500: #64748b; --gray-700: #334155; --gray-900: #0f172a;
+  --primary-bg: #cfdbed;
+}
+* { box-sizing: border-box; }
+body { font-family: 'Segoe UI', -apple-system, sans-serif; color: var(--gray-900); font-size: 14px; line-height: 1.6; max-width: 8.5in; margin: 0 auto; padding: 24px 32px; }
+h1 { color: var(--primary); border-bottom: 3px solid var(--primary); padding-bottom: 8px; margin-bottom: 4px; font-size: 28px; }
+h1 + p { color: var(--gray-500); margin-top: 0; margin-bottom: 18px; }
+h2 { color: var(--primary-dark); border-bottom: 1px solid var(--gray-300); padding-bottom: 4px; margin-top: 32px; margin-bottom: 12px; font-size: 20px; page-break-after: avoid; }
+h3 { color: var(--primary-dark); margin-top: 20px; margin-bottom: 8px; font-size: 16px; page-break-after: avoid; }
+p { margin: 8px 0; }
+ol, ul { margin: 8px 0; padding-left: 26px; }
+ol li, ul li { margin: 4px 0; }
+code { background: var(--gray-100); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 12px; color: var(--primary-dark); }
+pre { background: var(--gray-100); padding: 10px 14px; border-radius: 4px; font-size: 12px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+th { background: var(--primary); color: white; padding: 8px 10px; text-align: left; font-weight: 600; }
+td { padding: 6px 10px; border-bottom: 1px solid var(--gray-200); vertical-align: top; }
+tr:nth-child(even) td { background: var(--gray-100); }
+hr { border: none; border-top: 1px solid var(--gray-300); margin: 24px 0; }
+.tip { background: #ecfeff; border-left: 4px solid #0891b2; padding: 8px 12px; margin: 10px 0; font-size: 13px; border-radius: 0 4px 4px 0; }
+.tip strong { color: #0891b2; }
+.note { background: #fffbeb; border-left: 4px solid #d97706; padding: 8px 12px; margin: 10px 0; font-size: 13px; border-radius: 0 4px 4px 0; }
+.note strong { color: #d97706; }
+strong { color: var(--gray-900); }
+.url { font-family: 'Consolas', monospace; font-size: 13px; word-break: break-all; }
+.toc { background: var(--gray-100); padding: 14px 18px; border-radius: 6px; margin: 16px 0 24px; }
+.toc h3 { margin-top: 0; }
+.toc a { color: var(--primary); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.print-button { position: fixed; top: 10px; right: 10px; padding: 8px 16px; background: var(--primary); color: white; border: 0; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+@media print { .print-button { display: none; } }
+section { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+<div class="print-button" style="display:flex;gap:6px;padding:0;background:transparent;box-shadow:none">
+  <a href="PI-Transfer-Tracker-How-To-Use.pdf" target="_blank" style="background:var(--primary);color:white;padding:8px 14px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.15)">📥 Download PDF</a>
+  <button onclick="window.print()" style="background:white;color:var(--primary);padding:8px 14px;border-radius:6px;border:1px solid var(--primary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15)">🖨 Print</button>
+</div>
+
+<h1>PI Transfer Tracker — How to Use</h1>
+<p>A quick guide for daily tasks. Bookmark, print, or save as PDF (button top-right).</p>
+
+<p><strong>Website:</strong> <span class="url">https://red-island-0bb34e510.7.azurestaticapps.net</span></p>
+
+<div class="toc">
+  <h3>Contents</h3>
+  <ul>
+    <li><a href="#signin">Signing In</a></li>
+    <li><a href="#new">Creating a New Transfer</a> (Single + Bulk Upload)</li>
+    <li><a href="#refill">Refilling an Existing Transfer</a></li>
+    <li><a href="#edit">Editing a Transfer After Submission</a></li>
+    <li><a href="#ask">Asking a Question About a Transfer</a></li>
+    <li><a href="#alerts">Checking Alerts</a></li>
+    <li><a href="#cc">Credit Card Workflow</a></li>
+    <li><a href="#shipments">Shipments — Create + Receive</a></li>
+    <li><a href="#print">Printing &amp; Batch Operations</a></li>
+    <li><a href="#fedex">Pulling Tracking from FedEx</a></li>
+    <li><a href="#admin">Admin Tasks</a></li>
+    <li><a href="#statuses">Status Definitions</a></li>
+    <li><a href="#faq">Common Questions</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<section id="signin">
+<h2>Signing In</h2>
+<ol>
+  <li>Open the site</li>
+  <li>Click <strong>🔐 Sign in with Microsoft</strong> in the top right</li>
+  <li>Sign in with your <strong>@pharmacyinnovations.net</strong> account (same one you use for Outlook/Teams)</li>
+  <li>First time only: pick your location from the dropdown in the top right. The app remembers it next time.</li>
+</ol>
+<p>If you ever need to switch which pharmacy you're working from for the day, just change the dropdown in the navbar.</p>
+</section>
+
+<section id="new">
+<h2>Creating a New Transfer</h2>
+<p>There are two ways:</p>
+
+<h3>Single Transfer</h3>
+<p>Use this when you have one transfer to enter.</p>
+<ol>
+  <li>Click <strong>+ New Transfer</strong></li>
+  <li>Fill in the form:
+    <ul>
+      <li><strong>Patient Name</strong> is required</li>
+      <li>At least one <strong>PK Transfer Sheet</strong> upload is required</li>
+      <li>If billing is <strong>Credit Card</strong> and the card is NOT on file: upload the signed CC Authorization Form (see Credit Card Workflow below)</li>
+    </ul>
+  </li>
+  <li>Click <strong>Submit transfer</strong></li>
+</ol>
+<div class="tip"><strong>Tip:</strong> If you upload a clean PDF transfer sheet, the app auto-fills patient name, DOB, drug, and Rx# from the sheet. You only need to verify/edit.</div>
+
+<h3>Bulk Upload (multiple transfers at once)</h3>
+<p>Use this when you have a stack of transfers in one PDF.</p>
+<ol>
+  <li>Click <strong>+ New Transfer</strong> → toggle to <strong>Bulk Upload</strong> at the top right</li>
+  <li>Click <strong>📁 Select PDFs to upload</strong> and pick the file(s)</li>
+  <li>The app splits each PDF: every "PATIENT Rx TRANSFER INFORMATION" page becomes its own draft. Hard copies/order forms that follow get attached to that draft.</li>
+  <li>Review the queue — drafts marked <strong>⚠ Needs Review</strong> are missing required fields</li>
+  <li>Click <strong>Edit</strong> to fix any flagged drafts</li>
+  <li>Click <strong>Approve</strong> on each ready draft, OR click <strong>Approve all N ready</strong> at the top to do them in one shot</li>
+</ol>
+</section>
+
+<section id="refill">
+<h2>Refilling an Existing Transfer</h2>
+<ol>
+  <li>Click <strong>+ Refill</strong> (top tab)</li>
+  <li>Search by patient name, Origin Rx#, or Receiving Rx#</li>
+  <li>Click <strong>Refill this →</strong> on the right transfer</li>
+  <li>Review the <strong>Shipping &amp; Payment Defaults</strong> (auto-pulled from the original). Click <strong>Edit</strong> if anything changed.</li>
+  <li>Check the <strong>Prescriptions</strong> boxes for which Rx to include in this refill</li>
+  <li>Click <strong>Continue to refill form →</strong></li>
+  <li>The form is pre-filled — review, attach a fresh PK transfer sheet, hit <strong>Submit</strong></li>
+</ol>
+<div class="tip"><strong>Tip:</strong> Refills don't require a hard copy scan — it's optional.</div>
+</section>
+
+<section id="edit">
+<h2>Editing a Transfer After Submission</h2>
+<ol>
+  <li>From the Transfers tab, click the row to open the detail modal</li>
+  <li>Click <strong>✏️ Edit Transfer</strong> at the top</li>
+  <li>Change anything: patient info, routing, ship-to, billing, documents</li>
+  <li>Click <strong>Save changes</strong></li>
+</ol>
+<p>Use this to fix typos, update the ship-to address, swap the wrong origin pharmacy, or add documents that came in later.</p>
+</section>
+
+<section id="ask">
+<h2>Asking a Question About a Transfer</h2>
+<p>Use this when you need info from another pharmacy.</p>
+<ol>
+  <li>From the Transfers list, find the patient → click <strong>❓ Ask question</strong> on that row.<br>
+      <em>(Or open the transfer and click ❓ Ask Question at the top.)</em></li>
+  <li>Type your question, click <strong>Send Question</strong></li>
+  <li>The other location gets a Teams notification with a button to open the transfer</li>
+  <li>They reply in the transfer's <strong>Discussion</strong> section</li>
+  <li>Your reply appears for them on their <strong>Alerts</strong> tab</li>
+</ol>
+<p>You can see questions YOU asked that are still unanswered on the <strong>Alerts</strong> tab → "Questions You've Asked" section.</p>
+</section>
+
+<section id="alerts">
+<h2>Checking Alerts</h2>
+<p>The <strong>Alerts</strong> tab shows three things:</p>
+<ol>
+  <li><strong>Open Questions</strong> — questions other team members asked YOUR location, waiting for your answer. Click <strong>Answer →</strong> to open the transfer.</li>
+  <li><strong>Questions You've Asked</strong> — your own pending questions still waiting on a reply.</li>
+  <li><strong>Transfers Past Status Time Limit</strong> — transfers stuck in one status too long. Click any row to open and update.</li>
+</ol>
+<p>The number in the <strong>Alerts</strong> tab badge = open questions for you + overdue transfers.</p>
+</section>
+
+<section id="cc">
+<h2>Credit Card Workflow</h2>
+<p>When billing = <strong>Credit Card</strong> AND the card is NOT on file:</p>
+<ol>
+  <li>On the New Transfer form, click <strong>🖨 Print blank CC Auth Form</strong></li>
+  <li>A one-page PDF prints with patient name + drug pre-filled. The patient signs it.</li>
+  <li>Scan the signed form</li>
+  <li>Upload it in the <strong>Signed Credit Card Authorization Form</strong> field on the same transfer</li>
+  <li>Billing team opens the transfer in the app → clicks <strong>View / Print Signed Form</strong> when they need to charge</li>
+</ol>
+<div class="note"><strong>Important:</strong> Card info goes on the paper form — never typed into the app — for compliance.</div>
+</section>
+
+<section id="shipments">
+<h2>Shipments</h2>
+
+<h3>Creating a Bulk Pharmacy Shipment (weekly box to another pharmacy)</h3>
+<ol>
+  <li><strong>Shipments</strong> tab → <strong>+ Create Shipment</strong></li>
+  <li>Destination Type: <strong>Pharmacy</strong>, To: pick the destination pharmacy</li>
+  <li>The list below auto-loads open transfers going to that pharmacy. Check the ones in this box.</li>
+  <li>Carrier: FedEx (or whichever), tracking #: paste from FedEx Ship Manager</li>
+  <li><strong>Create Shipment</strong></li>
+  <li>App offers to print a <strong>packing slip</strong> with the bulk shipment ID + Code128 barcode + manifest. Put this inside the box.</li>
+</ol>
+
+<h3>Receiving a Shipment</h3>
+<ol>
+  <li><strong>Shipments</strong> tab → focus the <strong>📷 Scan tracking barcode</strong> field at the top</li>
+  <li>Scan the FedEx barcode OR the bulk packing slip barcode</li>
+  <li>The shipment opens — click <strong>📦 Arrived at my pharmacy</strong> when the box is in your hand</li>
+  <li>Check off each Rx as you unpack it</li>
+  <li>Take photos of any damage with the camera button</li>
+  <li>Click <strong>Mark Package Received</strong></li>
+</ol>
+</section>
+
+<section id="print">
+<h2>Printing &amp; Batch Operations</h2>
+
+<h3>Batch print transfer sheets (Erie sterile team)</h3>
+<ol>
+  <li><strong>Transfers</strong> tab → check the boxes next to transfers you want to print</li>
+  <li>Click <strong>🖨 Print Selected (N)</strong> at the top right</li>
+  <li>App opens a print window with all selected PK sheets + hard copies in one job</li>
+  <li>After printing, the app auto-changes those transfers to <strong>In Progress</strong></li>
+</ol>
+</section>
+
+<section id="fedex">
+<h2>Pulling Tracking from FedEx</h2>
+<p>When the FedEx integration is set up:</p>
+<ol>
+  <li><strong>Shipments</strong> tab → click <strong>📦 Pull from FedEx</strong></li>
+  <li>Pick a date range (default last 10 days)</li>
+  <li>App pulls all shipments from your FedEx account in that range</li>
+  <li>App auto-matches each FedEx shipment to an open transfer by ship-to address</li>
+  <li>Review matches — high-confidence ones are pre-checked. Uncheck or change as needed.</li>
+  <li>Click <strong>Apply</strong> — tracking numbers + dates get linked</li>
+</ol>
+<p>Status updates automatically every 15 min while someone has the Shipments tab open.</p>
+</section>
+
+<section id="admin">
+<h2>Admin Tasks (admins only)</h2>
+<p>The <strong>Admin</strong> tab is only visible if your email is in the Admin Users list.</p>
+<ul>
+  <li><strong>Admin Users:</strong> type emails, click + Add, then Save</li>
+  <li><strong>SLA Rules:</strong> how long a transfer can sit in each status before it shows on the Alerts tab</li>
+  <li><strong>Formula Library:</strong> saved formula worksheets per pharmacy</li>
+  <li><strong>Pharmacy Mailing Addresses:</strong> used for Ship-to-Pharmacy auto-fill</li>
+  <li><strong>Teams Webhooks:</strong> paste Power Automate webhook URLs per location</li>
+</ul>
+</section>
+
+<section id="statuses">
+<h2>Status Definitions</h2>
+<table>
+<thead><tr><th>Status</th><th>What it means</th></tr></thead>
+<tbody>
+<tr><td><strong>New</strong></td><td>Just submitted, not yet processed</td></tr>
+<tr><td><strong>In Progress</strong></td><td>Being compounded at the fill location</td></tr>
+<tr><td><strong>Ready to Ship</strong></td><td>Compounding done, awaiting shipment</td></tr>
+<tr><td><strong>Shipped</strong></td><td>In transit</td></tr>
+<tr><td><strong>Delivered</strong></td><td>Patient or pharmacy has received</td></tr>
+<tr><td><strong>Canceled</strong></td><td>Transfer canceled (must be acknowledged on Alerts tab before being archived)</td></tr>
+</tbody>
+</table>
+</section>
+
+<section id="faq">
+<h2>Common Questions</h2>
+<p><strong>Q: I picked the wrong origin pharmacy and submitted. Can I fix it?</strong><br>
+A: Yes — open the transfer → ✏️ Edit Transfer → change origin → Save.</p>
+
+<p><strong>Q: A patient changed their address. How do I update for refills?</strong><br>
+A: Edit the existing transfer with the new address before refilling, OR start the refill and use the <strong>Edit</strong> button on the Shipping &amp; Payment Defaults to override.</p>
+
+<p><strong>Q: We canceled a transfer — does the app know?</strong><br>
+A: Change the status to <strong>Canceled</strong> on the transfer. It will show up under Action Items until someone acknowledges it. This prevents accidentally shipping it.</p>
+
+<p><strong>Q: How do I see all transfers for one patient?</strong><br>
+A: Use the search bar at the top of the navbar — type their name. Results include their transfers AND shipments.</p>
+
+<p><strong>Q: Can I export the list?</strong><br>
+A: Yes — <strong>Reports</strong> tab → <strong>Export CSV</strong> at the bottom.</p>
+</section>
+
+<hr>
+<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>This guide is also available at /help.html inside the app. Need to update it? Edit help.html in the repo.</em></p>
+
+</body>
+</html>
