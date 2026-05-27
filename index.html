@@ -2566,11 +2566,9 @@ async function extractPdfTextPerPage(file) {
 
 // Rasterize a PDF page to a base64 PNG. Used as input to the Vision OCR endpoint when
 // pdf.js text extraction returns nothing (i.e., the PDF is image-only / scanned).
-// Scale 2 gives ~150 DPI which is the sweet spot for OCR accuracy vs payload size.
-async function rasterizePdfPageToBase64(file, pageNum, scale = 2) {
-  if (!window.pdfjsLib) return null;
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+// Scale 1.5 gives ~110 DPI — good enough for OCR accuracy without blowing up the payload.
+// Re-uses a pdf document handle (passed in) to avoid re-parsing the whole file per page.
+async function rasterizePdfPageToBase64(pdf, pageNum, scale = 1.5) {
   const page = await pdf.getPage(pageNum);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement('canvas');
@@ -2655,21 +2653,29 @@ async function processBulkFiles(rawFiles) {
       // pdf.js couldn't find markers (image-only PDF or unrecognized layout) — try OCR fallback.
       // We rasterize each page to PNG and send to /api/parse-transfer-vision (Azure AI Doc Intel).
       if (hint) hint.textContent = `Pdf has no extractable text — running OCR on ${pages.length} page(s)…`;
+      // Open the PDF ONCE so we don't re-parse on every page
+      let pdf = null;
+      try {
+        const buf = await file.arrayBuffer();
+        pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      } catch (e) { console.warn('Could not open PDF for rasterization', e); }
       const ocrPages = [];
-      let ocrSucceeded = true;
-      for (let p = 1; p <= pages.length; p++) {
-        if (hint) hint.textContent = `OCR page ${p} of ${pages.length}…`;
-        try {
-          const base64 = await rasterizePdfPageToBase64(file, p);
-          const result = await ocrParsePage(base64);
-          ocrPages.push({ pageNum: p, ...result });
-        } catch (e) {
-          console.warn('OCR failed for page ' + p, e);
-          ocrSucceeded = false;
-          break;
+      const ocrErrors = [];
+      if (pdf) {
+        for (let p = 1; p <= pages.length; p++) {
+          if (hint) hint.textContent = `OCR page ${p} of ${pages.length}…`;
+          try {
+            const base64 = await rasterizePdfPageToBase64(pdf, p);
+            const result = await ocrParsePage(base64);
+            ocrPages.push({ pageNum: p, ...result });
+          } catch (e) {
+            console.warn('OCR failed for page ' + p + ':', e.message || e);
+            ocrErrors.push(`page ${p}: ${e.message || e}`);
+            // KEEP GOING — one bad page shouldn't kill the whole batch
+          }
         }
       }
-      if (ocrSucceeded && ocrPages.length) {
+      if (ocrPages.length > 0) {
         // Group OCR'd pages into transfers using the same logic, but on the OCR text + isTransferSheet flag
         const ocrGroups = [];
         let current = null;
@@ -2714,11 +2720,12 @@ async function processBulkFiles(rawFiles) {
         newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name + ' (OCR)', parseError: 'OCR ran but no transfer header detected on any page.', parsed: null });
         continue;
       }
-      // OCR failed (not configured / network / etc.)
+      // All OCR attempts failed (not configured / network / image too small / etc.)
       const totalChars = pages.reduce((n, p) => n + (p.text||'').length, 0);
+      const errorSummary = ocrErrors.length ? ` First error: ${ocrErrors[0]}` : '';
       const reason = totalChars < 50
-        ? `PDF appears to be scanned images and Azure Document Intelligence OCR failed. Check the function logs.`
-        : `No transfer header detected in ${pages.length} page(s). OCR fallback also failed.`;
+        ? `PDF is image-only and OCR failed on every page.${errorSummary}`
+        : `No transfer header detected in ${pages.length} page(s). OCR fallback also failed.${errorSummary}`;
       const draft = freshDraft();
       draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
       newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: reason, parsed: null });
