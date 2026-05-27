@@ -1644,7 +1644,7 @@ function freshDraft() {
     transferType: 'New', refillOfId: null,
     patientName: '', patientDOB: '', patientAllergies: '',
     originLocation: CURRENT_USER.location, fillLocation: 'Erie',
-    shipTo: 'Patient', deliveryCharge: '',
+    shipTo: 'Pharmacy', deliveryCharge: '',
     shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
     billing: 'HealNow', ccOnFileInPaladin: false, ccForm: null,
     coldItem: false,
@@ -2958,22 +2958,45 @@ function renderBulkEditor(b) {
     if (submitBtn) {
       submitBtn.textContent = 'Save & return to queue';
       submitBtn.onclick = exitEdit;
-      // Add a sibling "Save & Approve" button that approves the draft immediately if all required fields are filled
-      const approveBtn = document.createElement('button');
-      approveBtn.className = 'btn btn-primary';
-      approveBtn.textContent = 'Save & Approve';
-      approveBtn.style.marginRight = '8px';
-      approveBtn.onclick = () => {
-        saveBulkQueue();
-        if (bulkDraftStatus(b) !== 'ok') {
-          const missing = bulkDraftMissing(b);
-          alert(`Cannot approve — still missing: ${missing.join(', ')}`);
-          return;
-        }
-        approveBulkDraft(b.id);
-        state.draft = null; state.bulkEditingId = null;
-        document.querySelector('.tab[data-tab=new]').click();
+      // Two approve buttons: "Save & Approve" closes the editor, "Approve & Next" advances to the next draft
+      const queueSnapshot = (state.bulkQueue || []).map(x => x.id);
+      const currentIdx = queueSnapshot.indexOf(b.id);
+      const hasNext = currentIdx >= 0 && currentIdx < queueSnapshot.length - 1;
+
+      const makeApproveBtn = (label, advanceToNext) => {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary';
+        btn.textContent = label;
+        btn.style.marginRight = '8px';
+        btn.onclick = () => {
+          saveBulkQueue();
+          if (bulkDraftStatus(b) !== 'ok') {
+            const missing = bulkDraftMissing(b);
+            alert(`Cannot approve — still missing: ${missing.join(', ')}`);
+            return;
+          }
+          approveBulkDraft(b.id);
+          // After approval, b.id is removed from the queue. The next draft (if any) sits at
+          // currentIdx in the snapshot we took — find it now.
+          if (advanceToNext && hasNext) {
+            const nextId = queueSnapshot[currentIdx + 1];
+            const stillExists = (state.bulkQueue || []).find(x => x.id === nextId);
+            if (stillExists) {
+              state.bulkEditingId = nextId;
+              renderNewForm();
+              return;
+            }
+          }
+          state.draft = null; state.bulkEditingId = null;
+          document.querySelector('.tab[data-tab=new]').click();
+        };
+        return btn;
       };
+      if (hasNext) {
+        const nextBtn = makeApproveBtn('Approve & Next →', true);
+        submitBtn.parentNode.insertBefore(nextBtn, submitBtn);
+      }
+      const approveBtn = makeApproveBtn('Save & Approve', false);
       submitBtn.parentNode.insertBefore(approveBtn, submitBtn);
     }
     const resetBtn = document.getElementById('resetDraft');
