@@ -1858,11 +1858,17 @@ function draftFromRefill(source) {
     ccForm: null,
     coldItem: !!source.coldItem,
     anticipatedShipDate: '',
-    pkSheets: [], formula: null, hardCopies: [],
+    // Carry over docs from the source transfer — same prescription, same paperwork.
+    // User can replace/remove on the form if anything changed.
+    pkSheets: (source.pkSheets || []).slice(),
+    hardCopies: (source.hardCopies || []).slice(),
+    formula: source.formula || null,
+    // Same prescription = same Rx numbers. User can override on the form if needed.
     items: source.items.map(i => ({
       id: nextId(),
       drug: i.drug, qty: i.qty,
-      rxNumber: '',
+      rxNumber: i.rxNumber || '',
+      receivingRxNumber: i.receivingRxNumber || '',
       receiptAttached: false,
       doctorName: i.doctorName, doctorAddr: i.doctorAddr,
       doctorPhone: i.doctorPhone, doctorDEA: i.doctorDEA,
@@ -2102,6 +2108,28 @@ function renderModal() {
           <div style="font-size:13px;line-height:1.8">
             <strong>${escapeHtml(t.patientName)}</strong> · DOB ${fmtDate(t.patientDOB)} · Allergies: ${escapeHtml(t.patientAllergies||'—')}
           </div>
+          ${(() => {
+            // Build the refill chain: the original (top of chain) + every refill that descends from it
+            const original = t.refillOfId ? TRANSFERS.find(x => x.id === t.refillOfId) : t;
+            if (!original) return '';
+            const refills = TRANSFERS.filter(x => x.refillOfId === original.id)
+              .sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
+            if (refills.length === 0 && !t.refillOfId) return ''; // No chain to show
+            const chainRow = (entry, label, isCurrent) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:4px;${isCurrent?'background:var(--primary-bg);font-weight:600':''}">
+              <div style="font-size:12px">
+                <span class="badge ${entry.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${label}</span>
+                <span style="margin-left:6px">${fmtDate(entry.createdAt)}</span>
+                <span class="item-sub" style="margin-left:6px">· ${entry.items.length} Rx · <span class="badge ${STATUS_BADGE[entry.status]||''}" style="font-size:10px">${entry.status}</span></span>
+                ${isCurrent?'<span class="hint" style="margin-left:6px">— you are viewing this one</span>':''}
+              </div>
+              ${isCurrent ? '' : `<button class="btn btn-secondary btn-sm" data-open-transfer="${entry.id}">Open</button>`}
+            </div>`;
+            return `<div class="section"><div class="section-title">Rx History <span class="hint" style="text-transform:none;font-weight:400">— original transfer + all refills</span></div>
+              <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px">
+                ${chainRow(original, 'Original', original.id === t.id)}
+                ${refills.map(r => chainRow(r, 'Refill', r.id === t.id)).join('')}
+              </div></div>`;
+          })()}
           ${t.legacyRefill ? `<div class="section"><div class="section-title">Prior Transfer Info <span class="hint" style="text-transform:none;font-weight:400">(manual — original not in app)</span></div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px 24px;font-size:13px;background:var(--gray-50);padding:10px 14px;border-radius:6px">
             <div><strong>Prior pharmacy:</strong> ${escapeHtml(t.priorPharmacy||'—')}</div>
             <div><strong>Prior Rx #:</strong> ${escapeHtml(t.priorRxNumber||'—')}</div>
@@ -2188,6 +2216,11 @@ function renderModal() {
     closeModal();
     document.querySelector('.tab[data-tab=new]').click();
   });
+  // Rx History — clicking Open on another entry in the chain re-renders the modal for that transfer
+  document.querySelectorAll('[data-open-transfer]').forEach(b => b.addEventListener('click', () => {
+    state.openTransferId = +b.dataset.openTransfer;
+    renderModal();
+  }));
   document.getElementById('askQBtn').addEventListener('click', () => openAskQuestionModal(t.id));
   const viewBulkBtn = document.getElementById('viewBulkPages');
   if (viewBulkBtn) viewBulkBtn.addEventListener('click', () => openPageViewer({ sourceFile: t.patientName + ' — attached pages', pageImages: t.pageImages || [] }));
@@ -3403,7 +3436,7 @@ function renderRefillReview(t) {
     </div></div>
 
     <div class="card"><div class="card-header">Prescriptions in Original Transfer <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— pick which to include in the refill</span></div><div class="card-body">
-      <p style="color:var(--gray-600);margin-bottom:10px">${t.items.length} prescription${t.items.length>1?'s were':' was'} on the original transfer. Check the ones you want to refill. PK transfer sheet, hard copy, and any new Rx numbers will be re-uploaded/assigned at the next step.</p>
+      <p style="color:var(--gray-600);margin-bottom:10px">${t.items.length} prescription${t.items.length>1?'s were':' was'} on the original transfer. Check the ones you want to refill. PK transfer sheet, hard copy, formula, and Rx numbers carry over from the original — you can replace any of them on the next screen if something changed.</p>
       ${t.items.map(i => `
         <div class="checkbox-row" style="padding:10px;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px">
           <input type="checkbox" data-incl="${i.id}" ${r.includedItems[i.id]?'checked':''} />
@@ -3445,11 +3478,13 @@ function renderRefillReview(t) {
       billing: def.billing, ccOnFileInPaladin: def.ccOnFileInPaladin
     });
     const keepIds = new Set(Object.entries(r.includedItems).filter(([,v])=>v).map(([k])=>+k));
-    // draft.items currently has fresh IDs; we need to map source IDs → which to keep
+    // draft.items currently has fresh IDs; we need to map source IDs → which to keep.
+    // Same Rx (it's a refill) so keep the origin and receiving Rx numbers from the source.
     draft.items = t.items.filter(i => keepIds.has(i.id)).map(i => ({
       id: nextId(),
       drug: i.drug, qty: i.qty,
-      rxNumber: '', receivingRxNumber: '',
+      rxNumber: i.rxNumber || '',
+      receivingRxNumber: i.receivingRxNumber || '',
       receiptAttached: false,
       doctorName: i.doctorName, doctorAddr: i.doctorAddr, doctorPhone: i.doctorPhone, doctorDEA: i.doctorDEA,
       notes: ''
