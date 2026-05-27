@@ -727,24 +727,52 @@ function openPageViewer(bulkDraft) {
 }
 
 // Open one or more attached documents in a print window. Each file's dataUrl is rendered;
-// PDFs get embedded, images get an <img>. After load, the browser print dialog opens.
+// PDFs get embedded, images get an <img>. Each doc gets a prominent header band at the
+// top showing the Transfer ID (WorldShip reference) and patient name, so receiving staff
+// can identify the transfer at a glance. After load, the browser print dialog opens.
 function printDocs(items) {
   const w = window.open('', '_blank');
   if (!w) { alert('Pop-up blocked — please allow pop-ups for this site so the print queue can open.'); return; }
-  const html = ['<!DOCTYPE html><html><head><title>Print</title><style>body{margin:0;font-family:sans-serif}.doc{page-break-after:always;padding:14px}.doc:last-child{page-break-after:auto}h2{font-size:14px;margin:0 0 8px;color:#333}img,embed,iframe{max-width:100%;border:0;display:block}</style></head><body>'];
+  const html = ['<!DOCTYPE html><html><head><title>Print</title><style>',
+    '@page { margin: 0.4in; }',
+    'body { margin: 0; font-family: Arial, sans-serif; color: #111; }',
+    '.doc { page-break-after: always; }',
+    '.doc:last-child { page-break-after: auto; }',
+    '.stamp { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #fff3a8; border: 2px solid #233f76; border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; font-size: 13px; }',
+    '.stamp .ref-label { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: #555; font-weight: 600; }',
+    '.stamp .ref-id { font-family: "Consolas", monospace; font-size: 22px; font-weight: 700; color: #233f76; letter-spacing: .04em; line-height: 1.1; }',
+    '.stamp .patient { font-weight: 600; }',
+    '.stamp .meta { font-size: 11px; color: #555 }',
+    '.doc-title { font-size: 11px; color: #666; margin: 0 0 6px; }',
+    'img, embed, iframe { max-width: 100%; border: 0; display: block; }',
+    '</style></head><body>'].join('');
+  const out = [html];
   items.forEach(it => {
-    html.push(`<div class="doc"><h2>${escapeHtml(it.title)}</h2>`);
-    if (!it.dataUrl) {
-      html.push(`<div style="color:#999;font-size:12px">[ No preview available — ${escapeHtml(it.name||'document')} was not stored with data ]</div>`);
-    } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
-      html.push(`<img src="${it.dataUrl}" />`);
-    } else {
-      html.push(`<embed src="${it.dataUrl}" type="application/pdf" style="width:100%;height:90vh" />`);
+    out.push('<div class="doc">');
+    if (it.transferId != null) {
+      out.push(`<div class="stamp">
+        <div>
+          <div class="ref-label">WorldShip Reference / Transfer ID</div>
+          <div class="ref-id">${escapeHtml(String(it.transferId))}</div>
+        </div>
+        <div style="text-align:right">
+          ${it.patientName ? `<div class="patient">${escapeHtml(it.patientName)}</div>` : ''}
+          ${it.transferMeta ? `<div class="meta">${escapeHtml(it.transferMeta)}</div>` : ''}
+        </div>
+      </div>`);
     }
-    html.push('</div>');
+    out.push(`<div class="doc-title">${escapeHtml(it.title)}</div>`);
+    if (!it.dataUrl) {
+      out.push(`<div style="color:#999;font-size:12px">[ No preview available — ${escapeHtml(it.name||'document')} was not stored with data ]</div>`);
+    } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
+      out.push(`<img src="${it.dataUrl}" />`);
+    } else {
+      out.push(`<embed src="${it.dataUrl}" type="application/pdf" style="width:100%;height:90vh" />`);
+    }
+    out.push('</div>');
   });
-  html.push('<script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script></body></html>');
-  w.document.write(html.join(''));
+  out.push('<script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script></body></html>');
+  w.document.write(out.join(''));
   w.document.close();
 }
 
@@ -923,10 +951,12 @@ function batchPrintTransfers(ids) {
   transfers.forEach(t => {
     const pks = t.pkSheets || (t.pkSheet ? [t.pkSheet] : []);
     const hcs = t.hardCopies || (t.hardCopy ? [t.hardCopy] : []);
-    pks.forEach((f, idx) => docs.push({ title: `${t.patientName} — PK Transfer Sheet${pks.length>1?' '+(idx+1):''}`, name: f.name, type: f.type, dataUrl: f.dataUrl }));
-    hcs.forEach((f, idx) => docs.push({ title: `${t.patientName} — Hard Copy${hcs.length>1?' '+(idx+1):''}`, name: f.name, type: f.type, dataUrl: f.dataUrl }));
+    const meta = `${t.originLocation} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`;
+    const stampCommon = { transferId: t.id, patientName: t.patientName, transferMeta: meta };
+    pks.forEach((f, idx) => docs.push({ ...stampCommon, title: `PK Transfer Sheet${pks.length>1?' '+(idx+1):''}`, name: f.name, type: f.type, dataUrl: f.dataUrl }));
+    hcs.forEach((f, idx) => docs.push({ ...stampCommon, title: `Hard Copy${hcs.length>1?' '+(idx+1):''}`, name: f.name, type: f.type, dataUrl: f.dataUrl }));
     if (pks.length === 0 && hcs.length === 0) {
-      docs.push({ title: `${t.patientName} — (no documents attached)`, name: '', type: '', dataUrl: null });
+      docs.push({ ...stampCommon, title: '(no documents attached)', name: '', type: '', dataUrl: null });
     }
   });
   printDocs(docs);
@@ -2207,7 +2237,7 @@ function renderModal() {
   document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
   document.querySelectorAll('[data-cc-print]').forEach(b => b.onclick = () => {
     if (!t.ccForm) { alert('No CC form attached.'); return; }
-    printDocs([{ title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: t.ccForm.dataUrl }]);
+    printDocs([{ transferId: t.id, patientName: t.patientName, transferMeta: `${t.originLocation} → ${t.fillLocation}`, title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: t.ccForm.dataUrl }]);
   });
   const printBlankCCBtn = document.getElementById('modal-printCCBlank');
   if (printBlankCCBtn) printBlankCCBtn.addEventListener('click', () => printCCAuthForm(t));
