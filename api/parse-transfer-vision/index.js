@@ -19,7 +19,7 @@ module.exports = async function (context, req) {
     if (!image) { context.res = { status: 400, body: { error: 'image (base64) required' } }; return; }
 
     // Step 1: Submit the image for analysis. Returns 202 + Operation-Location header.
-    const submitUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-02-29-preview`;
+    const submitUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30`;
     const imgBytes = Buffer.from(image, 'base64');
     const submitResp = await fetch(submitUrl, {
       method: 'POST',

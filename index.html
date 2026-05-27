@@ -2717,7 +2717,7 @@ async function processBulkFiles(rawFiles) {
       // OCR failed (not configured / network / etc.)
       const totalChars = pages.reduce((n, p) => n + (p.text||'').length, 0);
       const reason = totalChars < 50
-        ? `PDF appears to be scanned images and OCR is unavailable. Set ANTHROPIC_API_KEY env var or check Azure AI configuration.`
+        ? `PDF appears to be scanned images and Azure Document Intelligence OCR failed. Check the function logs.`
         : `No transfer header detected in ${pages.length} page(s). OCR fallback also failed.`;
       const draft = freshDraft();
       draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
