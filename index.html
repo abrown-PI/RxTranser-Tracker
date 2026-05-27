@@ -249,17 +249,17 @@ const PHARMACY_CODES = {
 // Pharmacy mailing addresses for the Ship-to-Pharmacy auto-fill.
 // Cities/states are pre-populated from the canonical roster; street/zip are editable in Admin.
 let PHARMACY_ADDRESSES = {
-  'Erie':           { addr1: '', addr2: '', city: 'Erie',           state: 'PA', zip: '' },
-  'Lancaster':      { addr1: '', addr2: '', city: 'Lancaster',      state: 'PA', zip: '' },
-  'Greenville':     { addr1: '640 Congaree Rd', addr2: '', city: 'Greenville', state: 'SC', zip: '29607' },
-  'Houston':        { addr1: '', addr2: '', city: 'Houston',        state: 'TX', zip: '' },
-  'Tucson':         { addr1: '', addr2: '', city: 'Tucson',         state: 'AZ', zip: '' },
-  'Flower Mound':   { addr1: '', addr2: '', city: 'Flower Mound',   state: 'TX', zip: '' },
-  'Denton':         { addr1: '', addr2: '', city: 'Denton',         state: 'TX', zip: '' },
-  'Corinth':        { addr1: '', addr2: '', city: 'Corinth',        state: 'TX', zip: '' },
-  'Jamestown':      { addr1: '', addr2: '', city: 'Jamestown',      state: 'NY', zip: '' },
-  'Virginia Beach': { addr1: '', addr2: '', city: 'Virginia Beach', state: 'VA', zip: '' },
-  'Seminole':       { addr1: '', addr2: '', city: 'Seminole',       state: 'FL', zip: '' }
+  'Erie':           { addr1: '2936 W. 17th Street',         addr2: '',           city: 'Erie',           state: 'PA', zip: '16505' },
+  'Lancaster':      { addr1: '902 N. Duke Street',          addr2: '',           city: 'Lancaster',      state: 'PA', zip: '17602' },
+  'Greenville':     { addr1: '640 Congaree Rd',             addr2: '',           city: 'Greenville',     state: 'SC', zip: '29607' },
+  'Houston':        { addr1: '8687 Louetta Rd',             addr2: 'Suite 150',  city: 'Spring',         state: 'TX', zip: '77379' },
+  'Tucson':         { addr1: '2729 E Speedway Blvd',        addr2: '',           city: 'Tucson',         state: 'AZ', zip: '85716' },
+  'Flower Mound':   { addr1: '',                            addr2: '',           city: 'Flower Mound',   state: 'TX', zip: '' },
+  'Denton':         { addr1: '',                            addr2: '',           city: 'Denton',         state: 'TX', zip: '' },
+  'Corinth':        { addr1: '',                            addr2: '',           city: 'Corinth',        state: 'TX', zip: '' },
+  'Jamestown':      { addr1: '863 Fairmount Ave',           addr2: '',           city: 'Jamestown',      state: 'NY', zip: '14701' },
+  'Virginia Beach': { addr1: '3636 Virginia Beach Blvd',    addr2: 'Suite 107C', city: 'Virginia Beach', state: 'VA', zip: '23452' },
+  'Seminole':       { addr1: '7779 Starkey Rd',             addr2: '',           city: 'Seminole',       state: 'FL', zip: '33777' }
 };
 
 // Demo users — in production these come from MSAL / Azure AD + SharePoint group membership
@@ -1211,8 +1211,8 @@ function renderNewForm() {
 
       <div class="section"><div class="section-title">Routing</div>
       <div class="form-grid">
-        <div class="form-group"><label>Origin Location</label><select id="f-origin">${LOCATIONS.map(l=>`<option ${l===d.originLocation?'selected':''}>${l}</option>`).join('')}</select></div>
-        <div class="form-group"><label>Fill Location</label><select id="f-fill">${LOCATIONS.map(l=>`<option ${l===d.fillLocation?'selected':''}>${l}</option>`).join('')}</select><div class="hint">Erie handles sterile compounds</div></div>
+        <div class="form-group"><label>Origin Location</label><select id="f-originLocation">${LOCATIONS.map(l=>`<option ${l===d.originLocation?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Fill Location</label><select id="f-fillLocation">${LOCATIONS.map(l=>`<option ${l===d.fillLocation?'selected':''}>${l}</option>`).join('')}</select><div class="hint">Erie handles sterile compounds</div></div>
       </div></div>
 
       <div class="section"><div class="section-title">Shipping</div>
@@ -1539,7 +1539,7 @@ function bindDraftInputs() {
   };
   const shipToSel = document.getElementById('f-shipTo');
   if (shipToSel) shipToSel.addEventListener('change', fillPharmacyAddress);
-  const originSel2 = document.getElementById('f-origin');
+  const originSel2 = document.getElementById('f-originLocation');
   if (originSel2) originSel2.addEventListener('change', fillPharmacyAddress);
   ['coldItem','ccPaladin'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('change', () => { state.draft[f==='ccPaladin'?'ccOnFileInPaladin':f] = el.checked; }); });
 
@@ -1614,7 +1614,7 @@ function bindDraftInputs() {
   document.getElementById('f-formulaSaveLib').onchange = e => { if (state.draft.formula && !state.draft.formula.fromLibrary) state.draft.formula.saveToLibrary = e.target.checked; };
 
   // re-render formula library options when origin location changes
-  const origSel = document.getElementById('f-origin');
+  const origSel = document.getElementById('f-originLocation');
   if (origSel) origSel.addEventListener('change', () => { state.draft.formula = null; renderNewForm(); });
 }
 
