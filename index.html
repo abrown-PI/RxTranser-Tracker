@@ -672,6 +672,28 @@ ${drugs ? `<div class="row"><div class="field"><label>Prescription(s)</label><di
   w.document.close();
 }
 
+// Open the page images attached to a bulk-upload draft in a modal so the user can
+// visually inspect which pages got assigned to this transfer.
+function openPageViewer(bulkDraft) {
+  const root = document.getElementById('modalRoot');
+  const pages = bulkDraft.pageImages || [];
+  if (pages.length === 0) { alert('No page images available for this draft. (May be lost after page reload.)'); return; }
+  root.innerHTML = `<div class="modal-overlay" id="pvOverlay"><div class="modal" style="max-width:900px">
+    <div class="modal-header">
+      <div><div class="modal-title">Pages in this draft</div><div class="item-sub">${escapeHtml(bulkDraft.sourceFile)}</div></div>
+      <button class="modal-close" id="pvClose">&times;</button>
+    </div>
+    <div class="modal-body" style="background:var(--gray-100)">
+      ${pages.map(p => `<div style="margin-bottom:18px"><div style="font-weight:600;margin-bottom:6px">Page ${p.pageNum} <span class="badge ${p.kind==='transfer'?'badge-verified':'badge-progress'}" style="font-size:10px">${p.kind==='transfer'?'Transfer Sheet':'Hard Copy'}</span></div><img src="${escapeHtml(p.dataUrl)}" alt="Page ${p.pageNum}" style="width:100%;border:1px solid var(--gray-300);border-radius:4px;background:white" /></div>`).join('')}
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" id="pvCloseBtn">Close</button></div>
+  </div></div>`;
+  const close = () => { root.innerHTML = ''; };
+  document.getElementById('pvClose').onclick = close;
+  document.getElementById('pvCloseBtn').onclick = close;
+  document.getElementById('pvOverlay').onclick = e => { if (e.target.id === 'pvOverlay') close(); };
+}
+
 // Open one or more attached documents in a print window. Each file's dataUrl is rendered;
 // PDFs get embedded, images get an <img>. After load, the browser print dialog opens.
 function printDocs(items) {
@@ -2430,8 +2452,26 @@ function openShipment(id) {
 // Bulk upload + review queue
 // Each uploaded PDF becomes one draft entry in state.bulkQueue. The user
 // reviews/edits each, then approves or rejects. Approved drafts become
-// real transfers; the queue persists in memory until cleared.
+// real transfers. The queue persists to localStorage so it survives reloads.
 // =====================================================================
+const BULK_QUEUE_KEY = 'bulkQueue_v1';
+function saveBulkQueue() {
+  try {
+    const safe = (state.bulkQueue || []).map(b => ({
+      ...b,
+      // Strip file blobs (we can't serialize and they're not used for display anyway)
+      pageImages: undefined
+    }));
+    localStorage.setItem(BULK_QUEUE_KEY, JSON.stringify(safe));
+  } catch (e) { console.warn('Failed to persist bulk queue', e); }
+}
+function loadBulkQueue() {
+  try {
+    const raw = localStorage.getItem(BULK_QUEUE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch (e) { console.warn('Failed to restore bulk queue', e); return []; }
+}
 function bulkDraftStatus(b) {
   if (b.parseError) return 'failed';
   const d = b.draft;
@@ -2452,7 +2492,8 @@ function bulkDraftMissing(b) {
 
 function renderBulkUpload() {
   const root = document.getElementById('view-new');
-  if (!state.bulkQueue) state.bulkQueue = [];
+  // Restore from localStorage on first access this session
+  if (!state.bulkQueue) state.bulkQueue = loadBulkQueue();
   const q = state.bulkQueue;
   const editing = q.find(b => b.id === state.bulkEditingId);
 
@@ -2472,10 +2513,20 @@ function renderBulkUpload() {
 
     <div class="card"><div class="card-body">
       <p style="color:var(--gray-600);margin-bottom:14px">Upload PDFs — each <strong>"PATIENT Rx TRANSFER INFORMATION"</strong> page becomes a draft transfer. Pages after a transfer header (hard copies, order forms) get attached to that transfer until the next header. You'll review each draft, edit if needed, and approve. Drafts with missing required fields stay flagged until you fill them in.</p>
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;padding:8px 12px;background:var(--gray-100);border-radius:6px">
-        <label style="font-size:13px;color:var(--gray-700);font-weight:600">Expected transfers in this file (optional):</label>
-        <input id="bulk-expected" type="number" min="0" placeholder="e.g. 11" style="width:80px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px" />
-        <span class="hint">If filled in, app will warn if it detects a different count.</span>
+      <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;padding:10px 14px;background:var(--gray-100);border-radius:6px;flex-wrap:wrap">
+        <div style="font-weight:600;font-size:13px;color:var(--gray-700)">Apply to all new drafts:</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <label style="font-size:12px;color:var(--gray-600)">Fill Location:</label>
+          <select id="bulk-fillLocation" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+            <option value="">(use default: Erie)</option>
+            ${LOCATIONS.map(l => `<option ${l==='Erie'?'selected':''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <label style="font-size:12px;color:var(--gray-600)">Anticipated Ship Date:</label>
+          <input id="bulk-anticipatedShip" type="date" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px" />
+        </div>
+        <span class="hint" style="flex-basis:100%">These fill in on every draft created from this upload. You can still override per-draft.</span>
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
         <label class="btn btn-primary" style="cursor:pointer;margin:0">
@@ -2533,6 +2584,7 @@ function renderBulkUpload() {
   root.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => { state.bulkEditingId = +b.dataset.edit; renderNewForm(); });
   root.querySelectorAll('[data-reject]').forEach(b => b.onclick = () => {
     state.bulkQueue = state.bulkQueue.filter(x => x.id !== +b.dataset.reject);
+    saveBulkQueue();
     renderNewForm();
   });
   root.querySelectorAll('[data-approve]').forEach(b => b.onclick = () => approveBulkDraft(+b.dataset.approve));
@@ -2540,6 +2592,7 @@ function renderBulkUpload() {
   if (approveAll) approveAll.onclick = () => {
     const ready = state.bulkQueue.filter(b => bulkDraftStatus(b) === 'ok');
     ready.forEach(b => approveBulkDraft(b.id, true));
+    saveBulkQueue();
     alert(`Approved ${ready.length} transfer(s) into the tracker.`);
     renderNewForm();
     render();
@@ -2548,6 +2601,7 @@ function renderBulkUpload() {
   if (clearAll) clearAll.onclick = () => {
     if (state.bulkQueue.length && !confirm(`Clear all ${state.bulkQueue.length} pending drafts? Nothing will be saved.`)) return;
     state.bulkQueue = [];
+    saveBulkQueue();
     renderNewForm();
   };
 }
@@ -2635,10 +2689,18 @@ async function processBulkFiles(rawFiles) {
   if (hint) hint.textContent = `Processing ${rawFiles.length} file(s)…`;
   let _bulkId = (state.bulkQueue || []).reduce((m,b) => Math.max(m, b.id), 1000);
   const newDrafts = [];
+  // Bulk-level defaults applied to every draft created in this batch
+  const bulkFill = (document.getElementById('bulk-fillLocation') || {}).value || '';
+  const bulkAntShip = (document.getElementById('bulk-anticipatedShip') || {}).value || '';
+  const applyBulkDefaults = (draft) => {
+    if (bulkFill) draft.fillLocation = bulkFill;
+    if (bulkAntShip) draft.anticipatedShipDate = bulkAntShip;
+  };
   for (const file of rawFiles) {
     if (!/\.pdf$/i.test(file.name)) {
       // Non-PDF: keep the old single-draft behavior
       const draft = freshDraft();
+      applyBulkDefaults(draft);
       draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
       newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: 'Not a PDF — auto-parse not supported for this file type.', parsed: null });
       continue;
@@ -2647,6 +2709,7 @@ async function processBulkFiles(rawFiles) {
     const pages = await extractPdfTextPerPage(file);
     if (!pages || pages.length === 0) {
       const draft = freshDraft();
+      applyBulkDefaults(draft);
       draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
       newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: 'Could not read PDF text — may be image-only.', parsed: null });
       continue;
@@ -2667,15 +2730,15 @@ async function processBulkFiles(rawFiles) {
       const ocrPages = [];
       const ocrErrors = [];
       if (pdf) {
-        // Pace requests to stay under F0 rate limit (20 calls/minute = 1 per 3s).
-        // Doc Intel polling already takes ~2-3s per call so additional delay is small.
+        // Pace requests to stay safely under Doc Intel rate limits.
         const PACING_MS = 500;
         for (let p = 1; p <= pages.length; p++) {
           if (hint) hint.textContent = `OCR page ${p} of ${pages.length}…`;
           try {
             const base64 = await rasterizePdfPageToBase64(pdf, p);
             const result = await ocrParsePage(base64);
-            ocrPages.push({ pageNum: p, ...result });
+            // Store the rendered PNG so the user can later view this exact page from the edit screen
+            ocrPages.push({ pageNum: p, _pngDataUrl: 'data:image/png;base64,' + base64, ...result });
             console.log(`OCR page ${p}: isTransferSheet=${result.isTransferSheet}`, {
               patientName: result.patientName,
               rxNumber: result.rxNumber,
@@ -2705,6 +2768,7 @@ async function processBulkFiles(rawFiles) {
         if (ocrGroups.length > 0) {
           ocrGroups.forEach((g, idx) => {
             const draft = freshDraft();
+            applyBulkDefaults(draft);
             const transferPageRange = `page ${g.transferPage.pageNum}`;
             const hardCopyPageRange = g.hardCopyPages.length ? `pages ${g.hardCopyPages.map(p => p.pageNum).join(',')}` : null;
             draft.pkSheets = [{ name: `${file.name} [${transferPageRange}, OCR]`, size: file.size, type: file.type }];
@@ -2720,16 +2784,23 @@ async function processBulkFiles(rawFiles) {
             if (f.rxNumber) first.rxNumber = f.rxNumber;
             if (f.drug) first.drug = f.drug;
             if (f.qty) first.qty = f.qty;
+            // Page images for "View Pages" button — stored in memory only (not localStorage)
+            // because PNGs would blow the 5MB cap. Lost on reload but available within session.
+            const pagePngs = [g.transferPage, ...g.hardCopyPages]
+              .filter(p => p._pngDataUrl)
+              .map(p => ({ pageNum: p.pageNum, dataUrl: p._pngDataUrl, kind: p === g.transferPage ? 'transfer' : 'hardcopy' }));
             newDrafts.push({
               id: ++_bulkId, draft,
               sourceFile: `${file.name} (${idx+1}/${ocrGroups.length}, OCR)`,
-              parseError: null, parsed: f
+              parseError: null, parsed: f,
+              pageImages: pagePngs
             });
           });
           continue;
         }
         // OCR'd but still no transfer-sheet pages detected — fall through to single-draft error case
         const draft = freshDraft();
+        applyBulkDefaults(draft);
         draft.pkSheets = [{ name: file.name + ' [OCR]', size: file.size, type: file.type }];
         newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name + ' (OCR)', parseError: 'OCR ran but no transfer header detected on any page.', parsed: null });
         continue;
@@ -2741,6 +2812,7 @@ async function processBulkFiles(rawFiles) {
         ? `PDF is image-only and OCR failed on every page.${errorSummary}`
         : `No transfer header detected in ${pages.length} page(s). OCR fallback also failed.${errorSummary}`;
       const draft = freshDraft();
+      applyBulkDefaults(draft);
       draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
       newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: reason, parsed: null });
       continue;
@@ -2749,6 +2821,7 @@ async function processBulkFiles(rawFiles) {
     // Create one draft per detected transfer
     groups.forEach((g, idx) => {
       const draft = freshDraft();
+      applyBulkDefaults(draft);
       const parsed = parseTransferSheet(g.transferPage.text);
       const transferPageRange = `page ${g.transferPage.pageNum}`;
       const hardCopyPageRange = g.hardCopyPages.length ? `pages ${g.hardCopyPages.map(p => p.pageNum).join(',')}` : null;
@@ -2795,14 +2868,7 @@ async function processBulkFiles(rawFiles) {
   });
   if (!state.bulkQueue) state.bulkQueue = [];
   state.bulkQueue.push(...newDrafts);
-  // Expected count warning — if user typed how many they expect, warn if mismatch
-  const expectedInput = document.getElementById('bulk-expected');
-  const expected = expectedInput ? parseInt(expectedInput.value, 10) : 0;
-  if (expected && expected > 0 && newDrafts.length !== expected) {
-    setTimeout(() => {
-      alert(`Expected ${expected} transfers but the app detected ${newDrafts.length}.\n\nIf this is wrong:\n• Open DevTools console (F12) and look for "OCR page N:" log entries\n• Look at the pages where isTransferSheet=false but should be true\n• Send me the firstChars text from those pages so I can adjust the detection.`);
-    }, 100);
-  }
+  saveBulkQueue(); // persist immediately so they survive a reload
   // Prompt for merging within groups
   const newGroups = Object.values(groups).filter(g => g.length > 1);
   if (newGroups.length) {
@@ -2845,6 +2911,7 @@ function approveBulkDraft(id, skipAlert) {
   TRANSFERS.unshift(t);
   apiSaveTransfer(t);
   state.bulkQueue = state.bulkQueue.filter(x => x.id !== id);
+  saveBulkQueue();
   if (!skipAlert) {
     alert(`Approved: ${t.patientName} added to transfers.`);
     renderNewForm();
@@ -2867,19 +2934,45 @@ function renderBulkEditor(b) {
     const banner = document.createElement('div');
     banner.style.cssText = 'background:var(--warning-bg);border:1px solid var(--warning);padding:10px 14px;border-radius:6px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px';
     const missing = bulkDraftMissing(b);
+    const hasImages = b.pageImages && b.pageImages.length > 0;
     banner.innerHTML = `
       <div>
         <strong>Editing bulk-upload draft</strong>
         <div class="item-sub">Source: ${escapeHtml(b.sourceFile)}${b.parseError?` · <span style="color:var(--danger)">${escapeHtml(b.parseError)}</span>`:''}</div>
         ${missing.length?`<div class="item-sub" style="color:var(--warning)">Missing: ${missing.join(', ')}</div>`:''}
       </div>
-      <button class="btn btn-secondary btn-sm" id="bulk-back">← Back to queue</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${hasImages?`<button class="btn btn-secondary btn-sm" id="bulk-viewPages">📄 View attached pages (${b.pageImages.length})</button>`:''}
+        <button class="btn btn-secondary btn-sm" id="bulk-back">← Back to queue</button>
+      </div>
     `;
     card.parentNode.insertBefore(banner, card);
-    const exitEdit = () => { state.draft = null; state.bulkEditingId = null; renderNewForm(); };
+    const exitEdit = () => { saveBulkQueue(); state.draft = null; state.bulkEditingId = null; renderNewForm(); };
     document.getElementById('bulk-back').onclick = exitEdit;
+    const viewPagesBtn = document.getElementById('bulk-viewPages');
+    if (viewPagesBtn) viewPagesBtn.onclick = () => openPageViewer(b);
     const submitBtn = document.getElementById('submitDraft');
-    if (submitBtn) { submitBtn.textContent = 'Save & return to queue'; submitBtn.onclick = exitEdit; }
+    if (submitBtn) {
+      submitBtn.textContent = 'Save & return to queue';
+      submitBtn.onclick = exitEdit;
+      // Add a sibling "Save & Approve" button that approves the draft immediately if all required fields are filled
+      const approveBtn = document.createElement('button');
+      approveBtn.className = 'btn btn-primary';
+      approveBtn.textContent = 'Save & Approve';
+      approveBtn.style.marginRight = '8px';
+      approveBtn.onclick = () => {
+        saveBulkQueue();
+        if (bulkDraftStatus(b) !== 'ok') {
+          const missing = bulkDraftMissing(b);
+          alert(`Cannot approve — still missing: ${missing.join(', ')}`);
+          return;
+        }
+        approveBulkDraft(b.id);
+        state.draft = null; state.bulkEditingId = null;
+        document.querySelector('.tab[data-tab=new]').click();
+      };
+      submitBtn.parentNode.insertBefore(approveBtn, submitBtn);
+    }
     const resetBtn = document.getElementById('resetDraft');
     if (resetBtn) resetBtn.style.display = 'none';
   }

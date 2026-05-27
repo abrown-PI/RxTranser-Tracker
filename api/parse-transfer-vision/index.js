@@ -150,17 +150,31 @@ function extractFieldsFromText(text) {
     return `${yy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
   })() : null;
 
-  const addressBlock = grab(/(?:Patient\s*Address)\s*:?\s*(.*?)(?=\s*(?:Drug|DAW|Doctor|Rx\s*number|Patient\s*Phone|Store|Person|Pharmacy|Date|First\s*fill|Last\s*fill|Quantity|Refills|Instructions|Transferred\s*By|$))/i);
+  // Patient Address — try labeled form first, fall back to scanning for a "City, ST 12345" pattern
+  let addressBlock = grab(/(?:Patient\s*Address|Address)\s*:?\s*(.*?)(?=\s*(?:Drug|DAW|Doctor|Rx\s*number|Patient\s*Phone|Phone|Store|Person|Pharmacy|Date|First\s*fill|Last\s*fill|Quantity|Refills|Instructions|Transferred\s*By|$))/i);
   let shipAddr1 = '', shipCity = '', shipState = '', shipZip = '';
   if (addressBlock) {
-    const csz = addressBlock.match(/([A-Za-z\.\-' ]+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$/);
+    const csz = addressBlock.match(/([A-Za-z\.\-' ]+?),?\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/);
     if (csz) {
       shipCity = csz[1].trim();
       shipState = csz[2].trim();
       shipZip = csz[3].trim();
-      shipAddr1 = addressBlock.replace(csz[0], '').trim();
+      shipAddr1 = addressBlock.replace(csz[0], '').replace(/,\s*$/, '').trim();
     } else {
       shipAddr1 = addressBlock.trim();
+    }
+  } else {
+    // Fallback: look for a US street + city/state/zip pattern anywhere on the page near "Patient"
+    // The Patient block typically contains: NAME / DOB / phone / ADDRESS lines together.
+    const patientBlock = grab(/Patient\s*:?\s*([\s\S]{0,400}?)(?=\s*(?:Drug|DAW|Doctor|Rx\s*number|First\s*fill|Quantity|Refills|Instructions|Transferred\s*By|Store\s*name|Person\s*name|Pharmacy\s*information|$))/i);
+    if (patientBlock) {
+      const csz = patientBlock.match(/(\d+[A-Z0-9\s.\-,#]+?)[,\s]+([A-Za-z\.\-' ]+?)[,\s]+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/);
+      if (csz) {
+        shipAddr1 = csz[1].trim().replace(/,$/, '');
+        shipCity = csz[2].trim();
+        shipState = csz[3].trim();
+        shipZip = csz[4].trim();
+      }
     }
   }
 
