@@ -68,6 +68,7 @@ section { page-break-inside: avoid; }
     <li><a href="#print">Printing &amp; Batch Operations</a></li>
     <li><a href="#fedex">Pulling Tracking from FedEx</a></li>
     <li><a href="#admin">Admin Tasks</a></li>
+    <li><a href="#emails">Email Notifications</a> (daily summary + shipment notices)</li>
     <li><a href="#statuses">Status Definitions</a></li>
     <li><a href="#faq">Common Questions</a></li>
   </ul>
@@ -83,8 +84,9 @@ section { page-break-inside: avoid; }
 <ol>
   <li>Click <strong>🔐 Sign in with Microsoft</strong></li>
   <li>Use your <strong>@pharmacyinnovations.net</strong> account (same one you use for Outlook/Teams)</li>
-  <li>First time only: pick your location from the dropdown in the top right. The app remembers it next time.</li>
+  <li>Your default location comes from the admin's Users &amp; Access list. If you see the wrong location, ask an admin to update your row — or use the location dropdown in the navbar to temporarily switch (saved across browsers and devices).</li>
 </ol>
+<div class="note"><strong>If you signed in before your location was set:</strong> Sign out and back in (or just refresh the page) — the app re-fetches your assigned location on each sign-in.</div>
 
 <h3>Option 2: Sign in without 365 account</h3>
 <p>For staff who don't have a Microsoft 365 license. An admin must create the account first.</p>
@@ -152,6 +154,8 @@ section { page-break-inside: avoid; }
 
 <section id="refill">
 <h2>Refilling an Existing Transfer</h2>
+
+<h3>From an in-app transfer (normal path)</h3>
 <ol>
   <li>Click <strong>+ Refill</strong> (top tab)</li>
   <li>Search by patient name, Origin Rx#, or Receiving Rx#</li>
@@ -159,9 +163,26 @@ section { page-break-inside: avoid; }
   <li>Review the <strong>Shipping &amp; Payment Defaults</strong> (auto-pulled from the original). Click <strong>Edit</strong> if anything changed (new address, different billing).</li>
   <li>Check the <strong>Prescriptions</strong> boxes for which Rx to include in this refill (some patients have multiple Rx and may only need one refilled)</li>
   <li>Click <strong>Continue to refill form →</strong></li>
-  <li>The form is pre-filled — review, attach a fresh PK transfer sheet, hit <strong>Submit</strong></li>
+  <li>The form opens pre-filled. <strong>PK transfer sheet, hard copies, formula, and Rx numbers all carry over from the original</strong> — same prescription, same paperwork. Review everything, replace any document if something changed, then click <strong>Submit</strong>.</li>
 </ol>
-<div class="tip"><strong>Tip:</strong> Refills don't require a hard copy scan — it's optional.</div>
+<div class="tip"><strong>Refills don't require a hard copy scan</strong> (optional) and inherit the original's docs, so you usually don't have to upload anything new.</div>
+
+<h3>From the transfer detail (one-click)</h3>
+<p>Open any transfer → click <strong>📋 Refill this Rx</strong> at the top → fills out the new transfer for you. Same carry-over behavior.</p>
+
+<h3>Refill of a transfer NOT in the app (legacy / manual)</h3>
+<p>For patients whose original transfer pre-dates the app, you can enter a refill manually:</p>
+<ol>
+  <li>Click <strong>+ Refill</strong> → scroll past the search results</li>
+  <li>Click <strong>+ Enter Refill Manually</strong> in the dashed box at the bottom</li>
+  <li>The form opens marked as <strong>Refill / Manual / Legacy</strong> with a gray "Prior Transfer Info" section at the top</li>
+  <li>Fill in whatever you have for the original: prior pharmacy, prior Rx #, prior transfer date, notes (all optional)</li>
+  <li>Fill out the rest like a new transfer (patient, drugs, PK sheet upload, etc.), then submit</li>
+</ol>
+<p>The Prior Transfer Info section will appear on the transfer detail so the receiving pharmacy can see the context. This option is temporary — once enough refill history is in the app, you'll always find the original via search.</p>
+
+<h3>Viewing the refill chain</h3>
+<p>Open any transfer that's part of a refill chain — the detail modal shows an <strong>Rx History</strong> section listing the original at the top plus every refill below in chronological order. Each row shows the date, item count, and status. Click <strong>Open</strong> on any row to switch the modal to that entry. Works whether you opened the original or any refill.</p>
 </section>
 
 <section id="edit">
@@ -182,7 +203,8 @@ section { page-break-inside: avoid; }
 <h3>Quick inline edits</h3>
 <ul>
   <li><strong>Receiving Rx #</strong> — fill location staff can type the Rx# directly on each item row in the detail modal (no need to open Edit Transfer)</li>
-  <li><strong>Status</strong> — change via the Update Status dropdown at the top of the detail modal</li>
+  <li><strong>Status from the All Transfers table</strong> — each row has a status dropdown right in the table. Change it without opening the row. Choosing "Canceled" still routes the transfer to Action Items for acknowledgment.</li>
+  <li><strong>Status from the detail modal</strong> — Update Status dropdown at the top of the modal</li>
   <li><strong>Tracking + dates</strong> — click <strong>Edit ship / tracking</strong> on the detail modal. Entering a tracking number auto-flips status to <em>Shipped</em>.</li>
 </ul>
 </section>
@@ -214,32 +236,60 @@ section { page-break-inside: avoid; }
 
 <section id="cc">
 <h2>Credit Card Workflow</h2>
-<p>The CC form options only appear on the New Transfer / Edit Transfer form when you set <strong>Billing Method = Credit Card</strong>.</p>
+<p>The CC Authorization form options only appear on the New Transfer / Edit Transfer form when you set <strong>Billing Method = Credit Card</strong> and the card is NOT already on file. The form has the PI logo, patient + Rx pre-filled, and a written authorization clause — no signature line.</p>
+
+<p>Two ways to capture the card info:</p>
+
+<h3>Option A: Print blank, fill by hand, scan back in</h3>
 <ol>
-  <li>On the form, set Billing Method to <strong>Credit Card</strong></li>
-  <li>A new section appears: <strong>Signed Credit Card Authorization Form</strong></li>
-  <li>If the card is NOT already on file: click <strong>🖨 Print blank CC Auth Form</strong></li>
-  <li>A one-page PDF prints with the patient name + Rx auto-filled — patient signs it</li>
-  <li>Scan the signed form</li>
-  <li>Upload the scanned file in the same section</li>
-  <li>Submit the transfer</li>
-  <li>Billing team opens the transfer in the app → clicks <strong>View / Print Signed Form</strong> when they need to charge</li>
+  <li>On the transfer form, set Billing Method to <strong>Credit Card</strong></li>
+  <li>Click <strong>🖨 Print blank form</strong></li>
+  <li>A one-page PDF prints with patient name and Rx auto-filled</li>
+  <li>Customer / cardholder writes in their card info on the paper</li>
+  <li>Scan the completed form</li>
+  <li>Upload the scanned file in the same section, then submit the transfer</li>
 </ol>
-<div class="note"><strong>Important:</strong> Card numbers go on the paper form ONLY — never typed into the app — to stay out of PCI scope.</div>
+
+<h3>Option B: Fill on screen, save as PDF, upload</h3>
+<ol>
+  <li>Click <strong>✏️ Fill on screen</strong> instead of Print blank</li>
+  <li>A new window opens with the same form, but the card fields are editable inputs</li>
+  <li>Cardholder types in their info (name, billing zip, card #, expiration, CVV)</li>
+  <li>Click <strong>🖨 Save as PDF / Print</strong> at the top — pick <em>"Save as PDF"</em> as the destination</li>
+  <li>Upload the saved PDF in the same section, then submit the transfer</li>
+</ol>
+
+<div class="note"><strong>Card data stays local.</strong> Whether you scan the paper or save as PDF, the card number is only entered on the customer's side. The app never transmits typed card data to the backend — same PCI posture as the original paper-scan flow.</div>
+
+<p>Billing team opens the transfer → clicks the print-the-signed-form button (visible on the detail modal when a CC form is attached) when they need to charge.</p>
 </section>
 
 <section id="shipments">
 <h2>Shipments</h2>
 
+<h3>WorldShip Customer Reference — the bridge between this app and FedEx</h3>
+<p>This is the most important thing to understand about shipping: <strong>every time you generate a FedEx label in WorldShip, type either the Transfer ID or the BULK Shipment ID into WorldShip's "Customer Reference" field</strong>. The daily auto-match cron looks up FedEx shipments by reference and links the tracking back to the transfer or bulk shipment in this app — automatically. No manual tracking number entry.</p>
+<ul>
+  <li><strong>Patient-direct ship</strong> — Customer Reference = the Transfer ID (visible at the top of the transfer detail modal in a yellow band)</li>
+  <li><strong>Bulk pharmacy-to-pharmacy ship</strong> — Customer Reference = the BULK Shipment ID (e.g., <code>BULK-2026-0042</code>, shown after you create the shipment in the app)</li>
+</ul>
+
 <h3>Creating a Bulk Pharmacy Shipment (weekly box to another pharmacy)</h3>
 <ol>
   <li><strong>Shipments</strong> tab → <strong>+ Create Shipment</strong></li>
   <li>Destination Type: <strong>Pharmacy</strong>, To: pick the destination pharmacy</li>
-  <li>The list below auto-loads open transfers going to that pharmacy. Check the ones in this box.</li>
-  <li>Carrier: FedEx (or whichever), tracking #: paste from FedEx Ship Manager</li>
-  <li><strong>Create Shipment</strong></li>
-  <li>App offers to print a <strong>packing slip</strong> with the bulk shipment ID + Code128 barcode + manifest. Put this inside the box.</li>
+  <li>The list below auto-loads transfers in <strong>In Progress</strong> or <strong>Ready to Ship</strong> heading to that pharmacy. (New transfers must be processed first — they don't appear here.) Check the ones in this box.</li>
+  <li>Carrier: FedEx. <strong>Tracking number is optional here</strong> — leave it blank.</li>
+  <li>Click <strong>Create Shipment</strong></li>
+  <li>The app shows the new <strong>BULK Shipment ID</strong> prominently. Write it down or memorize it.</li>
+  <li>The app offers to print a <strong>packing slip</strong> with the PI logo, BULK ID, Code128 barcode, From/To addresses, and the manifest. Put it inside the box.</li>
+  <li>Go to WorldShip and generate the FedEx label. <strong>Type the BULK ID into WorldShip's Customer Reference field.</strong></li>
+  <li>Done. The daily auto-match cron will find the FedEx shipment by reference, link the tracking number to this bulk, and cascade it to every transfer in the box. Status auto-advances to <em>Shipped</em>.</li>
 </ol>
+<div class="tip"><strong>You can come back later to add tracking manually</strong> if needed — open the bulk shipment in the Shipments tab and use Edit ship / tracking. But for typical FedEx shipping, the cron handles it.</div>
+
+<h3>Creating a Ship-to-Patient transfer</h3>
+<p>Patient-direct ships don't need a bulk shipment record. When you generate the FedEx label in WorldShip, type the <strong>Transfer ID</strong> (shown at the top of the transfer detail modal) into the Customer Reference field. The auto-match cron picks it up and links tracking to that transfer.</p>
 
 <h3>Receiving a Shipment</h3>
 <ol>
@@ -262,20 +312,27 @@ section { page-break-inside: avoid; }
   <li>App opens a print window with all selected PK sheets + hard copies in one job</li>
   <li>After printing, the app auto-changes those transfers to <strong>In Progress</strong></li>
 </ol>
+
+<div class="tip"><strong>Every printed document gets a yellow Transfer ID stamp at the top</strong> showing the WorldShip Reference (Transfer ID), patient name, and origin → fill route. Receiving staff can read the ID directly off the paper to type into WorldShip's Customer Reference field. <em>Note: for multi-page PDF uploads, the stamp shows on the first page of each transfer's section. The stamp is per-transfer, so a batch of 11 transfers gives you 11 stamped sections.</em></div>
 </section>
 
 <section id="fedex">
-<h2>Pulling Tracking from FedEx</h2>
-<p>When the FedEx integration is set up by admin:</p>
-<ol>
-  <li><strong>Shipments</strong> tab → click <strong>📦 Pull from FedEx</strong></li>
-  <li>Pick a date range (default last 10 days)</li>
-  <li>App pulls all shipments from your FedEx account in that range</li>
-  <li>App auto-matches each FedEx shipment to an open transfer by ship-to address</li>
-  <li>Review matches — high-confidence ones are pre-checked. Uncheck or change as needed.</li>
-  <li>Click <strong>Apply</strong> — tracking numbers + dates get linked</li>
-</ol>
-<p>Status updates automatically every 15 min while someone has the Shipments tab open.</p>
+<h2>FedEx Tracking — Automatic Match by Reference</h2>
+<p>You typically don't have to do anything here — the app handles tracking automatically as long as the WorldShip Customer Reference is set correctly when you generate the label (see Shipments section above).</p>
+
+<h3>How it works</h3>
+<ul>
+  <li>A scheduled job runs once a day (12:00 UTC, ~7-8 AM ET)</li>
+  <li>For every open transfer without tracking, the job queries the FedEx Track API by reference using the Transfer ID</li>
+  <li>For every open bulk shipment without tracking, the job queries by the BULK ID</li>
+  <li>Any match found: tracking number + ship date are written to the transfer/bulk. Status flips to <em>Shipped</em>.</li>
+  <li>Bulk matches cascade — when a BULK ID matches, the tracking is applied to every transfer in that bulk</li>
+</ul>
+
+<h3>Manual pull (Shipments tab → Pull from FedEx)</h3>
+<p>If you don't want to wait for the daily cron, click <strong>📦 Pull from FedEx</strong> on the Shipments tab to trigger the same lookup on demand. Results show what was matched. Same reference-based logic.</p>
+
+<div class="tip"><strong>The key thing:</strong> typing the Transfer ID or BULK ID into WorldShip's Customer Reference field is what makes auto-match work. If you forget, you can always paste a tracking # manually via Edit ship / tracking on the transfer or bulk shipment detail.</div>
 </section>
 
 <section id="admin">
@@ -296,9 +353,33 @@ section { page-break-inside: avoid; }
 <ul>
   <li><strong>SLA Rules</strong>: hour limits per status before transfers show on the Alerts tab</li>
   <li><strong>Formula Library</strong>: saved formula worksheets per pharmacy</li>
-  <li><strong>Pharmacy Mailing Addresses</strong>: used for Ship-to-Pharmacy auto-fill</li>
+  <li><strong>Pharmacy Mailing Addresses</strong>: used for Ship-to-Pharmacy auto-fill <em>and</em> for the From/To addresses on the bulk packing slip</li>
+  <li><strong>Email Notifications</strong>: per-location recipient list for both the daily summary email and shipment notification emails. Multiple emails per location (one per line or comma-separated). An optional "Always-CC" list copies managers on every location's daily summary.</li>
   <li><strong>Teams Webhooks</strong>: paste Power Automate webhook URLs per location so Ask Question notifications go to the right place</li>
+  <li><strong>Document Templates</strong>: preview what the printable docs look like (CC Auth form in either print-blank or fill-on-screen mode, plus the bulk packing slip). Sample data — useful for showing staff what to expect.</li>
 </ul>
+</section>
+
+<section id="emails">
+<h2>Email Notifications</h2>
+<p>The app sends two kinds of emails automatically from <code>noreply@pharmacyinnovations.net</code>. No setup per user — admins manage the recipient lists in Admin → Email Notifications.</p>
+
+<h3>Daily Summary (5 PM ET)</h3>
+<p>For every location that had transfer activity that day, the app sends a per-location summary email:</p>
+<ul>
+  <li><strong>Incoming section</strong> — transfers your location received today, grouped by origin pharmacy, with status badges</li>
+  <li><strong>Outgoing section</strong> — transfers your location originated today, sent to other pharmacies</li>
+  <li>Locations with zero activity get no email that day (no inbox noise)</li>
+  <li>Each row links to the transfer in the portal</li>
+</ul>
+
+<h3>Shipment notifications (when a shipment is created)</h3>
+<ul>
+  <li><strong>Bulk pharmacy-to-pharmacy</strong> — the destination pharmacy gets an email listing all transfers in the box, tracking number, BULK ID, and links back to the shipment</li>
+  <li><strong>Ship-to-patient</strong> — the fill location gets notified that a transfer has shipped to the patient, with tracking</li>
+</ul>
+
+<p>Recipients are configured in Admin → Email Notifications. Same list is used for both kinds.</p>
 </section>
 
 <section id="statuses">
@@ -345,10 +426,28 @@ A: Yes — <strong>Reports</strong> tab → <strong>Export CSV</strong> at the b
 
 <p><strong>Q: I forgot my local-account PIN.</strong><br>
 A: An admin can reset it from Admin → Users &amp; Access → click Reset PIN on your row.</p>
+
+<p><strong>Q: The original transfer isn't in the app — how do I record a refill?</strong><br>
+A: + Refill tab → scroll to the bottom → click <strong>+ Enter Refill Manually</strong>. You can put whatever you know about the original (prior pharmacy, prior Rx #, date) in the gray "Prior Transfer Info" box. The rest of the form works like a new transfer. This is temporary — once enough history is in the app, you'll find originals via search.</p>
+
+<p><strong>Q: My default location keeps showing the wrong pharmacy.</strong><br>
+A: Sign out and back in (or refresh the page) — the app reads your assigned location from the admin's Users &amp; Access list on each sign-in. If it's still wrong, the admin needs to update your row.</p>
+
+<p><strong>Q: Do I have to enter a tracking number when I create a bulk shipment?</strong><br>
+A: No, leave it blank. Generate the FedEx label in WorldShip with the <strong>BULK ID</strong> in the Customer Reference field. The daily auto-match cron links the tracking automatically. If you'd rather, you can manually paste a tracking # later via Edit ship / tracking on the bulk shipment.</p>
+
+<p><strong>Q: I forgot to type the Transfer ID / BULK ID in WorldShip — what now?</strong><br>
+A: Open the transfer (or bulk shipment) → Edit ship / tracking → paste the FedEx tracking number manually. It'll set the status to Shipped just like the auto-match would have.</p>
+
+<p><strong>Q: Where do I see all refills for a patient/Rx?</strong><br>
+A: Open any transfer in the chain → the <strong>Rx History</strong> section shows the original and every refill in order. Click Open on any row to switch the modal to that entry.</p>
+
+<p><strong>Q: I don't see my new transfer when trying to add it to a shipment.</strong><br>
+A: The shipment list only shows transfers in <strong>In Progress</strong> or <strong>Ready to Ship</strong> status. Open the transfer and bump the status forward, then it'll appear.</p>
 </section>
 
 <hr>
-<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-05-27. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
+<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-05-27 — WorldShip Reference workflow, fillable CC form, doc carry-over on refills, manual legacy refill, Rx History chain, daily summary emails, Transfer ID stamp on prints. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
 
 </body>
 </html>
