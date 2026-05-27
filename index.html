@@ -233,15 +233,23 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 
 <div id="modalRoot"></div>
 
-<!-- Sign-in gate overlay: blocks app access until 365 auth completes. Hidden after sign-in. -->
+<!-- Sign-in gate overlay: blocks app access until auth completes. Hidden after sign-in. -->
 <div id="authGate" style="display:flex;position:fixed;inset:0;background:linear-gradient(135deg,var(--primary-darker),var(--primary-dark));z-index:9999;align-items:center;justify-content:center;flex-direction:column;color:white;padding:20px">
-  <img src="logo.png" alt="PI" style="height:64px;margin-bottom:18px;filter:brightness(1.1)" />
-  <h1 style="font-size:28px;font-weight:600;margin-bottom:6px">Pharmacy Innovations</h1>
-  <div style="font-size:15px;opacity:.85;margin-bottom:28px">Inter-Pharmacy Transfer Tracker</div>
-  <div style="background:rgba(255,255,255,.1);padding:24px 32px;border-radius:12px;backdrop-filter:blur(8px);text-align:center;max-width:420px">
-    <div style="font-size:15px;margin-bottom:18px">Sign in with your <strong>@pharmacyinnovations.net</strong> account to continue.</div>
-    <button id="gateSignInBtn" class="btn btn-primary" style="background:white;color:var(--primary-dark);font-weight:600;padding:12px 24px;font-size:15px">🔐 Sign in with Microsoft</button>
-    <div style="margin-top:18px;font-size:12px;opacity:.7" id="gateMsg"></div>
+  <img src="logo.png" alt="PI" style="height:80px;margin-bottom:28px;filter:brightness(1.1)" />
+  <div style="background:rgba(255,255,255,.1);padding:24px 32px;border-radius:12px;backdrop-filter:blur(8px);text-align:center;max-width:420px;width:100%">
+    <div id="gatePrimary">
+      <button id="gateSignInBtn" class="btn btn-primary" style="background:white;color:var(--primary-dark);font-weight:600;padding:12px 24px;font-size:15px;width:100%">🔐 Sign in with Microsoft</button>
+      <div style="margin:18px 0 14px;display:flex;align-items:center;gap:10px"><div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div><div style="font-size:11px;opacity:.6;text-transform:uppercase;letter-spacing:.05em">or</div><div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div></div>
+      <button id="gateLocalBtn" class="btn btn-secondary" style="background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:white;font-size:13px;padding:10px 18px;width:100%">Sign in without 365 account</button>
+    </div>
+    <div id="gateLocal" style="display:none;text-align:left">
+      <div style="font-size:13px;margin-bottom:14px;text-align:center">Enter your username + PIN</div>
+      <div style="margin-bottom:10px"><input id="gateUsername" placeholder="Username" autocomplete="username" style="width:100%;padding:10px 12px;border:0;border-radius:6px;font-size:14px" /></div>
+      <div style="margin-bottom:14px"><input id="gatePin" type="password" placeholder="PIN" autocomplete="current-password" inputmode="numeric" style="width:100%;padding:10px 12px;border:0;border-radius:6px;font-size:14px;font-family:monospace" /></div>
+      <button id="gateLocalSubmit" class="btn btn-primary" style="background:white;color:var(--primary-dark);font-weight:600;padding:10px 18px;width:100%;font-size:14px">Sign in</button>
+      <div style="margin-top:10px;text-align:center"><a href="#" id="gateLocalBack" style="color:rgba(255,255,255,.75);font-size:12px;text-decoration:none">← Use Microsoft sign-in instead</a></div>
+    </div>
+    <div style="margin-top:18px;font-size:12px;opacity:.7;min-height:14px" id="gateMsg"></div>
   </div>
 </div>
 
@@ -1106,6 +1114,23 @@ function renderAdmin() {
       </tbody></table>
     </div></div>
 
+    <div class="card"><div class="card-header">Local Accounts <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— username + PIN for users without a 365 license</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">Create username + PIN accounts for staff who don't have a Microsoft 365 license. They'll click "Sign in without 365 account" on the sign-in page.</p>
+      <div id="lu-list" style="margin-bottom:14px"></div>
+      <div style="background:var(--gray-50);padding:12px 14px;border-radius:6px;border:1px solid var(--gray-200)">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">+ Create new local account</div>
+        <div class="form-grid" style="gap:8px">
+          <div class="form-group"><label>Username</label><input id="lu-username" placeholder="firstname.lastname" /></div>
+          <div class="form-group"><label>Display Name</label><input id="lu-name" placeholder="First Last" /></div>
+          <div class="form-group"><label>PIN (min 4 chars)</label><input id="lu-pin" type="password" inputmode="numeric" placeholder="e.g. 4-8 digits" /></div>
+          <div class="form-group"><label>Location</label><select id="lu-location">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Role</label><select id="lu-role"><option>tech</option><option>manager</option><option>admin</option></select></div>
+        </div>
+        <button class="btn btn-primary btn-sm" id="lu-create" style="margin-top:10px">Create Account</button>
+        <span class="item-sub" id="lu-result" style="margin-left:10px"></span>
+      </div>
+    </div></div>
+
     <div class="card"><div class="card-header">Admin Users <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— emails listed here get admin role on sign-in</span></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">Any 365 account signing in with an email on this list gets the admin role automatically. Everyone else defaults to tech.</p>
       <div id="ae-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
@@ -1148,6 +1173,73 @@ function renderAdmin() {
   };
   // Manual user add is gone — users auto-add on first 365 sign-in. Name field is editable
   // in the table above to fix typos that come from Microsoft account display name.
+
+  // Local accounts (username + PIN) management
+  const renderLocalUsers = (users) => {
+    const list = document.getElementById('lu-list');
+    if (!list) return;
+    if (!users.length) { list.innerHTML = '<div class="item-sub" style="font-style:italic;padding:8px 0">No local accounts yet.</div>'; return; }
+    list.innerHTML = `<table style="box-shadow:none;font-size:13px"><thead><tr><th>Username</th><th>Name</th><th>Location</th><th>Role</th><th>Last Login</th><th></th></tr></thead><tbody>
+      ${users.map(u => `<tr>
+        <td style="font-family:monospace">${escapeHtml(u.username)}</td>
+        <td>${escapeHtml(u.name||'')}</td>
+        <td>${escapeHtml(u.location||'')}</td>
+        <td>${escapeHtml(u.role||'tech')}</td>
+        <td>${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '<span class="item-sub">never</span>'}</td>
+        <td style="white-space:nowrap"><button class="btn btn-secondary btn-sm" data-lu-resetpin="${escapeHtml(u.username)}">Reset PIN</button> <button class="btn btn-secondary btn-sm" data-lu-rm="${escapeHtml(u.username)}">Remove</button></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+    list.querySelectorAll('[data-lu-rm]').forEach(b => b.onclick = async () => {
+      if (!confirm(`Delete local account "${b.dataset.luRm}"?`)) return;
+      await fetch('/api/local-users/x/' + encodeURIComponent(b.dataset.luRm), { method: 'DELETE' });
+      loadLocalUsers();
+    });
+    list.querySelectorAll('[data-lu-resetpin]').forEach(b => b.onclick = async () => {
+      const newPin = prompt(`New PIN for "${b.dataset.luResetpin}" (min 4 chars):`);
+      if (!newPin || newPin.length < 4) return;
+      await fetch('/api/local-users/x/' + encodeURIComponent(b.dataset.luResetpin), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: newPin })
+      });
+      alert('PIN updated.');
+    });
+  };
+  const loadLocalUsers = async () => {
+    try {
+      const r = await fetch('/api/local-users');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      renderLocalUsers(data.users || []);
+    } catch (e) { renderLocalUsers([]); }
+  };
+  loadLocalUsers();
+  const luCreate = document.getElementById('lu-create');
+  if (luCreate) luCreate.onclick = async () => {
+    const body = {
+      username: document.getElementById('lu-username').value.trim().toLowerCase(),
+      name: document.getElementById('lu-name').value.trim(),
+      pin: document.getElementById('lu-pin').value.trim(),
+      location: document.getElementById('lu-location').value,
+      role: document.getElementById('lu-role').value
+    };
+    const result = document.getElementById('lu-result');
+    if (!body.username || !body.pin) { result.innerHTML = '<span style="color:var(--danger)">Username and PIN required</span>'; return; }
+    if (body.pin.length < 4) { result.innerHTML = '<span style="color:var(--danger)">PIN must be 4+ chars</span>'; return; }
+    result.innerHTML = '<span class="item-sub">Creating…</span>';
+    try {
+      const r = await fetch('/api/local-users', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await r.json();
+      if (!r.ok) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(data.error||'Failed')}</span>`; return; }
+      result.innerHTML = '<span style="color:var(--success)">✓ Created</span>';
+      ['lu-username','lu-name','lu-pin'].forEach(id => document.getElementById(id).value = '');
+      loadLocalUsers();
+    } catch (e) {
+      result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(e.message)}</span>`;
+    }
+  };
   document.getElementById('saveSla').onclick = () => {
     root.querySelectorAll('[data-sla]').forEach(el => SLA_RULES[el.dataset.sla] = +el.value || SLA_RULES[el.dataset.sla]);
     alert('SLA rules updated.');
@@ -2464,23 +2556,35 @@ async function extractPdfTextPerPage(file) {
   } catch (e) { console.warn('extractPdfTextPerPage failed', e); return null; }
 }
 
-// Group pages of a PDF into transfers. A page that contains the "PATIENT Rx TRANSFER
-// INFORMATION" header starts a new transfer; subsequent pages (until the next header)
-// are treated as hard-copy/order-form attachments for that transfer.
+// Group pages of a PDF into transfers. We try several markers because pdf.js text
+// extraction can be quirky — sometimes words run together ("PATIENTRxTRANSFER") and
+// sometimes there's whitespace + page-break noise between them.
+// A page that has any of these markers starts a new transfer:
+//   - "PATIENT Rx TRANSFER INFORMATION" or variants
+//   - "TRANSFER INFORMATION"
+//   - "For patient:" header (every transfer info page has this)
+// Pages without markers are attached as hard-copy/order-form pages to the prior transfer.
+function pageIsTransferStart(text) {
+  if (!text) return false;
+  return /TRANSFER\s*INFORMATION/i.test(text)
+      || /For\s*patient\s*:/i.test(text);
+}
 function groupPdfPagesIntoTransfers(pages) {
-  const re = /PATIENT\s*Rx\s*TRANSFER\s*INFORMATION/i;
   const groups = [];
   let current = null;
   pages.forEach(p => {
-    if (re.test(p.text)) {
+    if (pageIsTransferStart(p.text)) {
       if (current) groups.push(current);
       current = { transferPage: p, hardCopyPages: [] };
     } else if (current) {
       current.hardCopyPages.push(p);
     }
-    // pages before any transfer marker are skipped (rare — usually the file starts with one)
   });
   if (current) groups.push(current);
+  // Diagnostic logging — helps figure out why detection fails on weird PDFs
+  if (groups.length === 0) {
+    console.log('PDF text extraction summary:', pages.map(p => ({ page: p.pageNum, charCount: (p.text||'').length, sample: (p.text||'').slice(0, 80) })));
+  }
   return groups;
 }
 
@@ -2509,10 +2613,14 @@ async function processBulkFiles(rawFiles) {
     const groups = groupPdfPagesIntoTransfers(pages);
 
     if (groups.length === 0) {
-      // No "PATIENT Rx TRANSFER INFORMATION" markers found — fall back to one draft for the whole file
+      // No transfer markers found — likely an image-only / scanned PDF. Fall back to one draft.
+      const totalChars = pages.reduce((n,p) => n + (p.text||'').length, 0);
+      const reason = totalChars < 50
+        ? `PDF appears to be scanned images (no extractable text). Tech will need to fill in fields manually.`
+        : `No transfer header detected in ${pages.length} page(s). Check the file format.`;
       const draft = freshDraft();
       draft.pkSheets = [{ name: file.name, size: file.size, type: file.type }];
-      newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: 'No transfer info pages detected in this PDF.', parsed: null });
+      newDrafts.push({ id: ++_bulkId, draft, sourceFile: file.name, parseError: reason, parsed: null });
       continue;
     }
 
@@ -3358,32 +3466,116 @@ async function doSignIn(m) {
   }
 }
 
+// Show the local-account (username + PIN) form on the auth gate.
+function showLocalSignInForm() {
+  document.getElementById('gatePrimary').style.display = 'none';
+  document.getElementById('gateLocal').style.display = 'block';
+  document.getElementById('gateUsername').focus();
+}
+function showPrimarySignIn() {
+  document.getElementById('gateLocal').style.display = 'none';
+  document.getElementById('gatePrimary').style.display = 'block';
+  document.getElementById('gateMsg').textContent = '';
+}
+
+// Apply a local (non-365) account as the signed-in user.
+function applyLocalAccount(localUser) {
+  const user = {
+    name: localUser.name || localUser.username,
+    email: localUser.email || (localUser.username + '@local'),
+    location: localUser.location || 'Erie',
+    role: localUser.role || 'tech',
+    isLocal: true,
+    username: localUser.username
+  };
+  // Add or replace in USERS
+  const i = USERS.findIndex(u => u.email === user.email);
+  if (i >= 0) USERS[i] = user; else USERS.unshift(user);
+  CURRENT_USER = user;
+  document.getElementById('signInArea').style.display = 'none';
+  document.getElementById('signedInArea').style.display = 'flex';
+  document.getElementById('userInfo').textContent = user.name;
+  const locSel = document.getElementById('locationSwitcher');
+  locSel.innerHTML = LOCATIONS.map(l => `<option value="${l}" ${l===user.location?'selected':''}>${l}</option>`).join('');
+  locSel.onchange = () => {
+    user.location = locSel.value;
+    localStorage.setItem('userLocation_' + user.email, locSel.value);
+    applyRoleVisibility(); render();
+  };
+  // Remember the local user across reloads (no actual session — just a hint to restore)
+  sessionStorage.setItem('localUserHint', JSON.stringify({ username: user.username, name: user.name, location: user.location, role: user.role, email: user.email }));
+  applyRoleVisibility();
+  render();
+}
+
+async function doLocalSignIn() {
+  const username = (document.getElementById('gateUsername').value || '').trim();
+  const pin = (document.getElementById('gatePin').value || '').trim();
+  if (!username || !pin) return;
+  const msg = document.getElementById('gateMsg');
+  msg.textContent = 'Signing in…';
+  try {
+    const r = await fetch('/api/local-users/auth', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, pin })
+    });
+    const data = await r.json();
+    if (!r.ok) { msg.innerHTML = `<span style="color:#fca5a5">${escapeHtml(data.error || 'Sign-in failed')}</span>`; return; }
+    applyLocalAccount(data.user);
+    hideAuthGate();
+    document.getElementById('gatePin').value = '';
+  } catch (e) {
+    msg.innerHTML = `<span style="color:#fca5a5">Network error: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
 async function initAuth() {
+  // Hook up the local sign-in path first — it doesn't depend on MSAL loading
+  document.getElementById('gateLocalBtn').onclick = showLocalSignInForm;
+  document.getElementById('gateLocalBack').onclick = (e) => { e.preventDefault(); showPrimarySignIn(); };
+  document.getElementById('gateLocalSubmit').onclick = doLocalSignIn;
+  document.getElementById('gatePin').addEventListener('keydown', e => { if (e.key === 'Enter') doLocalSignIn(); });
+  document.getElementById('gateUsername').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('gatePin').focus(); });
+
+  // Restore a local user across reloads if one was used
+  const localHint = sessionStorage.getItem('localUserHint');
+  if (localHint) {
+    try { applyLocalAccount(JSON.parse(localHint)); hideAuthGate(); }
+    catch {}
+  }
+
   const m = getMsal();
   if (!m) {
-    // MSAL didn't load — show gate with a fallback message
-    showAuthGate('Authentication library failed to load. Please check your network connection or contact IT.');
+    // MSAL didn't load — still allow local sign-in. Hide the Microsoft button, surface the message.
+    showAuthGate('Microsoft sign-in unavailable. Use a local account or check your network.');
+    document.getElementById('gateSignInBtn').style.display = 'none';
     return;
   }
   await m.initialize();
-  // Handle the case where we just came back from a redirect-based login
   try { await m.handleRedirectPromise(); } catch (e) { console.warn('handleRedirectPromise', e); }
   await loadAdminEmails();
   const accounts = m.getAllAccounts();
   if (accounts.length > 0) {
     applyMsalAccount(accounts[0]);
     hideAuthGate();
-  } else {
+  } else if (!localHint) {
     showAuthGate();
   }
   document.getElementById('signInBtn').onclick = () => doSignIn(m);
   document.getElementById('gateSignInBtn').onclick = () => doSignIn(m);
   document.getElementById('signOutBtn').onclick = async () => {
-    try { await m.logoutPopup(); }
-    catch { await m.logoutRedirect(); }
+    sessionStorage.removeItem('localUserHint');
+    if (CURRENT_USER && CURRENT_USER.isLocal) {
+      // local sign-out — nothing server-side, just reset
+      CURRENT_USER = USERS[0] || { name: '', email: '', role: 'tech', location: '' };
+    } else {
+      try { await m.logoutPopup(); }
+      catch { await m.logoutRedirect(); }
+    }
     document.getElementById('signedInArea').style.display = 'none';
     document.getElementById('signInArea').style.display = 'flex';
     showAuthGate();
+    showPrimarySignIn();
   };
 }
 
