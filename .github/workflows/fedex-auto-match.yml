@@ -1,0 +1,26 @@
+name: FedEx Auto-Match (daily)
+
+on:
+  schedule:
+    # Runs at 12:00 UTC daily = 7am Eastern (8am during DST). Adjust as needed.
+    - cron: '0 12 * * *'
+  workflow_dispatch: # also allow manual triggering from the Actions tab
+
+jobs:
+  auto-match:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call FedEx auto-match endpoint
+        run: |
+          response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
+            "https://red-island-0bb34e510.7.azurestaticapps.net/api/fedex-auto-match" \
+            -H "Content-Type: application/json" \
+            -d '{"threshold": 80}')
+          body=$(echo "$response" | sed '$d')
+          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+          echo "HTTP $status"
+          echo "$body" | head -100
+          if [ "$status" != "200" ]; then
+            echo "::error::Auto-match endpoint returned $status"
+            exit 1
+          fi

@@ -2144,7 +2144,6 @@ function renderShipments() {
       <div class="page-title">Shipments <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${filtered.length})</span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span class="item-sub" id="fedexStatusPill" style="font-size:12px"></span>
-        <button class="btn btn-secondary" id="testFedexBtn" title="Test the FedEx connection with a sandbox tracking number">🧪 Test FedEx</button>
         <button class="btn btn-secondary" id="pullFedexBtn" title="Pull recent shipments from FedEx and auto-match by ship-to address">📦 Pull from FedEx</button>
         <button class="btn btn-primary" id="newShipBtn">+ Create Shipment</button>
       </div>
@@ -2184,7 +2183,6 @@ function renderShipments() {
   `;
   document.getElementById('newShipBtn').addEventListener('click', openCreateShipment);
   document.getElementById('pullFedexBtn').addEventListener('click', openFedexPullModal);
-  document.getElementById('testFedexBtn').addEventListener('click', openFedexTestModal);
   updateFedexStatusPill();
   document.getElementById('shipMine').addEventListener('change', e => { state.shipFilter.mine = e.target.checked; renderShipments(); });
   document.getElementById('shipSearch').addEventListener('input', e => { state.shipFilter.search = e.target.value; renderShipments(); });
