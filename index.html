@@ -508,11 +508,13 @@ function printPackingSlip(shipment, opts) {
   if (!w) { alert('Pop-up blocked — allow pop-ups for this site.'); return; }
   const today = new Date().toLocaleString();
   const bulkId = shipment.bulkShipmentId || ('SHIP-' + shipment.id);
-  const addr = PHARMACY_ADDRESSES[shipment.toLocation] || {};
-  const logoUrl = location.origin + '/logo.png';
+  const toAddr = PHARMACY_ADDRESSES[shipment.toLocation] || {};
+  const fromAddr = PHARMACY_ADDRESSES[shipment.fromLocation] || {};
+  const fmtAddr = a => a.addr1 ? `${escapeHtml(a.addr1)}${a.addr2?', '+escapeHtml(a.addr2):''}, ${escapeHtml(a.city||'')}, ${escapeHtml(a.state||'')} ${escapeHtml(a.zip||'')}` : '';
+  const logoUrl = location.origin + '/logo-print.svg';
   const html = `<!DOCTYPE html><html><head><title>Packing Slip — ${escapeHtml(bulkId)}</title>
 <style>
-  @page { size: letter; margin: 0.5in; }
+  @page { size: letter portrait; margin: 0.5in; }
   body { font-family: 'Arial', sans-serif; color: #111; font-size: 12px; }
   .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2a6ebb; padding-bottom: 10px; margin-bottom: 14px; gap: 16px; }
   .header-left { display: flex; align-items: flex-start; gap: 14px; }
@@ -538,8 +540,8 @@ function printPackingSlip(shipment, opts) {
     <div>
       <div class="brand">Pharmacy Innovations</div>
       <div class="brand-sub">Inter-Pharmacy Bulk Shipment Packing Slip</div>
-      <div style="margin-top:8px"><strong>From:</strong> ${escapeHtml(shipment.fromLocation)} — Sterile Compounding</div>
-      <div><strong>To:</strong> ${escapeHtml(shipment.toLocation)}${addr.addr1?` · ${escapeHtml(addr.addr1)}, ${escapeHtml(addr.city||'')}, ${escapeHtml(addr.state||'')} ${escapeHtml(addr.zip||'')}`:''}</div>
+      <div style="margin-top:8px"><strong>From:</strong> ${escapeHtml(shipment.fromLocation)}${fromAddr.addr1?`<div style="margin-left:42px;font-size:11px;color:#444">${fmtAddr(fromAddr)}</div>`:''}</div>
+      <div style="margin-top:4px"><strong>To:</strong> ${escapeHtml(shipment.toLocation)}${toAddr.addr1?`<div style="margin-left:28px;font-size:11px;color:#444">${fmtAddr(toAddr)}</div>`:''}</div>
     </div>
   </div>
   <div>
@@ -611,7 +613,7 @@ function printCCAuthForm(source, opts) {
   const drugs = (source.items || []).map(i => i.drug).filter(Boolean).join(', ');
   const tid = source.id || '(new transfer)';
   const today = new Date().toLocaleDateString();
-  const logoUrl = location.origin + '/logo.png';
+  const logoUrl = location.origin + '/logo-print.svg';
   const fillable = mode === 'fill';
   const fieldInput = (placeholder = '') => fillable
     ? `<input type="text" class="fill-input" placeholder="${escapeHtml(placeholder)}" />`
