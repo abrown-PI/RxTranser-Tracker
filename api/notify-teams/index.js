@@ -25,10 +25,36 @@ async function loadWebhooks() {
   }
 }
 
-// Build an Adaptive Card payload for Teams. The "View Transfer in Portal" action uses
-// `openUrl` which works in both Incoming Webhooks and Power Automate webhook templates.
+// Build a dual-format Teams payload: an Adaptive Card (rendered in channels via Power Automate
+// channel templates) AND plain text fields (used by chat flows). Power Automate flows can
+// map whichever field they want — `text` for chat messages, `attachments` for channel cards.
 function buildCard({ patientName, drug, askedBy, question, transferId, portalUrl, askedLocation }) {
+  const fromLine = `From ${askedBy || 'team member'}${askedLocation ? ' (' + askedLocation + ')' : ''}`;
+  const drugLine = drug ? `Drug: ${drug}` : '';
+  // Plain text version — readable in chats, with markdown-style formatting that Teams renders
+  const textLines = [
+    `**❓ Question on transfer: ${patientName || '(unnamed)'}**`,
+    fromLine,
+    drugLine,
+    '',
+    question || '(no question text)',
+    '',
+    portalUrl ? `[View Transfer in Portal](${portalUrl})` : ''
+  ].filter(Boolean);
+  const text = textLines.join('\n');
+
   return {
+    // Used by chat-format flows (just .text)
+    text,
+    // Convenience fields chat flows can map individually
+    patientName: patientName || '',
+    askedBy: askedBy || '',
+    askedLocation: askedLocation || '',
+    drug: drug || '',
+    question: question || '',
+    portalUrl: portalUrl || '',
+    transferId: transferId || '',
+    // Used by channel-format flows (adaptive card attachment)
     type: 'message',
     attachments: [{
       contentType: 'application/vnd.microsoft.card.adaptive',
@@ -39,7 +65,7 @@ function buildCard({ patientName, drug, askedBy, question, transferId, portalUrl
         version: '1.4',
         body: [
           { type: 'TextBlock', size: 'Medium', weight: 'Bolder', text: `❓ Question on transfer: ${patientName || '(unnamed)'}` },
-          { type: 'TextBlock', wrap: true, isSubtle: true, text: `From ${askedBy || 'team member'}${askedLocation ? ' (' + askedLocation + ')' : ''}` },
+          { type: 'TextBlock', wrap: true, isSubtle: true, text: fromLine },
           ...(drug ? [{ type: 'TextBlock', wrap: true, text: `**Drug:** ${drug}` }] : []),
           { type: 'TextBlock', wrap: true, text: question || '(no question text)', spacing: 'Medium' }
         ],
