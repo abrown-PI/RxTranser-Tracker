@@ -1,19 +1,14 @@
 // POST /api/fedex-auto-match
-// Body (optional): { dateFrom, dateTo, threshold, dryRun }
+// Body (optional): { dryRun }
 //
-// Scheduled job target. Pulls recent FedEx shipments, scores each against open transfers
-// without a tracking number, and AUTO-APPLIES matches that exceed the confidence threshold.
-// Lower-confidence matches are returned in the response for human review (no auto-apply).
-//
-// Defaults:
-//   dateFrom = today - 10 days
-//   dateTo = today
-//   threshold = 80 (score 0-100ish — see scoreMatch)
-//   dryRun = false (set true to preview without writing)
+// Scheduled daily job. For every open transfer without a tracking number,
+// queries FedEx Track API by the transfer's reference (transfer ID).
+// If FedEx returns a shipment, the tracking # + ship date are linked to the
+// transfer automatically. This requires staff to enter the transfer ID into
+// WorldShip's "Customer Reference" field when generating the label.
 
 const { TableClient } = require('@azure/data-tables');
 
-// === Shared FedEx auth (same pattern as fedex-track / fedex-search) ===
 let _cachedToken = null;
 let _cachedTokenExpiry = 0;
 async function getAccessToken() {
@@ -35,45 +30,6 @@ async function getAccessToken() {
   return _cachedToken;
 }
 
-// === Pull FedEx shipments by date range (mirrors /api/fedex-search) ===
-async function pullFedexShipments(dateFrom, dateTo) {
-  const base = process.env.FEDEX_API_BASE || 'https://apis-sandbox.fedex.com';
-  const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER || '';
-  const token = await getAccessToken();
-  const body = {
-    accountNumber: { value: accountNumber },
-    searchDateRange: { beginDate: dateFrom, endDate: dateTo },
-    paging: { resultsPerPage: 250 }
-  };
-  const resp = await fetch(base + '/shipments/v1/searches', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
-    body: JSON.stringify(body)
-  });
-  if (!resp.ok) throw Object.assign(new Error('FedEx search ' + resp.status), { statusCode: resp.status });
-  const data = await resp.json();
-  const out = data && data.output;
-  const raw = (out && (out.shipments || out.shipmentDetails)) || [];
-  return raw.map(s => {
-    const trackingNumber = (s.trackingNumber || (s.masterTrackingNumber && s.masterTrackingNumber.trackingNumber) || '').replace(/\s+/g, '');
-    const r = s.recipient || s.recipientAddress || s.receiverAddress || {};
-    const contact = r.contact || s.recipientContact || {};
-    const addr = r.address || r;
-    return {
-      trackingNumber,
-      shipDate: s.shipDateStamp || s.shipDate || null,
-      recipient: {
-        name: contact.personName || r.personName || s.recipientName || '',
-        addr1: (addr.streetLines && addr.streetLines[0]) || addr.streetLine1 || '',
-        city: addr.city || '',
-        state: addr.stateOrProvinceCode || addr.state || '',
-        zip: addr.postalCode || addr.zip || ''
-      }
-    };
-  }).filter(s => s.trackingNumber);
-}
-
-// === Load all transfers from Table Storage ===
 async function loadTransfers() {
   const conn = process.env.AZURE_STORAGE_CONNECTION;
   if (!conn) throw new Error('AZURE_STORAGE_CONNECTION not set');
@@ -109,116 +65,103 @@ async function updateTransfer(t) {
   }, 'Replace');
 }
 
-// === Scoring (same logic as frontend scoreMatch but server-side) ===
-function normalizeAddr(s) {
-  if (!s) return '';
-  return String(s).toUpperCase()
-    .replace(/\bSTREET\b/g, 'ST').replace(/\bROAD\b/g, 'RD').replace(/\bAVENUE\b/g, 'AVE')
-    .replace(/\bDRIVE\b/g, 'DR').replace(/\bBOULEVARD\b/g, 'BLVD').replace(/\bLANE\b/g, 'LN')
-    .replace(/\bCIRCLE\b/g, 'CIR').replace(/\bCOURT\b/g, 'CT').replace(/\bPLACE\b/g, 'PL')
-    .replace(/[.,#]/g, '').replace(/\s+/g, ' ').trim();
-}
-function lastNameOf(name) { if (!name) return ''; return name.split(',')[0].trim().toUpperCase(); }
-function scoreMatch(fedexShip, transfer, pharmacyAddresses) {
-  let score = 0;
-  const r = fedexShip.recipient || {};
-  const tLast = lastNameOf(transfer.patientName);
-  const fLast = lastNameOf(r.name);
-  if (tLast && fLast && tLast === fLast) score += 50;
-  if (transfer.shipTo === 'Pharmacy') {
-    const pa = (pharmacyAddresses || {})[transfer.originLocation];
-    if (pa) {
-      if (normalizeAddr(pa.addr1) === normalizeAddr(r.addr1) && pa.zip && pa.zip === r.zip) score += 40;
-      else if (pa.zip && pa.zip === r.zip) score += 20;
+// Query FedEx Track API for a batch of references. Returns map: reference -> { trackingNumber, shipDate }
+async function searchByReferences(refs, context) {
+  const base = process.env.FEDEX_API_BASE || 'https://apis-sandbox.fedex.com';
+  const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER || '';
+  const token = await getAccessToken();
+  const today = new Date();
+  const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000);
+  const fmtDate = d => d.toISOString().slice(0, 10);
+  const found = {};
+  for (let i = 0; i < refs.length; i += 30) {
+    const chunk = refs.slice(i, i + 30);
+    const body = {
+      includeDetailedScans: false,
+      trackingInfo: chunk.map(r => ({
+        trackingNumberInfo: {
+          trackingNumber: String(r),
+          trackingNumberType: 'FEDEX_REFERENCE_NUMBER',
+          carrierCode: 'FDXE'
+        },
+        shipmentAccountNumber: { value: accountNumber },
+        shipDateBegin: fmtDate(ninetyDaysAgo),
+        shipDateEnd: fmtDate(today)
+      }))
+    };
+    const resp = await fetch(base + '/track/v1/trackingnumbers', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      context.log.warn(`FedEx track-by-ref chunk failed: ${resp.status} ${txt.slice(0, 200)}`);
+      continue;
     }
-  } else {
-    if (transfer.shipAddr1 && r.addr1 && normalizeAddr(transfer.shipAddr1) === normalizeAddr(r.addr1)) score += 40;
-    if (transfer.shipZip && r.zip && transfer.shipZip === r.zip) score += 10;
-    if (transfer.shipCity && r.city && transfer.shipCity.toUpperCase() === r.city.toUpperCase()) score += 5;
+    const data = await resp.json();
+    const out = data && data.output;
+    if (!out || !Array.isArray(out.completeTrackResults)) continue;
+    out.completeTrackResults.forEach((r, idx) => {
+      const reference = chunk[idx];
+      const first = (r.trackResults || [])[0] || {};
+      const trackingNumber = (r.trackingNumber || (first.trackingNumberInfo && first.trackingNumberInfo.trackingNumber) || '').replace(/\s+/g, '');
+      if (!trackingNumber) return;
+      const dates = first.dateAndTimes || [];
+      const shipDate = (dates.find(d => d.type === 'ACTUAL_PICKUP') || dates.find(d => d.type === 'SHIP') || {}).dateTime || null;
+      found[reference] = {
+        trackingNumber,
+        shipDate: shipDate ? String(shipDate).slice(0, 10) : null
+      };
+    });
   }
-  const fDate = fedexShip.shipDate ? new Date(fedexShip.shipDate) : null;
-  const tDate = transfer.createdAt ? new Date(transfer.createdAt) : null;
-  if (fDate && tDate) {
-    const daysOff = Math.abs(fDate - tDate) / 86400000;
-    const window = transfer.shipTo === 'Pharmacy' ? 3 : 10;
-    if (daysOff <= window) score += Math.max(0, 10 - daysOff);
-  }
-  return score;
+  return found;
 }
-
-// Hardcoded pharmacy addresses (matches frontend; eventually load from /api/settings)
-const PHARMACY_ADDRESSES = {
-  'Erie':           { addr1: '2936 W. 17th Street', city: 'Erie', state: 'PA', zip: '16505' },
-  'Lancaster':      { addr1: '902 N. Duke Street', city: 'Lancaster', state: 'PA', zip: '17602' },
-  'Greenville':     { addr1: '640 Congaree Rd', city: 'Greenville', state: 'SC', zip: '29607' },
-  'Houston':        { addr1: '8687 Louetta Rd', city: 'Spring', state: 'TX', zip: '77379' },
-  'Tucson':         { addr1: '2729 E Speedway Blvd', city: 'Tucson', state: 'AZ', zip: '85716' },
-  'Jamestown':      { addr1: '863 Fairmount Ave', city: 'Jamestown', state: 'NY', zip: '14701' },
-  'Virginia Beach': { addr1: '3636 Virginia Beach Blvd', city: 'Virginia Beach', state: 'VA', zip: '23452' },
-  'Seminole':       { addr1: '7779 Starkey Rd', city: 'Seminole', state: 'FL', zip: '33777' }
-};
 
 module.exports = async function (context, req) {
   try {
     const body = req.body || {};
-    const today = new Date().toISOString().slice(0, 10);
-    const tenDaysAgo = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
-    const dateFrom = body.dateFrom || tenDaysAgo;
-    const dateTo = body.dateTo || today;
-    const threshold = body.threshold || 80;
     const dryRun = !!body.dryRun;
+    const today = new Date().toISOString().slice(0, 10);
 
-    context.log(`Auto-match starting: ${dateFrom} → ${dateTo}, threshold ${threshold}, dryRun=${dryRun}`);
-
-    const [shipments, transfers] = await Promise.all([pullFedexShipments(dateFrom, dateTo), loadTransfers()]);
+    const transfers = await loadTransfers();
     const openTransfers = transfers.filter(t => !['Delivered', 'Canceled'].includes(t.status) && !t.trackingNumber);
+    if (openTransfers.length === 0) {
+      context.res = { status: 200, body: { applied: 0, message: 'No open transfers without tracking' } };
+      return;
+    }
 
-    context.log(`Pulled ${shipments.length} FedEx shipments, ${openTransfers.length} open transfers without tracking`);
+    // Reference per transfer = its transfer ID as a string. Staff enters this into WorldShip.
+    const references = openTransfers.map(t => String(t.id));
+    context.log(`Auto-match querying FedEx for ${references.length} references…`);
 
+    const found = await searchByReferences(references, context);
     const applied = [];
-    const needsReview = [];
-    for (const s of shipments) {
-      const candidates = openTransfers
-        .map(t => ({ transfer: t, score: scoreMatch(s, t, PHARMACY_ADDRESSES) }))
-        .filter(c => c.score > 0)
-        .sort((a, b) => b.score - a.score);
-      const best = candidates[0];
-      if (!best) continue;
-      if (best.score >= threshold) {
-        if (!dryRun) {
-          best.transfer.trackingNumber = s.trackingNumber;
-          best.transfer.dateShipped = s.shipDate || best.transfer.dateShipped || today;
-          if (!['Shipped', 'Delivered', 'Canceled'].includes(best.transfer.status)) {
-            best.transfer.status = 'Shipped';
-          }
-          best.transfer.fedexAutoMatched = true;
-          best.transfer.fedexAutoMatchedAt = new Date().toISOString();
-          await updateTransfer(best.transfer);
-        }
-        applied.push({
-          trackingNumber: s.trackingNumber, score: best.score,
-          transferId: best.transfer.id, patientName: best.transfer.patientName
-        });
-      } else if (best.score >= 40) {
-        needsReview.push({
-          trackingNumber: s.trackingNumber, score: best.score,
-          transferId: best.transfer.id, patientName: best.transfer.patientName,
-          recipient: s.recipient
-        });
+
+    for (const t of openTransfers) {
+      const ref = String(t.id);
+      const match = found[ref];
+      if (!match) continue;
+      if (!dryRun) {
+        t.trackingNumber = match.trackingNumber;
+        if (match.shipDate) t.dateShipped = match.shipDate;
+        else if (!t.dateShipped) t.dateShipped = today;
+        if (!['Shipped', 'Delivered', 'Canceled'].includes(t.status)) t.status = 'Shipped';
+        t.fedexAutoMatched = true;
+        t.fedexAutoMatchedAt = new Date().toISOString();
+        await updateTransfer(t);
       }
+      applied.push({ transferId: t.id, patientName: t.patientName, trackingNumber: match.trackingNumber, shipDate: match.shipDate });
     }
 
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
       body: {
-        dateRange: { from: dateFrom, to: dateTo },
-        threshold,
         dryRun,
-        pulledShipments: shipments.length,
         openTransfers: openTransfers.length,
-        autoApplied: applied,
-        needsReview
+        referencesQueried: references.length,
+        autoApplied: applied
       }
     };
   } catch (err) {

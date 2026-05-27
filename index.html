@@ -1897,6 +1897,11 @@ function renderModal() {
           <button class="modal-close" id="modalClose">&times;</button>
         </div>
         <div class="modal-body">
+          <div style="background:var(--primary-bg);padding:8px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <strong style="color:var(--primary-dark);text-transform:uppercase;letter-spacing:.03em;font-size:11px">WorldShip Reference:</strong>
+            <code style="background:white;padding:4px 10px;border-radius:4px;font-size:14px;font-weight:600;color:var(--primary-dark);border:1px solid var(--primary-light)">${t.id}</code>
+            <span class="hint" style="font-size:11px">↑ Type this into WorldShip's Customer Reference field when shipping so it auto-links here</span>
+          </div>
           <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
             <span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span>
             ${t.transferType==='Refill'?'<span class="badge badge-verified">Refill</span>':'<span class="badge badge-new">New Rx</span>'}
@@ -3468,142 +3473,110 @@ function openFedexTestModal() {
 
 function openFedexPullModal() {
   const root = document.getElementById('modalRoot');
-  const today = new Date().toISOString().slice(0,10);
-  const tenDaysAgo = new Date(Date.now() - 10*86400000).toISOString().slice(0,10);
-  const state = { dateFrom: tenDaysAgo, dateTo: today, loading: false, results: null, error: null, matches: [] };
+  // Reference-based pull: query FedEx for the reference number of every open transfer w/o tracking
+  const state = { loading: false, results: null, error: null, applied: [] };
+
+  const openTransfers = TRANSFERS.filter(t => !['Delivered','Canceled'].includes(t.status) && !t.trackingNumber);
 
   const render = () => {
-    root.innerHTML = `<div class="modal-overlay" id="fxOverlay"><div class="modal" style="max-width:900px">
-      <div class="modal-header"><div><div class="modal-title">Pull Shipments from FedEx</div><div class="item-sub">Match recent FedEx shipments to open transfers by ship-to address</div></div><button class="modal-close" id="fxClose">&times;</button></div>
+    root.innerHTML = `<div class="modal-overlay" id="fxOverlay"><div class="modal" style="max-width:760px">
+      <div class="modal-header"><div><div class="modal-title">Pull Shipments from FedEx</div><div class="item-sub">Looks up the FedEx Customer Reference (transfer ID) for each open transfer to find its tracking number</div></div><button class="modal-close" id="fxClose">&times;</button></div>
       <div class="modal-body">
-        <div class="form-grid">
-          <div class="form-group"><label>From</label><input type="date" id="fx-from" value="${state.dateFrom}" /></div>
-          <div class="form-group"><label>To</label><input type="date" id="fx-to" value="${state.dateTo}" /></div>
+        <div style="background:var(--primary-bg);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;line-height:1.5">
+          <strong>How this works:</strong> when staff prints a label in WorldShip, they must enter the <strong>transfer ID</strong> into WorldShip's <strong>Customer Reference</strong> field. This button then asks FedEx "what's the tracking # for reference X?" for every open transfer.
         </div>
-        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-          <button class="btn btn-primary" id="fx-go" ${state.loading?'disabled style="opacity:.5"':''}>${state.loading?'Pulling…':'Pull from FedEx'}</button>
-          ${state.error?`<span style="color:var(--danger);font-size:13px">${escapeHtml(state.error)}</span>`:''}
+        <div style="font-size:13px;color:var(--gray-700);margin-bottom:12px">
+          <strong>${openTransfers.length}</strong> open transfer${openTransfers.length===1?'':'s'} without tracking numbers will be queried.
         </div>
-        ${state.results ? renderResults() : `<div style="margin-top:20px;color:var(--gray-500);font-size:13px">Click "Pull from FedEx" to fetch shipments in the date range and auto-match them to open transfers.</div>`}
+        <button class="btn btn-primary" id="fx-go" ${state.loading||openTransfers.length===0?'disabled style="opacity:.5"':''}>${state.loading?'Querying FedEx…':'Query FedEx now'}</button>
+        ${state.error?`<div style="margin-top:14px;background:var(--danger-bg);border:1px solid var(--danger);padding:10px 14px;border-radius:6px;font-size:13px"><strong style="color:var(--danger)">Error:</strong> ${escapeHtml(state.error)}</div>`:''}
+        ${state.results ? renderResults() : ''}
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="fxCancel">Close</button>
-        ${state.matches.some(m => m.approved) ? `<button class="btn btn-primary" id="fxApply">Apply ${state.matches.filter(m=>m.approved).length} matched shipment(s)</button>` : ''}
       </div>
     </div></div>`;
     document.getElementById('fxClose').onclick = close;
     document.getElementById('fxCancel').onclick = close;
     document.getElementById('fxOverlay').onclick = e => { if (e.target.id === 'fxOverlay') close(); };
-    document.getElementById('fx-from').onchange = e => { state.dateFrom = e.target.value; };
-    document.getElementById('fx-to').onchange = e => { state.dateTo = e.target.value; };
     document.getElementById('fx-go').onclick = pull;
-    bindResultRows();
-    const apply = document.getElementById('fxApply');
-    if (apply) apply.onclick = applyMatches;
   };
 
   const renderResults = () => {
-    if (state.results.length === 0) return '<div class="empty"><h3>No shipments found</h3><p>FedEx returned no shipments for this date range.</p></div>';
+    const found = state.results.filter(s => s.found);
+    if (found.length === 0) return `<div style="margin-top:14px;background:var(--warning-bg);border:1px solid var(--warning);padding:10px 14px;border-radius:6px;font-size:13px">
+      <strong>No matches found.</strong> Either staff didn't enter transfer IDs into WorldShip's Customer Reference field, or the shipments haven't been processed by FedEx yet. Try again later or check that references are being entered.
+    </div>`;
     return `
       <div style="margin-top:14px;font-size:13px;color:var(--gray-700)">
-        Pulled <strong>${state.results.length}</strong> shipment(s). ${state.matches.filter(m=>m.bestMatch).length} have a candidate match. Confirm each below.
+        Found tracking for <strong>${found.length}</strong> of ${state.results.length} queried.${state.applied.length?` ${state.applied.length} applied successfully.`:''}
       </div>
       <table style="box-shadow:none;font-size:13px;margin-top:10px"><thead><tr>
-        <th>FedEx Recipient</th><th>Ship Date</th><th>Tracking #</th><th>Suggested Transfer</th><th>Score</th><th>Confirm</th>
+        <th>Transfer</th><th>Reference</th><th>Tracking #</th><th>Ship Date</th>
       </tr></thead><tbody>
-        ${state.matches.map((m, idx) => `<tr ${m.approved?'style="background:var(--success-bg)"':(m.bestMatch?'':'style="opacity:.6"')}>
-          <td><strong>${escapeHtml(m.ship.recipient.name||'(no name)')}</strong><div class="item-sub">${escapeHtml([m.ship.recipient.addr1, m.ship.recipient.city, m.ship.recipient.state, m.ship.recipient.zip].filter(Boolean).join(', '))}</div></td>
-          <td>${fmtDate(m.ship.shipDate)}</td>
-          <td style="font-family:monospace;font-size:12px">${escapeHtml(m.ship.trackingNumber)}</td>
-          <td>${m.bestMatch ? `
-            <select data-pick="${idx}" style="font-size:12px;padding:4px;max-width:260px">
-              ${m.candidates.slice(0, 5).map(c => `<option value="${c.transfer.id}" ${m.bestMatch.transfer.id===c.transfer.id?'selected':''}>${escapeHtml(c.transfer.patientName)} · ${escapeHtml(c.transfer.originLocation)} → ${escapeHtml(c.transfer.fillLocation)} (score ${c.score})</option>`).join('')}
-              <option value="">— No match —</option>
-            </select>` : '<span class="item-sub">No candidate</span>'}</td>
-          <td>${m.bestMatch?`<span class="badge ${m.bestMatch.score>=60?'badge-shipped':'badge-progress'}" style="font-size:10px">${m.bestMatch.score}</span>`:''}</td>
-          <td>${m.bestMatch?`<label class="checkbox-row"><input type="checkbox" data-approve="${idx}" ${m.approved?'checked':''} /></label>`:''}</td>
-        </tr>`).join('')}
+        ${found.map(s => {
+          const t = TRANSFERS.find(x => String(x.id) === String(s.reference));
+          return `<tr style="background:var(--success-bg)">
+            <td><strong>${escapeHtml(t ? t.patientName : '(unknown)')}</strong></td>
+            <td style="font-family:monospace">${escapeHtml(s.reference)}</td>
+            <td style="font-family:monospace;font-size:12px">${escapeHtml(s.trackingNumber)}</td>
+            <td>${fmtDate(s.shipDate)}</td>
+          </tr>`;
+        }).join('')}
       </tbody></table>
     `;
   };
 
-  const bindResultRows = () => {
-    document.querySelectorAll('[data-pick]').forEach(sel => sel.onchange = e => {
-      const idx = +sel.dataset.pick;
-      const tid = +e.target.value;
-      state.matches[idx].bestMatch = tid ? state.matches[idx].candidates.find(c => c.transfer.id === tid) : null;
-      if (!tid) state.matches[idx].approved = false;
-      render();
-    });
-    document.querySelectorAll('[data-approve]').forEach(cb => cb.onchange = e => {
-      const idx = +cb.dataset.approve;
-      state.matches[idx].approved = e.target.checked;
-      render();
-    });
-  };
-
   const pull = async () => {
-    state.loading = true; state.error = null; render();
+    state.loading = true; state.error = null; state.results = null; render();
     try {
+      const references = openTransfers.map(t => String(t.id));
       const r = await fetch('/api/fedex-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dateFrom: state.dateFrom, dateTo: state.dateTo })
+        body: JSON.stringify({ references })
       });
       const data = await r.json();
-      if (!r.ok) throw new Error(data.error || 'FedEx pull failed');
+      if (!r.ok) throw new Error(data.error || 'FedEx query failed');
       state.results = data.shipments || [];
-      // Build candidate matches for each FedEx shipment
-      const openTransfers = TRANSFERS.filter(t => !['Delivered','Canceled'].includes(t.status) && !t.trackingNumber);
-      state.matches = state.results.map(ship => {
-        const candidates = openTransfers
-          .map(t => ({ transfer: t, score: scoreMatch(ship, t) }))
-          .filter(c => c.score > 0)
-          .sort((a,b) => b.score - a.score);
-        const bestMatch = candidates[0] || null;
-        return { ship, candidates, bestMatch, approved: !!(bestMatch && bestMatch.score >= 60) };
-      });
+      // Apply found matches immediately (reference-by-reference lookup is unambiguous — no need to confirm)
+      for (const s of state.results) {
+        if (!s.found) continue;
+        const t = TRANSFERS.find(x => String(x.id) === String(s.reference));
+        if (!t) continue;
+        t.trackingNumber = s.trackingNumber;
+        if (s.shipDate) t.dateShipped = s.shipDate;
+        if (!['Shipped','Delivered','Canceled'].includes(t.status)) t.status = 'Shipped';
+        await apiUpdateTransfer(t);
+        if (!SHIPMENTS.some(sh => sh.trackingNumber === s.trackingNumber)) {
+          SHIPMENTS.unshift({
+            id: nextId(),
+            fromLocation: t.fillLocation,
+            toLocation: t.shipTo === 'Pharmacy' ? t.originLocation : 'Patient',
+            destinationType: t.shipTo === 'Pharmacy' ? 'Pharmacy' : 'Patient',
+            carrier: 'FedEx',
+            trackingNumber: s.trackingNumber,
+            labelGenerated: false,
+            status: 'In Transit',
+            shipDate: s.shipDate,
+            deliveredDate: null, receivedDate: null, receivedBy: null,
+            transferIds: [t.id],
+            createdAt: new Date().toISOString(), createdBy: 'FedEx auto-match',
+            unpacked: {}
+          });
+        }
+        state.applied.push(s);
+      }
     } catch (e) {
       state.error = e.message;
-      state.results = null;
     }
     state.loading = false;
     render();
+    if (state.applied.length) {
+      // Re-render shipments tab in the background so the new statuses show up
+      setTimeout(() => { if (typeof renderShipments === 'function' && state.tab === 'shipments') renderShipments(); }, 100);
+    }
   };
-
-  const applyMatches = () => {
-    let applied = 0;
-    state.matches.filter(m => m.approved && m.bestMatch).forEach(m => {
-      const t = m.bestMatch.transfer;
-      t.trackingNumber = m.ship.trackingNumber;
-      t.dateShipped = m.ship.shipDate || t.dateShipped || new Date().toISOString().slice(0,10);
-      if (!['Shipped','Delivered','Canceled'].includes(t.status)) t.status = 'Shipped';
-      apiUpdateTransfer(t);
-      // Also create a shipment record if one doesn't already exist for this tracking #
-      if (!SHIPMENTS.some(s => s.trackingNumber === m.ship.trackingNumber)) {
-        SHIPMENTS.unshift({
-          id: nextId(),
-          fromLocation: t.fillLocation,
-          toLocation: t.shipTo === 'Pharmacy' ? t.originLocation : 'Patient',
-          destinationType: t.shipTo === 'Pharmacy' ? 'Pharmacy' : 'Patient',
-          carrier: 'FedEx',
-          trackingNumber: m.ship.trackingNumber,
-          labelGenerated: false,
-          status: 'In Transit',
-          shipDate: m.ship.shipDate,
-          deliveredDate: null, receivedDate: null, receivedBy: null,
-          transferIds: [t.id],
-          createdAt: new Date().toISOString(), createdBy: 'FedEx auto-match',
-          unpacked: {}
-        });
-      }
-      applied++;
-    });
-    close();
-    alert(`Linked ${applied} FedEx shipment(s) to transfers.`);
-    render2(); // re-render the Shipments tab
-  };
-  const render2 = () => renderShipments();
 
   const close = () => { root.innerHTML = ''; };
   render();
