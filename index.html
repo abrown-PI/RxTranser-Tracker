@@ -684,7 +684,10 @@ function openPageViewer(bulkDraft) {
       <button class="modal-close" id="pvClose">&times;</button>
     </div>
     <div class="modal-body" style="background:var(--gray-100)">
-      ${pages.map(p => `<div style="margin-bottom:18px"><div style="font-weight:600;margin-bottom:6px">Page ${p.pageNum} <span class="badge ${p.kind==='transfer'?'badge-verified':'badge-progress'}" style="font-size:10px">${p.kind==='transfer'?'Transfer Sheet':'Hard Copy'}</span></div><img src="${escapeHtml(p.dataUrl)}" alt="Page ${p.pageNum}" style="width:100%;border:1px solid var(--gray-300);border-radius:4px;background:white" /></div>`).join('')}
+      ${pages.map(p => {
+        const src = p.dataUrl || (p.blobName ? blobUrl(p.blobName) : '');
+        return `<div style="margin-bottom:18px"><div style="font-weight:600;margin-bottom:6px">Page ${p.pageNum} <span class="badge ${p.kind==='transfer'?'badge-verified':'badge-progress'}" style="font-size:10px">${p.kind==='transfer'?'Transfer Sheet':'Hard Copy'}</span></div>${src?`<img src="${escapeHtml(src)}" alt="Page ${p.pageNum}" style="width:100%;border:1px solid var(--gray-300);border-radius:4px;background:white" />`:'<div class="item-sub" style="font-style:italic">No image stored</div>'}</div>`;
+      }).join('')}
     </div>
     <div class="modal-footer"><button class="btn btn-secondary" id="pvCloseBtn">Close</button></div>
   </div></div>`;
@@ -1925,7 +1928,7 @@ function renderModal() {
           <button class="btn btn-secondary btn-sm" style="margin-top:10px" id="editShipBtn">Edit ship / tracking</button>
           </div>
 
-          <div class="section"><div class="section-title">Attached Documents</div>
+          <div class="section"><div class="section-title">Attached Documents ${(t.pageImages && t.pageImages.length) ? `<button class="btn btn-secondary btn-sm" id="viewBulkPages" style="margin-left:10px">📄 View ${t.pageImages.length} attached page${t.pageImages.length>1?'s':''}</button>` : ''}</div>
           <div style="font-size:13px;line-height:1.9">
             <div><strong>PK Transfer Sheet${(t.pkSheets&&t.pkSheets.length>1)?'s':''}:</strong> ${docList(t.pkSheets || (t.pkSheet?[t.pkSheet]:[]))}</div>
             <div><strong>Hard Copy Scan${(t.hardCopies&&t.hardCopies.length>1)?'s':''}:</strong> ${docList(t.hardCopies || (t.hardCopy?[t.hardCopy]:[]))}</div>
@@ -1990,6 +1993,8 @@ function renderModal() {
     document.querySelector('.tab[data-tab=new]').click();
   });
   document.getElementById('askQBtn').addEventListener('click', () => openAskQuestionModal(t.id));
+  const viewBulkBtn = document.getElementById('viewBulkPages');
+  if (viewBulkBtn) viewBulkBtn.addEventListener('click', () => openPageViewer({ sourceFile: t.patientName + ' — attached pages', pageImages: t.pageImages || [] }));
   document.getElementById('editTransferBtn').addEventListener('click', () => {
     // Deep-clone the transfer into the draft so user can cancel without affecting the original
     state.draft = JSON.parse(JSON.stringify(t));
@@ -2453,27 +2458,73 @@ function openShipment(id) {
 
 // =====================================================================
 // Bulk upload + review queue
-// Each uploaded PDF becomes one draft entry in state.bulkQueue. The user
-// reviews/edits each, then approves or rejects. Approved drafts become
-// real transfers. The queue persists to localStorage so it survives reloads.
+// Drafts live in Azure Table Storage (location-scoped) so everyone at the
+// uploader's pharmacy can see + work on the queue. Page images get uploaded
+// to Blob Storage so they persist + are visible across users.
 // =====================================================================
-const BULK_QUEUE_KEY = 'bulkQueue_v1';
-function saveBulkQueue() {
+
+// Upload a base64 blob to /api/blobs. Returns the blob name (NOT the URL).
+async function uploadBlob(base64, contentType, prefix) {
   try {
-    const safe = (state.bulkQueue || []).map(b => ({
-      ...b,
-      // Strip file blobs (we can't serialize and they're not used for display anyway)
-      pageImages: undefined
-    }));
-    localStorage.setItem(BULK_QUEUE_KEY, JSON.stringify(safe));
-  } catch (e) { console.warn('Failed to persist bulk queue', e); }
+    const r = await fetch('/api/blobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: base64, contentType, prefix })
+    });
+    if (!r.ok) throw new Error('Upload failed: ' + r.status);
+    const data = await r.json();
+    return data.name;
+  } catch (e) { console.warn('uploadBlob failed', e); return null; }
 }
-function loadBulkQueue() {
+
+// Build a URL the browser can use to fetch a stored blob.
+function blobUrl(name) { return '/api/blobs/' + encodeURIComponent(name); }
+
+// Save / load / delete bulk drafts via the backend. Drafts are scoped by location;
+// users at the same pharmacy see each other's queue.
+async function apiSaveBulkDraft(b) {
   try {
-    const raw = localStorage.getItem(BULK_QUEUE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch (e) { console.warn('Failed to restore bulk queue', e); return []; }
+    const r = await fetch('/api/bulk-drafts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': (CURRENT_USER && CURRENT_USER.email) || '' },
+      body: JSON.stringify(b)
+    });
+    if (!r.ok) throw new Error('Save failed: ' + r.status);
+  } catch (e) { console.warn('apiSaveBulkDraft failed', e); }
+}
+async function apiUpdateBulkDraft(b) {
+  try {
+    await fetch('/api/bulk-drafts/' + encodeURIComponent(b.id), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-user-email': (CURRENT_USER && CURRENT_USER.email) || '' },
+      body: JSON.stringify(b)
+    });
+  } catch (e) { console.warn('apiUpdateBulkDraft failed', e); }
+}
+async function apiDeleteBulkDraft(id) {
+  try { await fetch('/api/bulk-drafts/' + encodeURIComponent(id), { method: 'DELETE' }); }
+  catch (e) { console.warn('apiDeleteBulkDraft failed', e); }
+}
+async function apiLoadBulkDrafts() {
+  try {
+    const loc = (CURRENT_USER && CURRENT_USER.role !== 'admin') ? (CURRENT_USER.location || '') : '';
+    const url = loc ? '/api/bulk-drafts?location=' + encodeURIComponent(loc) : '/api/bulk-drafts';
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('Load failed: ' + r.status);
+    const data = await r.json();
+    return data.drafts || [];
+  } catch (e) { console.warn('apiLoadBulkDrafts failed', e); return []; }
+}
+
+// Persist the entire queue (any-time helper for the existing mutation points)
+async function saveBulkQueue() {
+  // Save each draft individually so partial failures don't lose data
+  for (const b of (state.bulkQueue || [])) {
+    await apiUpdateBulkDraft(b);
+  }
+}
+// Compatibility shim — older code calls this on init
+function loadBulkQueueSync() {
+  // Returns empty; the async load is kicked off in renderBulkUpload
+  return state.bulkQueue || [];
 }
 function bulkDraftStatus(b) {
   if (b.parseError) return 'failed';
@@ -2495,8 +2546,15 @@ function bulkDraftMissing(b) {
 
 function renderBulkUpload() {
   const root = document.getElementById('view-new');
-  // Restore from localStorage on first access this session
-  if (!state.bulkQueue) state.bulkQueue = loadBulkQueue();
+  // First access: kick off async load from backend (location-scoped). Renders with empty
+  // queue immediately, then re-renders once data arrives.
+  if (!state.bulkQueue) {
+    state.bulkQueue = [];
+    apiLoadBulkDrafts().then(drafts => {
+      state.bulkQueue = drafts;
+      if (state.tab === 'new' && state.newMode === 'bulk') renderNewForm();
+    });
+  }
   const q = state.bulkQueue;
   const editing = q.find(b => b.id === state.bulkEditingId);
 
@@ -2586,8 +2644,9 @@ function renderBulkUpload() {
 
   root.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => { state.bulkEditingId = +b.dataset.edit; renderNewForm(); });
   root.querySelectorAll('[data-reject]').forEach(b => b.onclick = () => {
-    state.bulkQueue = state.bulkQueue.filter(x => x.id !== +b.dataset.reject);
-    saveBulkQueue();
+    const id = +b.dataset.reject;
+    state.bulkQueue = state.bulkQueue.filter(x => x.id !== id);
+    apiDeleteBulkDraft(id);
     renderNewForm();
   });
   root.querySelectorAll('[data-approve]').forEach(b => b.onclick = () => approveBulkDraft(+b.dataset.approve));
@@ -2601,10 +2660,11 @@ function renderBulkUpload() {
     render();
   };
   const clearAll = document.getElementById('bulk-clearAll');
-  if (clearAll) clearAll.onclick = () => {
+  if (clearAll) clearAll.onclick = async () => {
     if (state.bulkQueue.length && !confirm(`Clear all ${state.bulkQueue.length} pending drafts? Nothing will be saved.`)) return;
+    const ids = state.bulkQueue.map(b => b.id);
     state.bulkQueue = [];
-    saveBulkQueue();
+    for (const id of ids) await apiDeleteBulkDraft(id);
     renderNewForm();
   };
 }
@@ -2739,9 +2799,18 @@ async function processBulkFiles(rawFiles) {
           if (hint) hint.textContent = `OCR page ${p} of ${pages.length}…`;
           try {
             const base64 = await rasterizePdfPageToBase64(pdf, p);
-            const result = await ocrParsePage(base64);
-            // Store the rendered PNG so the user can later view this exact page from the edit screen
-            ocrPages.push({ pageNum: p, _pngDataUrl: 'data:image/png;base64,' + base64, ...result });
+            // Upload to blob storage IN PARALLEL with OCR call (Promise.all) so users at the
+            // same location can view pages even before approval. Blob name persists with the draft.
+            const [blobName, result] = await Promise.all([
+              uploadBlob(base64, 'image/png', 'pages'),
+              ocrParsePage(base64)
+            ]);
+            ocrPages.push({
+              pageNum: p,
+              blobName,
+              _pngDataUrl: 'data:image/png;base64,' + base64, // in-memory fallback for instant render
+              ...result
+            });
             console.log(`OCR page ${p}: isTransferSheet=${result.isTransferSheet}`, {
               patientName: result.patientName,
               rxNumber: result.rxNumber,
@@ -2787,11 +2856,16 @@ async function processBulkFiles(rawFiles) {
             if (f.rxNumber) first.rxNumber = f.rxNumber;
             if (f.drug) first.drug = f.drug;
             if (f.qty) first.qty = f.qty;
-            // Page images for "View Pages" button — stored in memory only (not localStorage)
-            // because PNGs would blow the 5MB cap. Lost on reload but available within session.
+            // Page images: store BOTH the blob name (permanent, viewable by anyone) AND the
+            // in-memory dataUrl (used for instant render before the blob is fetched).
             const pagePngs = [g.transferPage, ...g.hardCopyPages]
-              .filter(p => p._pngDataUrl)
-              .map(p => ({ pageNum: p.pageNum, dataUrl: p._pngDataUrl, kind: p === g.transferPage ? 'transfer' : 'hardcopy' }));
+              .filter(p => p._pngDataUrl || p.blobName)
+              .map(p => ({
+                pageNum: p.pageNum,
+                blobName: p.blobName || null,
+                dataUrl: p._pngDataUrl || null,
+                kind: p === g.transferPage ? 'transfer' : 'hardcopy'
+              }));
             newDrafts.push({
               id: ++_bulkId, draft,
               sourceFile: `${file.name} (${idx+1}/${ocrGroups.length}, OCR)`,
@@ -2871,7 +2945,8 @@ async function processBulkFiles(rawFiles) {
   });
   if (!state.bulkQueue) state.bulkQueue = [];
   state.bulkQueue.push(...newDrafts);
-  saveBulkQueue(); // persist immediately so they survive a reload
+  // Persist each new draft to backend (shared queue for everyone at this location)
+  for (const b of newDrafts) await apiSaveBulkDraft(b);
   // Prompt for merging within groups
   const newGroups = Object.values(groups).filter(g => g.length > 1);
   if (newGroups.length) {
@@ -2911,10 +2986,14 @@ function approveBulkDraft(id, skipAlert) {
     createdAt: new Date().toISOString(),
     comments: []
   };
+  // Carry the document blob references into the transfer so the receiving team can view them later
+  if (b.pageImages && b.pageImages.length) {
+    t.pageImages = b.pageImages.filter(p => p.blobName).map(p => ({ pageNum: p.pageNum, blobName: p.blobName, kind: p.kind }));
+  }
   TRANSFERS.unshift(t);
   apiSaveTransfer(t);
   state.bulkQueue = state.bulkQueue.filter(x => x.id !== id);
-  saveBulkQueue();
+  apiDeleteBulkDraft(id);
   if (!skipAlert) {
     alert(`Approved: ${t.patientName} added to transfers.`);
     renderNewForm();
@@ -2950,7 +3029,7 @@ function renderBulkEditor(b) {
       </div>
     `;
     card.parentNode.insertBefore(banner, card);
-    const exitEdit = () => { saveBulkQueue(); state.draft = null; state.bulkEditingId = null; renderNewForm(); };
+    const exitEdit = () => { apiUpdateBulkDraft(b); state.draft = null; state.bulkEditingId = null; renderNewForm(); };
     document.getElementById('bulk-back').onclick = exitEdit;
     const viewPagesBtn = document.getElementById('bulk-viewPages');
     if (viewPagesBtn) viewPagesBtn.onclick = () => openPageViewer(b);
@@ -2969,7 +3048,7 @@ function renderBulkEditor(b) {
         btn.textContent = label;
         btn.style.marginRight = '8px';
         btn.onclick = () => {
-          saveBulkQueue();
+          apiUpdateBulkDraft(b);
           if (bulkDraftStatus(b) !== 'ok') {
             const missing = bulkDraftMissing(b);
             alert(`Cannot approve — still missing: ${missing.join(', ')}`);
