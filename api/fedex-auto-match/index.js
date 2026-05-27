@@ -43,6 +43,33 @@ async function loadTransfers() {
   return out;
 }
 
+async function loadShipments() {
+  const conn = process.env.AZURE_STORAGE_CONNECTION;
+  if (!conn) return [];
+  // Shipments live in 'shipments' table if we've started persisting them; if not, return empty
+  try {
+    const client = TableClient.fromConnectionString(conn, 'shipments');
+    const out = [];
+    for await (const e of client.listEntities()) {
+      try { out.push(JSON.parse(e.body)); } catch {}
+    }
+    return out;
+  } catch (e) { if (e.statusCode === 404) return []; throw e; }
+}
+
+async function updateShipment(s) {
+  const conn = process.env.AZURE_STORAGE_CONNECTION;
+  if (!conn) return;
+  const client = TableClient.fromConnectionString(conn, 'shipments');
+  try { await client.createTable(); } catch (e) { if (e.statusCode !== 409) throw e; }
+  await client.upsertEntity({
+    partitionKey: 'pi', rowKey: String(s.id),
+    body: JSON.stringify(s),
+    trackingNumber: s.trackingNumber || '', bulkShipmentId: s.bulkShipmentId || '',
+    status: s.status || ''
+  }, 'Replace');
+}
+
 async function updateTransfer(t) {
   const conn = process.env.AZURE_STORAGE_CONNECTION;
   const client = TableClient.fromConnectionString(conn, 'transfers');
@@ -126,19 +153,54 @@ module.exports = async function (context, req) {
 
     const transfers = await loadTransfers();
     const openTransfers = transfers.filter(t => !['Delivered', 'Canceled'].includes(t.status) && !t.trackingNumber);
-    if (openTransfers.length === 0) {
-      context.res = { status: 200, body: { applied: 0, message: 'No open transfers without tracking' } };
+
+    // Also load shipments — for bulk pharmacy shipments, the BULK-* shipment ID is the
+    // FedEx reference (not the transfer ID), so we query by that and apply the tracking
+    // to every transfer in the bulk.
+    const shipments = await loadShipments();
+    const openBulkShipments = shipments.filter(s => s.bulkShipmentId && !s.trackingNumber && s.status !== 'Received');
+
+    if (openTransfers.length === 0 && openBulkShipments.length === 0) {
+      context.res = { status: 200, body: { applied: 0, message: 'No open transfers or bulk shipments without tracking' } };
       return;
     }
 
-    // Reference per transfer = its transfer ID as a string. Staff enters this into WorldShip.
-    const references = openTransfers.map(t => String(t.id));
-    context.log(`Auto-match querying FedEx for ${references.length} references…`);
+    // Build the combined reference list. Transfers use their numeric ID, bulks use their BULK-* ID.
+    const transferRefs = openTransfers.map(t => String(t.id));
+    const shipmentRefs = openBulkShipments.map(s => s.bulkShipmentId);
+    const allRefs = [...transferRefs, ...shipmentRefs];
+    context.log(`Auto-match querying FedEx for ${allRefs.length} references (${transferRefs.length} transfers + ${shipmentRefs.length} bulk shipments)…`);
 
-    const found = await searchByReferences(references, context);
+    const found = await searchByReferences(allRefs, context);
     const applied = [];
 
+    // First: handle bulk shipments. Any match applies the tracking to ALL transfers in the bulk.
+    for (const s of openBulkShipments) {
+      const match = found[s.bulkShipmentId];
+      if (!match) continue;
+      if (!dryRun) {
+        s.trackingNumber = match.trackingNumber;
+        if (match.shipDate) s.shipDate = match.shipDate;
+        if (!s.status || s.status === 'Pending') s.status = 'In Transit';
+        await updateShipment(s);
+        // Cascade tracking to every transfer in this bulk
+        for (const tid of (s.transferIds || [])) {
+          const t = transfers.find(x => x.id === tid);
+          if (!t) continue;
+          t.trackingNumber = match.trackingNumber;
+          if (match.shipDate) t.dateShipped = match.shipDate;
+          if (!['Shipped', 'Delivered', 'Canceled'].includes(t.status)) t.status = 'Shipped';
+          t.fedexAutoMatched = true;
+          t.fedexAutoMatchedAt = new Date().toISOString();
+          await updateTransfer(t);
+        }
+      }
+      applied.push({ kind: 'bulk', bulkShipmentId: s.bulkShipmentId, trackingNumber: match.trackingNumber, transfersUpdated: (s.transferIds || []).length });
+    }
+
+    // Then: handle individual transfers (non-bulk, ship-to-patient typically)
     for (const t of openTransfers) {
+      if (t.trackingNumber) continue; // may have been set by a bulk cascade above
       const ref = String(t.id);
       const match = found[ref];
       if (!match) continue;
@@ -151,7 +213,7 @@ module.exports = async function (context, req) {
         t.fedexAutoMatchedAt = new Date().toISOString();
         await updateTransfer(t);
       }
-      applied.push({ transferId: t.id, patientName: t.patientName, trackingNumber: match.trackingNumber, shipDate: match.shipDate });
+      applied.push({ kind: 'transfer', transferId: t.id, patientName: t.patientName, trackingNumber: match.trackingNumber, shipDate: match.shipDate });
     }
 
     context.res = {

@@ -811,7 +811,7 @@ function renderTransfers() {
     <table>
       <thead><tr>
         <th style="width:30px"></th>
-        <th>Patient</th><th>From → Fill</th><th>Ship To</th><th>Items</th><th>Status</th><th>SLA</th>
+        <th>ID</th><th>Patient</th><th>From → Fill</th><th>Ship To</th><th>Items</th><th>Status</th><th>SLA</th>
         <th>Transfer Date</th><th>Ship Date</th><th>Tracking</th><th>Submitted</th>
       </tr></thead>
       <tbody>
@@ -822,11 +822,12 @@ function renderTransfers() {
           const cancelWarn = (t.status === 'Canceled' && !t.cancelAcknowledged) ? '<span class="pill-danger" style="margin-left:4px">⚠ unack</span>' : '';
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
+            <td><code style="font-family:monospace;font-size:12px;font-weight:600;color:var(--primary-dark)">${t.id}</code></td>
             <td><strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div></td>
             <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
             <td>${escapeHtml(t.shipTo)}${t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:''}</td>
             <td>${t.items.length}</td>
-            <td><span class="badge ${STATUS_BADGE[t.status]}">${escapeHtml(t.status)}</span></td>
+            <td onclick="event.stopPropagation()"><select class="row-status status-select" data-status-id="${t.id}" style="font-size:11px;padding:3px 4px">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
             <td>${slaCell}</td>
             <td>${fmtDate(t.createdAt)}</td>
             <td>${fmtDate(t.dateShipped)}</td>
@@ -854,6 +855,18 @@ function renderTransfers() {
   root.querySelectorAll('[data-ask]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault(); e.stopPropagation();
     openAskQuestionModal(+a.dataset.ask);
+  }));
+  // Inline status change from the Transfers table — no need to open the detail modal
+  root.querySelectorAll('[data-status-id]').forEach(sel => sel.addEventListener('change', e => {
+    e.stopPropagation();
+    const id = +sel.dataset.statusId;
+    const t = TRANSFERS.find(x => x.id === id);
+    if (!t) return;
+    const newStatus = sel.value;
+    if (newStatus === 'Canceled' && t.status !== 'Canceled') onTransferCanceled(t);
+    t.status = newStatus;
+    apiUpdateTransfer(t);
+    renderTransfers();
   }));
   root.querySelectorAll('.print-pick').forEach(cb => cb.onchange = e => {
     const id = +cb.dataset.pick;
@@ -2349,7 +2362,7 @@ function openCreateShipment() {
         <div class="form-group"><label>Destination Type</label><select id="cm-destType"><option>Pharmacy</option><option>Patient</option></select></div>
         <div class="form-group full" id="cm-toWrap"><label>To Pharmacy</label><select id="cm-to">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select><div class="hint">Picking a pharmacy will auto-list that location's open transfers below.</div></div>
         <div class="form-group"><label>Carrier</label><select id="cm-carrier"><option>FedEx</option><option>UPS</option><option>USPS</option><option>Courier</option></select></div>
-        <div class="form-group"><label>Tracking Number</label><div style="display:flex;gap:6px"><input id="cm-tracking" placeholder="Enter or generate" /><button class="btn btn-secondary btn-sm" id="cm-genLabel" type="button">Generate FedEx Label</button></div></div>
+        <div class="form-group"><label>Tracking Number</label><input id="cm-tracking" placeholder="Paste tracking # from WorldShip after creating label" /></div>
       </div>
       <div class="section"><div class="section-title">Transfers to Include</div>
         <div id="cm-transfersBox"></div>
@@ -2374,16 +2387,12 @@ function openCreateShipment() {
     renderUI();
   };
   document.getElementById('cm-to').onchange = renderUI;
-  document.getElementById('cm-genLabel').onclick = () => {
-    const mockTracking = '7712 ' + Math.floor(1000+Math.random()*9000) + ' ' + Math.floor(1000+Math.random()*9000);
-    document.getElementById('cm-tracking').value = mockTracking;
-    alert('[Mock] FedEx label generated. Tracking: ' + mockTracking);
-  };
   document.getElementById('cmSave').onclick = () => {
     const picks = [...document.querySelectorAll('.cm-t:checked')].map(c => +c.value);
     const tracking = document.getElementById('cm-tracking').value.trim();
     if (!picks.length) { alert('Select at least one transfer.'); return; }
-    if (!tracking) { alert('Tracking number required.'); return; }
+    // Tracking is now optional at creation time — staff creates shipment first, gets BULK ID,
+    // takes that to WorldShip as the Customer Reference, then comes back to add tracking later.
     const destType = document.getElementById('cm-destType').value;
     const toLoc = document.getElementById('cm-to').value;
     const shipDate = new Date().toISOString().slice(0,10);
@@ -2414,11 +2423,14 @@ function openCreateShipment() {
     }).catch(e => console.warn('notification failed', e));
     close();
     if (s.isBulk) {
-      if (confirm(`Bulk shipment ${s.bulkShipmentId} created with ${picks.length} transfer(s). Print packing slip now?`)) {
-        printPackingSlip(s);
-      }
+      const msg = `Bulk shipment ${s.bulkShipmentId} created with ${picks.length} transfer(s).\n\n` +
+                  `📋 IMPORTANT: When creating the FedEx label in WorldShip, enter\n\n` +
+                  `        ${s.bulkShipmentId}\n\n` +
+                  `into the Customer Reference field. The app will then auto-pull the tracking number.\n\n` +
+                  `Print packing slip now?`;
+      if (confirm(msg)) printPackingSlip(s);
     } else {
-      alert('Shipment created and notification email sent.');
+      alert('Shipment created.\n\nNotification email sent.');
     }
     render();
   };
