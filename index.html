@@ -1042,17 +1042,19 @@ function renderAdmin() {
   if (CURRENT_USER.role !== 'admin') { root.innerHTML = '<div class="empty"><h3>Admins only</h3><p>Switch to an admin user to view this tab.</p></div>'; return; }
   root.innerHTML = `
     <div class="page-header"><div class="page-title">Admin</div></div>
-    <div class="card"><div class="card-header">Users & Roles <button class="btn btn-primary btn-sm" id="addUserBtn">+ Add User</button></div><div class="card-body">
+    <div class="card"><div class="card-header">Users & Roles</div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">Users appear here after they sign in with their @pharmacyinnovations.net account. From here you can adjust their role, location, or fix display name typos. Admins are managed separately in the <strong>Admin Users</strong> section below.</p>
       <table style="box-shadow:none"><thead><tr><th>Name</th><th>Email</th><th>Location</th><th>Role</th><th></th></tr></thead><tbody>
         ${USERS.map((u,i) => `<tr>
-          <td><strong>${escapeHtml(u.name)}</strong></td>
-          <td>${escapeHtml(u.email)}</td>
+          <td><input data-ui="${i}" data-k="name" value="${escapeHtml(u.name)}" style="width:100%;padding:4px 6px;border:1px solid var(--gray-300);border-radius:3px;font-weight:600" /></td>
+          <td><span style="font-family:monospace;font-size:12px">${escapeHtml(u.email)}</span></td>
           <td><select data-ui="${i}" data-k="location">${LOCATIONS.map(l=>`<option ${l===u.location?'selected':''}>${l}</option>`).join('')}</select></td>
           <td><select data-ui="${i}" data-k="role"><option ${u.role==='admin'?'selected':''}>admin</option><option ${u.role==='manager'?'selected':''}>manager</option><option ${u.role==='tech'?'selected':''}>tech</option></select></td>
           <td>${u===CURRENT_USER?'<span class="item-sub">(you)</span>':`<button class="btn btn-secondary btn-sm" data-rmu="${i}">Remove</button>`}</td>
         </tr>`).join('')}
       </tbody></table>
-      <div class="item-sub" style="margin-top:10px">Tech: sees only their location's incoming + transfers originating from their location. Manager: full read + Reports. Admin: everything including user management.</div>
+      <div class="item-sub" style="margin-top:10px"><strong>Tech:</strong> sees only their location's incoming + transfers originating from their location. <strong>Manager:</strong> full read + Reports. <strong>Admin:</strong> everything including user management.</div>
+      <div class="item-sub" style="margin-top:6px"><em>Note: changes here apply for the current session only until we add user-table persistence. The Admin Users list below DOES persist server-side.</em></div>
     </div></div>
 
     <div class="card"><div class="card-header">SLA Rules (hours)</div><div class="card-body">
@@ -1132,12 +1134,8 @@ function renderAdmin() {
     FORMULAS.push({ id: nextId(), name, location: loc, link, fileName: '', createdBy: CURRENT_USER.name, createdAt: new Date().toISOString() });
     renderAdmin();
   };
-  document.getElementById('addUserBtn').onclick = () => {
-    const name = prompt('Name?'); if (!name) return;
-    const email = prompt('Email?') || '';
-    USERS.push({ name, email, location: 'Erie', role: 'tech' });
-    populateUserSwitcher(); renderAdmin();
-  };
+  // Manual user add is gone — users auto-add on first 365 sign-in. Name field is editable
+  // in the table above to fix typos that come from Microsoft account display name.
   document.getElementById('saveSla').onclick = () => {
     root.querySelectorAll('[data-sla]').forEach(el => SLA_RULES[el.dataset.sla] = +el.value || SLA_RULES[el.dataset.sla]);
     alert('SLA rules updated.');
@@ -1264,12 +1262,7 @@ function renderNewForm() {
         <strong style="color:var(--info)">Save paper:</strong> Enter all patient, shipping, and billing info below — no need for the paper Patient Approval form anymore.
         <strong>The only time you'll need paper</strong> is the Credit Card Authorization (when billing = Credit Card and the card is NOT on file). The CC form prints a single page that the patient signs and you scan back in.
       </div>
-      <div style="display:flex;gap:18px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-200)">
-        <label style="font-size:13px;font-weight:600;color:var(--gray-700)">Transfer Type:</label>
-        <label class="checkbox-row"><input type="radio" name="transferType" value="New" ${d.transferType==='New'?'checked':''} /> New Prescription</label>
-        <label class="checkbox-row"><input type="radio" name="transferType" value="Refill" ${d.transferType==='Refill'?'checked':''} /> Refill</label>
-        <div class="hint" style="margin-left:auto">Refills don't require a hard copy scan.</div>
-      </div>
+      ${d.transferType === 'Refill' ? `<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-200);font-size:13px"><span style="font-weight:600;color:var(--gray-700)">Transfer Type:</span> <span class="badge badge-verified">Refill</span><span class="hint" style="margin-left:auto">Refills don't require a hard copy scan.</span></div>` : ''}
       <div class="section-title">Patient</div>
       <div class="form-grid">
         <div class="form-group"><label>Patient Name</label><input id="f-patientName" value="${escapeHtml(d.patientName)}" /></div>
