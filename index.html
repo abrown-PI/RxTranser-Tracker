@@ -1143,15 +1143,14 @@ function renderAdmin() {
 
     <div class="card"><div class="card-header">Teams Webhooks (per location) <span class="item-sub" id="tw-status" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">When a question is asked on a transfer, the app posts to the webhook configured for the receiving location(s). URLs are stored server-side and never returned to the browser — type/paste them here once, then save.</p>
-      ${LOCATIONS.map(l => `
-        <div class="form-group" style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
-          <label style="min-width:140px;font-weight:600">${escapeHtml(l)}</label>
-          <input id="tw-${escapeHtml(l).replace(/\s+/g,'_')}" data-loc="${escapeHtml(l)}" type="password" placeholder="https://...webhook.office.com/... (paste full URL)" style="flex:1" autocomplete="off" />
-          <span class="item-sub tw-state" data-loc-state="${escapeHtml(l)}"></span>
-        </div>
-      `).join('')}
-      <button class="btn btn-primary btn-sm" id="tw-save" style="margin-top:10px">Save webhook URLs</button>
-      <span class="item-sub" id="tw-saveResult" style="margin-left:10px"></span>
+      <table style="box-shadow:none;font-size:13px"><thead><tr><th style="width:160px">Location</th><th>Webhook URL</th><th style="width:120px">Status</th></tr></thead><tbody>
+        ${LOCATIONS.map(l => `<tr>
+          <td><strong>${escapeHtml(l)}</strong></td>
+          <td><input id="tw-${escapeHtml(l).replace(/\s+/g,'_')}" data-loc="${escapeHtml(l)}" type="password" placeholder="https://...webhook.office.com/... (paste full URL)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:12px" autocomplete="off" /></td>
+          <td><span class="item-sub tw-state" data-loc-state="${escapeHtml(l)}"></span></td>
+        </tr>`).join('')}
+      </tbody></table>
+      <div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="tw-save">Save webhook URLs</button> <span class="item-sub" id="tw-saveResult" style="margin-left:10px"></span></div>
     </div></div>
   `;
   root.querySelectorAll('[data-ui]').forEach(sel => sel.onchange = e => { USERS[+sel.dataset.ui][sel.dataset.k] = sel.value; });
