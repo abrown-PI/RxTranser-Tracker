@@ -57,12 +57,12 @@ section { page-break-inside: avoid; }
 <div class="toc">
   <h3>Contents</h3>
   <ul>
-    <li><a href="#signin">Signing In</a></li>
-    <li><a href="#new">Creating a New Transfer</a> (Single + Bulk Upload)</li>
+    <li><a href="#signin">Signing In (365 or Local Account)</a></li>
+    <li><a href="#new">Creating a New Transfer</a> (Single + Bulk Upload with OCR)</li>
     <li><a href="#refill">Refilling an Existing Transfer</a></li>
-    <li><a href="#edit">Editing a Transfer After Submission</a></li>
-    <li><a href="#ask">Asking a Question About a Transfer</a></li>
-    <li><a href="#alerts">Checking Alerts</a></li>
+    <li><a href="#edit">Editing or Deleting a Transfer</a></li>
+    <li><a href="#ask">Asking a Question (with Teams Notification)</a></li>
+    <li><a href="#alerts">The Alerts Tab</a></li>
     <li><a href="#cc">Credit Card Workflow</a></li>
     <li><a href="#shipments">Shipments — Create + Receive</a></li>
     <li><a href="#print">Printing &amp; Batch Operations</a></li>
@@ -77,44 +77,77 @@ section { page-break-inside: avoid; }
 
 <section id="signin">
 <h2>Signing In</h2>
+<p>The site requires sign-in before showing any data. Two options on the sign-in page:</p>
+
+<h3>Option 1: Sign in with Microsoft (preferred)</h3>
 <ol>
-  <li>Open the site</li>
-  <li>Click <strong>🔐 Sign in with Microsoft</strong> in the top right</li>
-  <li>Sign in with your <strong>@pharmacyinnovations.net</strong> account (same one you use for Outlook/Teams)</li>
+  <li>Click <strong>🔐 Sign in with Microsoft</strong></li>
+  <li>Use your <strong>@pharmacyinnovations.net</strong> account (same one you use for Outlook/Teams)</li>
   <li>First time only: pick your location from the dropdown in the top right. The app remembers it next time.</li>
 </ol>
-<p>If you ever need to switch which pharmacy you're working from for the day, just change the dropdown in the navbar.</p>
+
+<h3>Option 2: Sign in without 365 account</h3>
+<p>For staff who don't have a Microsoft 365 license. An admin must create the account first.</p>
+<ol>
+  <li>Click <strong>Sign in without 365 account</strong></li>
+  <li>Enter your <strong>username</strong> and <strong>PIN</strong> (set by the admin)</li>
+  <li>Click <strong>Sign in</strong></li>
+</ol>
+<p>To switch locations day-to-day, just change the dropdown in the navbar.</p>
 </section>
 
 <section id="new">
 <h2>Creating a New Transfer</h2>
-<p>There are two ways:</p>
+<p>Two ways: <strong>Single Transfer</strong> (one at a time) or <strong>Bulk Upload</strong> (many transfers from a multi-page PDF).</p>
 
 <h3>Single Transfer</h3>
-<p>Use this when you have one transfer to enter.</p>
 <ol>
   <li>Click <strong>+ New Transfer</strong></li>
-  <li>Fill in the form:
+  <li>The form opens with <strong>Single Transfer</strong> mode selected. Fill in:
     <ul>
-      <li><strong>Patient Name</strong> is required</li>
-      <li>At least one <strong>PK Transfer Sheet</strong> upload is required</li>
-      <li>If billing is <strong>Credit Card</strong> and the card is NOT on file: upload the signed CC Authorization Form (see Credit Card Workflow below)</li>
+      <li><strong>Patient Name</strong> (required)</li>
+      <li>Patient info (DOB, allergies)</li>
+      <li>Routing: Origin Location + Fill Location</li>
+      <li>Shipping: Ship-to (Pharmacy or Patient), address. If you pick <em>Pharmacy</em>, the origin pharmacy's address auto-fills.</li>
+      <li>Billing Method</li>
+      <li><strong>PK Transfer Sheet</strong> upload (required — drop a PDF, app auto-fills the fields it can read)</li>
+      <li>Optional: Hard Copy Scan, Formula, Transfer Notes</li>
+      <li>Items / Prescriptions: Origin Rx #, Receiving Rx # (filled in by fill location later), Drug, Qty</li>
     </ul>
   </li>
   <li>Click <strong>Submit transfer</strong></li>
 </ol>
-<div class="tip"><strong>Tip:</strong> If you upload a clean PDF transfer sheet, the app auto-fills patient name, DOB, drug, and Rx# from the sheet. You only need to verify/edit.</div>
+<div class="tip"><strong>Tip:</strong> Upload a clean PDF transfer sheet first — the app auto-fills patient, DOB, drug, Rx# from the document. You just verify and submit.</div>
 
-<h3>Bulk Upload (multiple transfers at once)</h3>
-<p>Use this when you have a stack of transfers in one PDF.</p>
+<h3>Bulk Upload (recommended for the weekly stack)</h3>
+<p>Drop a multi-page PDF that contains <em>multiple</em> transfer sheets and the app splits them automatically.</p>
 <ol>
-  <li>Click <strong>+ New Transfer</strong> → toggle to <strong>Bulk Upload</strong> at the top right</li>
+  <li>Click <strong>+ New Transfer</strong> → toggle to <strong>Bulk Upload</strong> top right</li>
+  <li>Set the bulk-level defaults if all transfers in this file share them:
+    <ul>
+      <li><strong>Fill Location</strong> — applies to every draft</li>
+      <li><strong>Anticipated Ship Date</strong> — applies to every draft</li>
+    </ul>
+  </li>
   <li>Click <strong>📁 Select PDFs to upload</strong> and pick the file(s)</li>
-  <li>The app splits each PDF: every "PATIENT Rx TRANSFER INFORMATION" page becomes its own draft. Hard copies/order forms that follow get attached to that draft.</li>
+  <li>The app processes each page:
+    <ul>
+      <li>For digital PDFs with selectable text: pdf.js extracts fields instantly</li>
+      <li>For scanned/image-only PDFs: <strong>Azure AI OCR</strong> reads each page (takes ~30-60 seconds for a 22-page file)</li>
+    </ul>
+  </li>
+  <li>Each "PATIENT Rx TRANSFER INFORMATION" page becomes one draft. Pages between transfer headers attach as hard copies to the preceding draft.</li>
   <li>Review the queue — drafts marked <strong>⚠ Needs Review</strong> are missing required fields</li>
-  <li>Click <strong>Edit</strong> to fix any flagged drafts</li>
-  <li>Click <strong>Approve</strong> on each ready draft, OR click <strong>Approve all N ready</strong> at the top to do them in one shot</li>
+  <li>Click <strong>Edit</strong> on any draft to fix fields. Inside the editor:
+    <ul>
+      <li><strong>📄 View attached pages</strong> shows you the actual PDF pages assigned to this draft</li>
+      <li><strong>Save &amp; return to queue</strong> saves edits</li>
+      <li><strong>Save &amp; Approve</strong> saves AND immediately commits the transfer to the live system</li>
+    </ul>
+  </li>
+  <li>Click <strong>Approve</strong> on each ready draft, or <strong>Approve all N ready</strong> at the top to do them in one shot</li>
 </ol>
+<div class="tip"><strong>The queue persists.</strong> Close the tab, sign out, leave the browser — when you come back, your in-progress bulk drafts are still there waiting. Use Clear queue to remove everything if you want a fresh start. Page images (for the View Pages button) are kept only during the active session and won't survive a browser reload.</div>
 </section>
 
 <section id="refill">
@@ -123,8 +156,8 @@ section { page-break-inside: avoid; }
   <li>Click <strong>+ Refill</strong> (top tab)</li>
   <li>Search by patient name, Origin Rx#, or Receiving Rx#</li>
   <li>Click <strong>Refill this →</strong> on the right transfer</li>
-  <li>Review the <strong>Shipping &amp; Payment Defaults</strong> (auto-pulled from the original). Click <strong>Edit</strong> if anything changed.</li>
-  <li>Check the <strong>Prescriptions</strong> boxes for which Rx to include in this refill</li>
+  <li>Review the <strong>Shipping &amp; Payment Defaults</strong> (auto-pulled from the original). Click <strong>Edit</strong> if anything changed (new address, different billing).</li>
+  <li>Check the <strong>Prescriptions</strong> boxes for which Rx to include in this refill (some patients have multiple Rx and may only need one refilled)</li>
   <li>Click <strong>Continue to refill form →</strong></li>
   <li>The form is pre-filled — review, attach a fresh PK transfer sheet, hit <strong>Submit</strong></li>
 </ol>
@@ -132,14 +165,26 @@ section { page-break-inside: avoid; }
 </section>
 
 <section id="edit">
-<h2>Editing a Transfer After Submission</h2>
+<h2>Editing or Deleting a Transfer</h2>
+
+<h3>Edit (all roles)</h3>
 <ol>
-  <li>From the Transfers tab, click the row to open the detail modal</li>
+  <li>From the Transfers tab, click any row to open the detail modal</li>
   <li>Click <strong>✏️ Edit Transfer</strong> at the top</li>
-  <li>Change anything: patient info, routing, ship-to, billing, documents</li>
+  <li>Change anything: patient info, routing, ship-to, billing, documents, transfer notes</li>
   <li>Click <strong>Save changes</strong></li>
 </ol>
 <p>Use this to fix typos, update the ship-to address, swap the wrong origin pharmacy, or add documents that came in later.</p>
+
+<h3>Delete (admin only)</h3>
+<p>On the detail modal, admins see a <strong>🗑 Delete</strong> button at the bottom-left. Click it and confirm — the transfer is removed permanently. Cannot be undone.</p>
+
+<h3>Quick inline edits</h3>
+<ul>
+  <li><strong>Receiving Rx #</strong> — fill location staff can type the Rx# directly on each item row in the detail modal (no need to open Edit Transfer)</li>
+  <li><strong>Status</strong> — change via the Update Status dropdown at the top of the detail modal</li>
+  <li><strong>Tracking + dates</strong> — click <strong>Edit ship / tracking</strong> on the detail modal. Entering a tracking number auto-flips status to <em>Shipped</em>.</li>
+</ul>
 </section>
 
 <section id="ask">
@@ -149,7 +194,7 @@ section { page-break-inside: avoid; }
   <li>From the Transfers list, find the patient → click <strong>❓ Ask question</strong> on that row.<br>
       <em>(Or open the transfer and click ❓ Ask Question at the top.)</em></li>
   <li>Type your question, click <strong>Send Question</strong></li>
-  <li>The other location gets a Teams notification with a button to open the transfer</li>
+  <li>The other location's Teams gets a notification with a button to open the transfer (admin must have set up the webhook for that location)</li>
   <li>They reply in the transfer's <strong>Discussion</strong> section</li>
   <li>Your reply appears for them on their <strong>Alerts</strong> tab</li>
 </ol>
@@ -157,27 +202,30 @@ section { page-break-inside: avoid; }
 </section>
 
 <section id="alerts">
-<h2>Checking Alerts</h2>
-<p>The <strong>Alerts</strong> tab shows three things:</p>
+<h2>The Alerts Tab</h2>
+<p>The <strong>Alerts</strong> tab shows three sections:</p>
 <ol>
   <li><strong>Open Questions</strong> — questions other team members asked YOUR location, waiting for your answer. Click <strong>Answer →</strong> to open the transfer.</li>
   <li><strong>Questions You've Asked</strong> — your own pending questions still waiting on a reply.</li>
-  <li><strong>Transfers Past Status Time Limit</strong> — transfers stuck in one status too long. Click any row to open and update.</li>
+  <li><strong>Transfers Past Status Time Limit</strong> — transfers stuck in one status too long (admin-configurable). Click any row to open and update.</li>
 </ol>
-<p>The number in the <strong>Alerts</strong> tab badge = open questions for you + overdue transfers.</p>
+<p>The number badge on the <strong>Alerts</strong> tab = open questions for you + overdue transfers combined.</p>
 </section>
 
 <section id="cc">
 <h2>Credit Card Workflow</h2>
-<p>When billing = <strong>Credit Card</strong> AND the card is NOT on file:</p>
+<p>The CC form options only appear on the New Transfer / Edit Transfer form when you set <strong>Billing Method = Credit Card</strong>.</p>
 <ol>
-  <li>On the New Transfer form, click <strong>🖨 Print blank CC Auth Form</strong></li>
-  <li>A one-page PDF prints with patient name + drug pre-filled. The patient signs it.</li>
+  <li>On the form, set Billing Method to <strong>Credit Card</strong></li>
+  <li>A new section appears: <strong>Signed Credit Card Authorization Form</strong></li>
+  <li>If the card is NOT already on file: click <strong>🖨 Print blank CC Auth Form</strong></li>
+  <li>A one-page PDF prints with the patient name + Rx auto-filled — patient signs it</li>
   <li>Scan the signed form</li>
-  <li>Upload it in the <strong>Signed Credit Card Authorization Form</strong> field on the same transfer</li>
+  <li>Upload the scanned file in the same section</li>
+  <li>Submit the transfer</li>
   <li>Billing team opens the transfer in the app → clicks <strong>View / Print Signed Form</strong> when they need to charge</li>
 </ol>
-<div class="note"><strong>Important:</strong> Card info goes on the paper form — never typed into the app — for compliance.</div>
+<div class="note"><strong>Important:</strong> Card numbers go on the paper form ONLY — never typed into the app — to stay out of PCI scope.</div>
 </section>
 
 <section id="shipments">
@@ -218,7 +266,7 @@ section { page-break-inside: avoid; }
 
 <section id="fedex">
 <h2>Pulling Tracking from FedEx</h2>
-<p>When the FedEx integration is set up:</p>
+<p>When the FedEx integration is set up by admin:</p>
 <ol>
   <li><strong>Shipments</strong> tab → click <strong>📦 Pull from FedEx</strong></li>
   <li>Pick a date range (default last 10 days)</li>
@@ -232,13 +280,24 @@ section { page-break-inside: avoid; }
 
 <section id="admin">
 <h2>Admin Tasks (admins only)</h2>
-<p>The <strong>Admin</strong> tab is only visible if your email is in the Admin Users list.</p>
+<p>The <strong>Admin</strong> tab is only visible if your email is in the Admin Users list (set in this same tab).</p>
+
+<h3>Users &amp; Access</h3>
+<p>One consolidated table showing all 365 users + local accounts. From here you can:</p>
 <ul>
-  <li><strong>Admin Users:</strong> type emails, click + Add, then Save</li>
-  <li><strong>SLA Rules:</strong> how long a transfer can sit in each status before it shows on the Alerts tab</li>
-  <li><strong>Formula Library:</strong> saved formula worksheets per pharmacy</li>
-  <li><strong>Pharmacy Mailing Addresses:</strong> used for Ship-to-Pharmacy auto-fill</li>
-  <li><strong>Teams Webhooks:</strong> paste Power Automate webhook URLs per location</li>
+  <li>Adjust role (tech / manager / admin) and location for any user</li>
+  <li>Reset PIN for local accounts</li>
+  <li>Remove any account</li>
+  <li><strong>Pre-authorize a 365 user</strong>: type their email + pick role; they get that role on first sign-in</li>
+  <li><strong>Create a local account</strong>: username + PIN + name + location + role for staff without 365</li>
+</ul>
+
+<h3>Other admin items</h3>
+<ul>
+  <li><strong>SLA Rules</strong>: hour limits per status before transfers show on the Alerts tab</li>
+  <li><strong>Formula Library</strong>: saved formula worksheets per pharmacy</li>
+  <li><strong>Pharmacy Mailing Addresses</strong>: used for Ship-to-Pharmacy auto-fill</li>
+  <li><strong>Teams Webhooks</strong>: paste Power Automate webhook URLs per location so Ask Question notifications go to the right place</li>
 </ul>
 </section>
 
@@ -250,17 +309,27 @@ section { page-break-inside: avoid; }
 <tr><td><strong>New</strong></td><td>Just submitted, not yet processed</td></tr>
 <tr><td><strong>In Progress</strong></td><td>Being compounded at the fill location</td></tr>
 <tr><td><strong>Ready to Ship</strong></td><td>Compounding done, awaiting shipment</td></tr>
-<tr><td><strong>Shipped</strong></td><td>In transit</td></tr>
+<tr><td><strong>Shipped</strong></td><td>In transit (auto-set when tracking # is added)</td></tr>
 <tr><td><strong>Delivered</strong></td><td>Patient or pharmacy has received</td></tr>
-<tr><td><strong>Canceled</strong></td><td>Transfer canceled (must be acknowledged on Alerts tab before being archived)</td></tr>
+<tr><td><strong>Canceled</strong></td><td>Transfer canceled (must be acknowledged on Action Items tab before being archived)</td></tr>
 </tbody>
 </table>
 </section>
 
 <section id="faq">
 <h2>Common Questions</h2>
+
 <p><strong>Q: I picked the wrong origin pharmacy and submitted. Can I fix it?</strong><br>
 A: Yes — open the transfer → ✏️ Edit Transfer → change origin → Save.</p>
+
+<p><strong>Q: I leave the Bulk Upload page mid-review. Will my drafts be there when I come back?</strong><br>
+A: Yes. The bulk queue is saved automatically and persists across reloads. Page-image previews disappear after a reload (no harm — you can still edit and approve), but draft data stays.</p>
+
+<p><strong>Q: The bulk upload only detected 4 transfers but my PDF has 11. What do I do?</strong><br>
+A: Open browser DevTools (F12) → Console tab. Look for "OCR page N:" log lines. The ones where <code>isTransferSheet=false</code> are the missed ones. Copy a snippet of their <code>firstChars</code> text and send it to whoever maintains the app — they'll tune the detection.</p>
+
+<p><strong>Q: I deleted a transfer by accident. Can I get it back?</strong><br>
+A: No. Delete is permanent. Reach out immediately if you need a record reconstructed — depending on backup state, it may or may not be recoverable.</p>
 
 <p><strong>Q: A patient changed their address. How do I update for refills?</strong><br>
 A: Edit the existing transfer with the new address before refilling, OR start the refill and use the <strong>Edit</strong> button on the Shipping &amp; Payment Defaults to override.</p>
@@ -273,10 +342,13 @@ A: Use the search bar at the top of the navbar — type their name. Results incl
 
 <p><strong>Q: Can I export the list?</strong><br>
 A: Yes — <strong>Reports</strong> tab → <strong>Export CSV</strong> at the bottom.</p>
+
+<p><strong>Q: I forgot my local-account PIN.</strong><br>
+A: An admin can reset it from Admin → Users &amp; Access → click Reset PIN on your row.</p>
 </section>
 
 <hr>
-<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>This guide is also available at /help.html inside the app. Need to update it? Edit help.html in the repo.</em></p>
+<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-05-27. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
 
 </body>
 </html>

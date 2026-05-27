@@ -1601,7 +1601,10 @@ async function autoFillFromTransferSheets(files) {
     if (!patientFilled) {
       if (f.patientName && !d.patientName) { d.patientName = f.patientName; applied++; }
       if (f.patientDOB && !d.patientDOB) { d.patientDOB = f.patientDOB; applied++; }
-      if (d.shipTo === 'Patient') {
+      // Auto-fill patient address for both direct-to-patient ship and Delivery-Lancaster
+      // (Lancaster delivery still goes to the patient's home — Lancaster is just the carrier).
+      // For Pharmacy ship-to, the address comes from PHARMACY_ADDRESSES auto-fill instead.
+      if (d.shipTo === 'Patient' || d.shipTo === 'Delivery-Lancaster') {
         if (f.shipAddr1 && !d.shipAddr1) { d.shipAddr1 = f.shipAddr1; applied++; }
         if (f.shipCity && !d.shipCity) { d.shipCity = f.shipCity; applied++; }
         if (f.shipState && !d.shipState) { d.shipState = f.shipState; applied++; }

@@ -150,29 +150,38 @@ function extractFieldsFromText(text) {
     return `${yy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
   })() : null;
 
-  // Patient Address — try labeled form first, fall back to scanning for a "City, ST 12345" pattern
-  let addressBlock = grab(/(?:Patient\s*Address|Address)\s*:?\s*(.*?)(?=\s*(?:Drug|DAW|Doctor|Rx\s*number|Patient\s*Phone|Phone|Store|Person|Pharmacy|Date|First\s*fill|Last\s*fill|Quantity|Refills|Instructions|Transferred\s*By|$))/i);
+  // Patient Address — multi-step extraction since OCR can return the block in several ways:
+  // - "Patient Address: 1224 JACKSON ST N\nSAINT PETERSBURG, FL 33705"
+  // - "Patient Address: 1224 JACKSON ST N SAINT PETERSBURG, FL 33705"  (no newline)
+  // - "Patient Address : 1224 JACKSON ST\nSAINT PETERSBURG FL 33705"   (no comma)
+  // - State may come back as "FL" or "Fl" (case varies)
   let shipAddr1 = '', shipCity = '', shipState = '', shipZip = '';
+  // Step 1: pull out the address block (everything after the label up to ~200 chars or next field)
+  const addrBlockMatch = T.match(/(?:Patient\s*Address|^Address)\s*:?\s*([\s\S]{0,250}?)(?=\s+(?:Drug|DAW|Doctor|Rx\s*number|Patient\s*Phone|Phone|Store|Person|Pharmacy\s*information|Date\s*Written|First\s*fill|Last\s*fill|Quantity|Refills|Instructions|Transferred\s*By|$))/i);
+  const addressBlock = addrBlockMatch ? addrBlockMatch[1] : '';
   if (addressBlock) {
-    const csz = addressBlock.match(/([A-Za-z\.\-' ]+?),?\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/);
+    // Step 2: find the city/state/zip pattern anywhere in the block. Case-insensitive state.
+    // The state is anchored as exactly 2 alpha chars BETWEEN whitespace/comma and a zip.
+    const csz = addressBlock.match(/([A-Za-z][A-Za-z\s.\-']{1,40}?)[,\s]+([A-Za-z]{2})[\s,]+(\d{5}(?:-\d{4})?)/);
     if (csz) {
-      shipCity = csz[1].trim();
-      shipState = csz[2].trim();
+      shipCity = csz[1].trim().replace(/[,\s]+$/, '');
+      shipState = csz[2].toUpperCase().trim();
       shipZip = csz[3].trim();
-      shipAddr1 = addressBlock.replace(csz[0], '').replace(/,\s*$/, '').trim();
+      // addr1 = everything in the block BEFORE the city/state/zip match
+      shipAddr1 = addressBlock.slice(0, csz.index).trim().replace(/[,\s]+$/, '');
     } else {
-      shipAddr1 = addressBlock.trim();
+      // No city/state/zip detected inside the labeled block — take just the first line as addr1
+      shipAddr1 = addressBlock.split(/[\r\n]/)[0].trim();
     }
   } else {
-    // Fallback: look for a US street + city/state/zip pattern anywhere on the page near "Patient"
-    // The Patient block typically contains: NAME / DOB / phone / ADDRESS lines together.
+    // Fallback: find a US street + city/state/zip pattern in the Patient section if no labeled block
     const patientBlock = grab(/Patient\s*:?\s*([\s\S]{0,400}?)(?=\s*(?:Drug|DAW|Doctor|Rx\s*number|First\s*fill|Quantity|Refills|Instructions|Transferred\s*By|Store\s*name|Person\s*name|Pharmacy\s*information|$))/i);
     if (patientBlock) {
-      const csz = patientBlock.match(/(\d+[A-Z0-9\s.\-,#]+?)[,\s]+([A-Za-z\.\-' ]+?)[,\s]+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/);
+      const csz = patientBlock.match(/(\d+[A-Z0-9\s.\-,#]+?)[,\s]+([A-Za-z][A-Za-z\s.\-']{1,40}?)[,\s]+([A-Za-z]{2})[\s,]+(\d{5}(?:-\d{4})?)/);
       if (csz) {
-        shipAddr1 = csz[1].trim().replace(/,$/, '');
+        shipAddr1 = csz[1].trim().replace(/[,\s]+$/, '');
         shipCity = csz[2].trim();
-        shipState = csz[3].trim();
+        shipState = csz[3].toUpperCase().trim();
         shipZip = csz[4].trim();
       }
     }
