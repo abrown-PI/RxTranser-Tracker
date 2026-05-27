@@ -19,19 +19,38 @@ module.exports = async function (context, req) {
     if (!image) { context.res = { status: 400, body: { error: 'image (base64) required' } }; return; }
 
     // Step 1: Submit the image for analysis. Returns 202 + Operation-Location header.
+    // Auto-retry on 429 (rate limit) up to 4 times with exponential backoff — F0 free tier
+    // is capped at 20 calls/minute so bulk uploads hit this frequently. Retry delays match
+    // Doc Intelligence's Retry-After header when present, else exponential 2/4/8/16 seconds.
     const submitUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30`;
     const imgBytes = Buffer.from(image, 'base64');
-    const submitResp = await fetch(submitUrl, {
-      method: 'POST',
-      headers: {
-        'Ocp-Apim-Subscription-Key': key,
-        'Content-Type': mediaType || 'image/png'
-      },
-      body: imgBytes
-    });
+    let submitResp;
+    let lastErrorBody = '';
+    for (let attempt = 0; attempt < 5; attempt++) {
+      submitResp = await fetch(submitUrl, {
+        method: 'POST',
+        headers: {
+          'Ocp-Apim-Subscription-Key': key,
+          'Content-Type': mediaType || 'image/png'
+        },
+        body: imgBytes
+      });
+      if (submitResp.ok) break;
+      lastErrorBody = await submitResp.text();
+      if (submitResp.status === 429 && attempt < 4) {
+        // Honor Retry-After header (seconds) if provided; otherwise exponential backoff
+        const retryAfter = parseInt(submitResp.headers.get('Retry-After') || '0', 10);
+        const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, attempt + 1) * 1000;
+        context.log(`429 rate limit, retrying in ${waitMs}ms (attempt ${attempt + 1})`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      // Non-429 error — return immediately
+      context.res = { status: 502, body: { error: 'Doc Intelligence submit failed', status: submitResp.status, detail: lastErrorBody.slice(0, 500) } };
+      return;
+    }
     if (!submitResp.ok) {
-      const txt = await submitResp.text();
-      context.res = { status: 502, body: { error: 'Doc Intelligence submit failed', status: submitResp.status, detail: txt.slice(0, 500) } };
+      context.res = { status: 502, body: { error: 'Doc Intelligence rate-limited after 5 attempts', status: submitResp.status, detail: lastErrorBody.slice(0, 500) } };
       return;
     }
     const operationLocation = submitResp.headers.get('Operation-Location') || submitResp.headers.get('operation-location');

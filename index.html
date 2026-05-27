@@ -2667,13 +2667,15 @@ async function processBulkFiles(rawFiles) {
       const ocrPages = [];
       const ocrErrors = [];
       if (pdf) {
+        // Pace requests to stay under F0 rate limit (20 calls/minute = 1 per 3s).
+        // Doc Intel polling already takes ~2-3s per call so additional delay is small.
+        const PACING_MS = 500;
         for (let p = 1; p <= pages.length; p++) {
           if (hint) hint.textContent = `OCR page ${p} of ${pages.length}…`;
           try {
             const base64 = await rasterizePdfPageToBase64(pdf, p);
             const result = await ocrParsePage(base64);
             ocrPages.push({ pageNum: p, ...result });
-            // Diagnostic: log per-page result so we can see why pages were/weren't detected as transfer sheets
             console.log(`OCR page ${p}: isTransferSheet=${result.isTransferSheet}`, {
               patientName: result.patientName,
               rxNumber: result.rxNumber,
@@ -2684,6 +2686,7 @@ async function processBulkFiles(rawFiles) {
             console.warn('OCR failed for page ' + p + ':', e.message || e);
             ocrErrors.push(`page ${p}: ${e.message || e}`);
           }
+          if (p < pages.length) await new Promise(r => setTimeout(r, PACING_MS));
         }
       }
       if (ocrPages.length > 0) {
