@@ -89,7 +89,12 @@ function extractFieldsFromText(text) {
   const T = text.replace(/ /g, ' ').replace(/[ \t]+/g, ' ');
   const grab = (re) => { const m = T.match(re); return m ? m[1].trim() : null; };
 
-  const isTransferSheet = /TRANSFER\s*INFORMATION/i.test(T) || /For\s*patient\s*:/i.test(T);
+  // Detect transfer-info pages with multiple signals — OCR is noisy so any of these counts.
+  const hasTransferHeader = /TRANSFER\s*INFORMATION/i.test(T) || /Transfer\s*date/i.test(T);
+  const hasForPatient = /For\s*patient\s*:/i.test(T);
+  const hasPatientAndRx = /Patient\s*:/i.test(T) && /Rx\s*number/i.test(T);
+  const hasRxAndDoctor = /Rx\s*number/i.test(T) && /Doctor\s*:/i.test(T);
+  const isTransferSheet = hasTransferHeader || hasForPatient || hasPatientAndRx || hasRxAndDoctor;
 
   const patientName = grab(/(?:Patient\s*Name|Patient\s*:|For\s*patient\s*:)\s*([A-Z][A-Z ,.'\-]+?)(?=\s*(?:DOB|Patient\s*Phone|Patient\s*DOB|Patient\s*Address|Doctor|Drug|Rx\s*number|Store|Person|Pharmacy|Date|First\s*fill|Last\s*fill|DAW|Quantity|Refills|Instructions|Transferred\s*By|Gender|Allergies|$))/i);
   const patientDOBRaw = grab(/(?:Patient\s*DOB|DOB)\s*:?\s*([0-9\/\-]+)/i);
