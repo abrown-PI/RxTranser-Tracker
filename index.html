@@ -1156,6 +1156,25 @@ function renderAdmin() {
     </div></div>
 
 
+    <div class="card"><div class="card-header">Email Notifications</div><div class="card-body">
+      <h4 style="margin:0 0 6px 0;font-size:14px;color:var(--gray-700)">Daily Summary Recipients</h4>
+      <p class="item-sub" style="margin-bottom:8px">Emails sent at 5 PM ET each day showing the day's transfer activity. One address per line.</p>
+      <textarea id="dsRecipients" rows="4" placeholder="erie@pharmacyinnovations.net&#10;alincoln@pharmacyinnovations.net" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:4px;font-family:'Consolas',monospace;font-size:12px"></textarea>
+      <button class="btn btn-primary btn-sm" id="dsSave" style="margin-top:8px">Save daily summary recipients</button>
+      <span class="item-sub" id="dsResult" style="margin-left:8px"></span>
+      <hr style="border:none;border-top:1px solid var(--gray-200);margin:18px 0">
+      <h4 style="margin:0 0 6px 0;font-size:14px;color:var(--gray-700)">Per-Location Notification Emails</h4>
+      <p class="item-sub" style="margin-bottom:8px">When a shipment goes to a pharmacy, the email lands at that pharmacy's address. When a shipment goes to a patient, the fill location's email gets notified.</p>
+      <table style="box-shadow:none;font-size:13px"><thead><tr><th style="width:160px">Location</th><th>Notification Email</th></tr></thead><tbody>
+        ${LOCATIONS.map(l => `<tr><td><strong>${escapeHtml(l)}</strong></td><td><input data-le="${escapeHtml(l)}" placeholder="${escapeHtml(l.toLowerCase().replace(/\s+/g,''))}@pharmacyinnovations.net" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:'Consolas',monospace;font-size:12px" /></td></tr>`).join('')}
+      </tbody></table>
+      <button class="btn btn-primary btn-sm" id="leSave" style="margin-top:10px">Save location emails</button>
+      <span class="item-sub" id="leResult" style="margin-left:8px"></span>
+      <hr style="border:none;border-top:1px solid var(--gray-200);margin:18px 0">
+      <button class="btn btn-secondary btn-sm" id="dsTest">📧 Send test summary email now</button>
+      <span class="item-sub" id="dsTestResult" style="margin-left:8px"></span>
+    </div></div>
+
     <div class="card"><div class="card-header">Teams Webhooks (per location) <span class="item-sub" id="tw-status" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">When a question is asked on a transfer, the app posts to the webhook configured for the receiving location(s). URLs are stored server-side and never returned to the browser — type/paste them here once, then save.</p>
       <table style="box-shadow:none;font-size:13px"><thead><tr><th style="width:160px">Location</th><th>Webhook URL</th><th style="width:120px">Status</th></tr></thead><tbody>
@@ -1326,8 +1345,7 @@ function renderAdmin() {
     render();
   };
 
-  // Teams webhooks — populate configured indicators (loadAllUsers above also fetches settings,
-  // but for the Teams-only status badges we run a separate small loader here).
+  // Teams webhooks + email notifications — populate fields from settings
   (async () => {
     try {
       const r = await fetch('/api/settings');
@@ -1339,10 +1357,63 @@ function renderAdmin() {
         const loc = el.dataset.locState;
         el.innerHTML = cfg[loc] ? '<span style="color:var(--success)">● configured</span>' : '<span style="color:var(--gray-400)">○ not set</span>';
       });
+      // Daily summary recipients
+      const dsBox = document.getElementById('dsRecipients');
+      if (dsBox) dsBox.value = (data.dailySummaryRecipients || []).join('\n');
+      // Per-location emails
+      const locEmails = data.locationEmails || {};
+      root.querySelectorAll('[data-le]').forEach(el => {
+        el.value = locEmails[el.dataset.le] || '';
+      });
     } catch (e) {
       document.getElementById('tw-status').textContent = '— load failed (' + e.message + ')';
     }
   })();
+
+  // Save daily summary recipients
+  const dsSave = document.getElementById('dsSave');
+  if (dsSave) dsSave.onclick = async () => {
+    const result = document.getElementById('dsResult');
+    const list = (document.getElementById('dsRecipients').value || '')
+      .split(/[\n,;]+/).map(s => s.trim().toLowerCase()).filter(s => /.+@.+\..+/.test(s));
+    result.innerHTML = '<span class="item-sub">Saving…</span>';
+    try {
+      const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dailySummaryRecipients: list }) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      result.innerHTML = `<span style="color:var(--success)">✓ Saved ${list.length} recipient${list.length===1?'':'s'}</span>`;
+    } catch (e) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(e.message)}</span>`; }
+  };
+
+  // Save per-location emails
+  const leSave = document.getElementById('leSave');
+  if (leSave) leSave.onclick = async () => {
+    const result = document.getElementById('leResult');
+    const locationEmails = {};
+    root.querySelectorAll('[data-le]').forEach(el => {
+      const v = el.value.trim();
+      if (v) locationEmails[el.dataset.le] = v;
+      else locationEmails[el.dataset.le] = ''; // explicit clear
+    });
+    result.innerHTML = '<span class="item-sub">Saving…</span>';
+    try {
+      const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locationEmails }) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      result.innerHTML = '<span style="color:var(--success)">✓ Saved</span>';
+    } catch (e) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(e.message)}</span>`; }
+  };
+
+  // Test send daily summary now
+  const dsTest = document.getElementById('dsTest');
+  if (dsTest) dsTest.onclick = async () => {
+    const result = document.getElementById('dsTestResult');
+    result.innerHTML = '<span class="item-sub">Sending…</span>';
+    try {
+      const r = await fetch('/api/send-daily-summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const data = await r.json();
+      if (!r.ok) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(data.error || 'Failed')}</span>`; return; }
+      result.innerHTML = `<span style="color:var(--success)">✓ Sent to ${data.recipients.join(', ')}</span>`;
+    } catch (e) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(e.message)}</span>`; }
+  };
   document.getElementById('tw-save').onclick = async () => {
     const teamsWebhooks = {};
     root.querySelectorAll('[data-loc]').forEach(el => {
@@ -2333,14 +2404,20 @@ function openCreateShipment() {
       unpacked: {}, damagePhotos: []
     };
     SHIPMENTS.unshift(s);
-    picks.forEach(id => { const t = TRANSFERS.find(x => x.id === id); if (t) { t.status = 'Shipped'; t.dateShipped = s.shipDate; t.trackingNumber = s.trackingNumber; } });
+    const shippedTransfers = picks.map(id => TRANSFERS.find(x => x.id === id)).filter(Boolean);
+    shippedTransfers.forEach(t => { t.status = 'Shipped'; t.dateShipped = s.shipDate; t.trackingNumber = s.trackingNumber; apiUpdateTransfer(t); });
+    // Fire email notification to the receiving location (or fill location for patient ships)
+    fetch('/api/send-shipment-notification', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shipment: s, transfers: shippedTransfers })
+    }).catch(e => console.warn('notification failed', e));
     close();
     if (s.isBulk) {
       if (confirm(`Bulk shipment ${s.bulkShipmentId} created with ${picks.length} transfer(s). Print packing slip now?`)) {
         printPackingSlip(s);
       }
     } else {
-      alert('Shipment created. (Mock — would notify ' + s.toLocation + ' via Teams webhook with manifest.)');
+      alert('Shipment created and notification email sent.');
     }
     render();
   };

@@ -56,7 +56,9 @@ function redactWebhooks(settings) {
   return {
     teamsWebhooksConfigured: configured,
     askQuestionRouting: settings.askQuestionRouting || 'opposite-side',
-    adminEmails: settings.adminEmails || []
+    adminEmails: settings.adminEmails || [],
+    dailySummaryRecipients: settings.dailySummaryRecipients || [],
+    locationEmails: settings.locationEmails || {}
   };
 }
 
@@ -83,10 +85,24 @@ module.exports = async function (context, req) {
       if (Array.isArray(incoming.adminEmails)) {
         adminEmails = incoming.adminEmails.map(e => String(e).toLowerCase().trim()).filter(Boolean);
       }
+      // Daily summary recipients — full replacement array if provided
+      let dailySummaryRecipients = current.dailySummaryRecipients || [];
+      if (Array.isArray(incoming.dailySummaryRecipients)) {
+        dailySummaryRecipients = incoming.dailySummaryRecipients.map(e => String(e).toLowerCase().trim()).filter(Boolean);
+      }
+      // Per-location emails — merge incoming object onto current
+      let locationEmails = { ...(current.locationEmails || {}) };
+      if (incoming.locationEmails && typeof incoming.locationEmails === 'object') {
+        Object.entries(incoming.locationEmails).forEach(([loc, email]) => {
+          if (email === '' || email == null) delete locationEmails[loc]; else locationEmails[loc] = String(email).trim();
+        });
+      }
       const merged = {
         ...current,
         teamsWebhooks,
         adminEmails,
+        dailySummaryRecipients,
+        locationEmails,
         askQuestionRouting: incoming.askQuestionRouting || current.askQuestionRouting || 'opposite-side'
       };
       await writeSettings(merged);

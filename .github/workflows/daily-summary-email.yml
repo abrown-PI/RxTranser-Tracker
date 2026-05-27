@@ -1,0 +1,24 @@
+name: Daily Transfer Summary Email
+
+on:
+  schedule:
+    # 21:00 UTC = 5 PM ET during EDT, 4 PM ET during EST.
+    # Using 22:00 UTC = 6 PM EDT / 5 PM EST. Pick 22:00 to keep "5 PM" stable during winter.
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+jobs:
+  send-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call send-daily-summary endpoint
+        run: |
+          response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
+            "https://red-island-0bb34e510.7.azurestaticapps.net/api/send-daily-summary" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          body=$(echo "$response" | sed '$d')
+          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+          echo "HTTP $status"
+          echo "$body"
+          if [ "$status" != "200" ]; then exit 1; fi
