@@ -1569,7 +1569,16 @@ function renderNewForm() {
         <strong style="color:var(--info)">Save paper:</strong> Enter all patient, shipping, and billing info below — no need for the paper Patient Approval form anymore.
         <strong>The only time you'll need paper</strong> is the Credit Card Authorization (when billing = Credit Card and the card is NOT on file). The CC form prints a single page that the patient signs and you scan back in.
       </div>
-      ${d.transferType === 'Refill' ? `<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-200);font-size:13px"><span style="font-weight:600;color:var(--gray-700)">Transfer Type:</span> <span class="badge badge-verified">Refill</span><span class="hint" style="margin-left:auto">Refills don't require a hard copy scan.</span></div>` : ''}
+      ${d.transferType === 'Refill' ? `<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-200);font-size:13px"><span style="font-weight:600;color:var(--gray-700)">Transfer Type:</span> <span class="badge badge-verified">Refill</span>${d.legacyRefill?' <span class="badge" style="background:var(--warning-bg);color:var(--warning);font-size:10px">Manual / Legacy</span>':''}<span class="hint" style="margin-left:auto">Refills don't require a hard copy scan.</span></div>` : ''}
+      ${(d.transferType === 'Refill' && !d.refillOfId) ? `<div class="section" style="background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:6px;padding:12px 14px;margin-bottom:14px">
+        <div class="section-title" style="margin-top:0">Prior Transfer Info <span class="hint" style="text-transform:none;font-weight:400">— optional, for context. Used because the original transfer isn't in the app yet.</span></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Prior Origin Pharmacy</label><input id="f-priorPharmacy" value="${escapeHtml(d.priorPharmacy||'')}" placeholder="e.g. Erie, Greenville" /></div>
+          <div class="form-group"><label>Prior Rx Number</label><input id="f-priorRxNumber" value="${escapeHtml(d.priorRxNumber||'')}" placeholder="Original Rx #" /></div>
+          <div class="form-group"><label>Prior Transfer Date</label><input type="date" id="f-priorTransferDate" value="${escapeHtml(d.priorTransferDate||'')}" /></div>
+          <div class="form-group full"><label>Notes</label><input id="f-priorTransferNote" value="${escapeHtml(d.priorTransferNote||'')}" placeholder="Anything else worth recording about the original transfer" /></div>
+        </div>
+      </div>` : ''}
       <div class="section-title">Patient</div>
       <div class="form-grid">
         <div class="form-group"><label>Patient Name</label><input id="f-patientName" value="${escapeHtml(d.patientName)}" /></div>
@@ -1894,7 +1903,7 @@ function renderDraftItems() {
 }
 
 function bindDraftInputs() {
-  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes'];
+  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote'];
   fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => state.draft[f] = el.value); });
 
   // Ship-to-Pharmacy auto-fill: when user picks Pharmacy or changes origin, fill ship address from origin pharmacy
@@ -2006,7 +2015,9 @@ function submitDraft() {
     if (!existing) { alert('Original transfer not found.'); return; }
     // Merge: preserve fields we don't edit in this form (status, tracking, dates, comments)
     Object.assign(existing, {
-      transferType: d.transferType, refillOfId: d.refillOfId,
+      transferType: d.transferType, refillOfId: d.refillOfId, legacyRefill: !!d.legacyRefill,
+      priorPharmacy: d.priorPharmacy || '', priorRxNumber: d.priorRxNumber || '',
+      priorTransferDate: d.priorTransferDate || '', priorTransferNote: d.priorTransferNote || '',
       patientName: d.patientName, patientDOB: d.patientDOB, patientAllergies: d.patientAllergies,
       originLocation: d.originLocation, fillLocation: d.fillLocation,
       shipTo: d.shipTo, deliveryCharge: d.deliveryCharge,
@@ -2091,6 +2102,13 @@ function renderModal() {
           <div style="font-size:13px;line-height:1.8">
             <strong>${escapeHtml(t.patientName)}</strong> · DOB ${fmtDate(t.patientDOB)} · Allergies: ${escapeHtml(t.patientAllergies||'—')}
           </div>
+          ${t.legacyRefill ? `<div class="section"><div class="section-title">Prior Transfer Info <span class="hint" style="text-transform:none;font-weight:400">(manual — original not in app)</span></div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px 24px;font-size:13px;background:var(--gray-50);padding:10px 14px;border-radius:6px">
+            <div><strong>Prior pharmacy:</strong> ${escapeHtml(t.priorPharmacy||'—')}</div>
+            <div><strong>Prior Rx #:</strong> ${escapeHtml(t.priorRxNumber||'—')}</div>
+            <div><strong>Prior transfer date:</strong> ${t.priorTransferDate?fmtDate(t.priorTransferDate):'—'}</div>
+            <div></div>
+            ${t.priorTransferNote?`<div style="grid-column:1/-1"><strong>Notes:</strong> ${escapeHtml(t.priorTransferNote)}</div>`:''}
+          </div></div>`:''}
           ${t.transferNotes?`<div class="section"><div class="section-title">Transfer Notes</div><div style="font-size:13px;line-height:1.6;background:var(--warning-bg);border-left:4px solid var(--warning);padding:10px 14px;border-radius:6px;white-space:pre-wrap">${escapeHtml(t.transferNotes)}</div></div>`:''}
 
           <div class="section"><div class="section-title">Shipping & Billing</div>
@@ -3312,6 +3330,10 @@ function renderRefillTab() {
               </tr>`).join('')}
             </tbody></table>`}
       </div>
+      <div style="margin-top:18px;padding:12px 14px;background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div style="font-size:13px"><strong>Can't find it?</strong> <span class="item-sub" style="text-transform:none;font-weight:400">Use this for refills of transfers that happened before the app existed. Temporary — once enough history is in here, just use search.</span></div>
+        <button class="btn btn-secondary btn-sm" id="rf-manual">+ Enter Refill Manually</button>
+      </div>
     </div></div>
   `;
   document.getElementById('rf-by').onchange = e => { r.searchBy = e.target.value; renderRefillTab(); };
@@ -3323,6 +3345,16 @@ function renderRefillTab() {
     if (t) t.items.forEach(i => r.includedItems[i.id] = true);
     renderRefillTab();
   });
+  document.getElementById('rf-manual').onclick = () => {
+    state.draft = freshDraft();
+    state.draft.transferType = 'Refill';
+    state.draft.legacyRefill = true;
+    state.draft.priorPharmacy = '';
+    state.draft.priorRxNumber = '';
+    state.draft.priorTransferDate = '';
+    state.draft.priorTransferNote = '';
+    document.querySelector('.tab[data-tab=new]').click();
+  };
 }
 
 function renderRefillReview(t) {
