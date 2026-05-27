@@ -89,12 +89,15 @@ function extractFieldsFromText(text) {
   const T = text.replace(/ /g, ' ').replace(/[ \t]+/g, ' ');
   const grab = (re) => { const m = T.match(re); return m ? m[1].trim() : null; };
 
-  // Detect transfer-info pages with multiple signals — OCR is noisy so any of these counts.
+  // Header-style signals first
   const hasTransferHeader = /TRANSFER\s*INFORMATION/i.test(T) || /Transfer\s*date/i.test(T);
   const hasForPatient = /For\s*patient\s*:/i.test(T);
   const hasPatientAndRx = /Patient\s*:/i.test(T) && /Rx\s*number/i.test(T);
   const hasRxAndDoctor = /Rx\s*number/i.test(T) && /Doctor\s*:/i.test(T);
-  const isTransferSheet = hasTransferHeader || hasForPatient || hasPatientAndRx || hasRxAndDoctor;
+  // Also: just look for an Rx number pattern (6-digit ID often labeled "Rx number")
+  // OR a "Pharmacy Innovations" header (every transfer sheet has it)
+  const hasRxNumberLike = /Rx\s*number/i.test(T) || /\bRx\s*#/i.test(T);
+  const hasPharmacyInnovationsHeader = /Pharmacy\s*Innovations/i.test(T) && /DEA/i.test(T);
 
   const patientName = grab(/(?:Patient\s*Name|Patient\s*:|For\s*patient\s*:)\s*([A-Z][A-Z ,.'\-]+?)(?=\s*(?:DOB|Patient\s*Phone|Patient\s*DOB|Patient\s*Address|Doctor|Drug|Rx\s*number|Store|Person|Pharmacy|Date|First\s*fill|Last\s*fill|DAW|Quantity|Refills|Instructions|Transferred\s*By|Gender|Allergies|$))/i);
   const patientDOBRaw = grab(/(?:Patient\s*DOB|DOB)\s*:?\s*([0-9\/\-]+)/i);
@@ -125,8 +128,15 @@ function extractFieldsFromText(text) {
   const qty = grab(/Qty\s*:?\s*(\d+)/i);
   const doctorName = grab(/Doctor\s*:?\s*([A-Z][A-Z ,.'\-]+?)(?=\s*(?:Doctor\s*Phone|Doctor\s*Address|Doctor\s*DEA|DEA|Phone|Drug|Store|Person|Pharmacy|$))/i);
 
+  // Final detection: any of the header signals OR successful extraction of BOTH patient + rx
+  // (handwritten order forms don't typically yield both — they have a different layout).
+  const extractedBothFields = !!(patientName && rxNumber);
+  const isTransferSheet = hasTransferHeader || hasForPatient || hasPatientAndRx || hasRxAndDoctor || extractedBothFields || hasPharmacyInnovationsHeader;
+
   return {
     isTransferSheet, patientName, patientDOB, shipAddr1, shipCity, shipState, shipZip,
-    rxNumber, drug, qty, doctorName
+    rxNumber, drug, qty, doctorName,
+    // Diagnostic signals — surfaced so we can debug why pages were/weren't detected
+    _signals: { hasTransferHeader, hasForPatient, hasPatientAndRx, hasRxAndDoctor, hasPharmacyInnovationsHeader, hasRxNumberLike, extractedBothFields, textLen: T.length }
   };
 }

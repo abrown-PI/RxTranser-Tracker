@@ -2472,6 +2472,11 @@ function renderBulkUpload() {
 
     <div class="card"><div class="card-body">
       <p style="color:var(--gray-600);margin-bottom:14px">Upload PDFs — each <strong>"PATIENT Rx TRANSFER INFORMATION"</strong> page becomes a draft transfer. Pages after a transfer header (hard copies, order forms) get attached to that transfer until the next header. You'll review each draft, edit if needed, and approve. Drafts with missing required fields stay flagged until you fill them in.</p>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;padding:8px 12px;background:var(--gray-100);border-radius:6px">
+        <label style="font-size:13px;color:var(--gray-700);font-weight:600">Expected transfers in this file (optional):</label>
+        <input id="bulk-expected" type="number" min="0" placeholder="e.g. 11" style="width:80px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px" />
+        <span class="hint">If filled in, app will warn if it detects a different count.</span>
+      </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
         <label class="btn btn-primary" style="cursor:pointer;margin:0">
           📁 Select PDFs to upload
@@ -2668,10 +2673,16 @@ async function processBulkFiles(rawFiles) {
             const base64 = await rasterizePdfPageToBase64(pdf, p);
             const result = await ocrParsePage(base64);
             ocrPages.push({ pageNum: p, ...result });
+            // Diagnostic: log per-page result so we can see why pages were/weren't detected as transfer sheets
+            console.log(`OCR page ${p}: isTransferSheet=${result.isTransferSheet}`, {
+              patientName: result.patientName,
+              rxNumber: result.rxNumber,
+              signals: result._signals,
+              firstChars: (result.rawText || '').slice(0, 200)
+            });
           } catch (e) {
             console.warn('OCR failed for page ' + p + ':', e.message || e);
             ocrErrors.push(`page ${p}: ${e.message || e}`);
-            // KEEP GOING — one bad page shouldn't kill the whole batch
           }
         }
       }
@@ -2781,6 +2792,14 @@ async function processBulkFiles(rawFiles) {
   });
   if (!state.bulkQueue) state.bulkQueue = [];
   state.bulkQueue.push(...newDrafts);
+  // Expected count warning — if user typed how many they expect, warn if mismatch
+  const expectedInput = document.getElementById('bulk-expected');
+  const expected = expectedInput ? parseInt(expectedInput.value, 10) : 0;
+  if (expected && expected > 0 && newDrafts.length !== expected) {
+    setTimeout(() => {
+      alert(`Expected ${expected} transfers but the app detected ${newDrafts.length}.\n\nIf this is wrong:\n• Open DevTools console (F12) and look for "OCR page N:" log entries\n• Look at the pages where isTransferSheet=false but should be true\n• Send me the firstChars text from those pages so I can adjust the detection.`);
+    }, 100);
+  }
   // Prompt for merging within groups
   const newGroups = Object.values(groups).filter(g => g.length > 1);
   if (newGroups.length) {
