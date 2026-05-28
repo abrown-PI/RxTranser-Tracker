@@ -1072,8 +1072,6 @@ function getPrintableDocsForTransfer(t) {
   const meta = `${t.originLocation} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`;
   const stampCommon = { transferId: t.id, patientName: t.patientName, transferMeta: meta };
   const docs = [];
-  // Cover page: always print first
-  docs.push({ summaryHtml: buildSummarySheetHtml(t), transferId: t.id, patientName: t.patientName, transferMeta: meta, title: 'Transfer Summary' });
   const resolveSrc = (f) => f.dataUrl || (f.blobName ? blobUrl(f.blobName) : null);
 
   const pks = t.pkSheets || (t.pkSheet ? [t.pkSheet] : []);
@@ -2316,6 +2314,7 @@ function renderModal() {
             <button class="btn btn-secondary btn-sm" id="editTransferBtn" title="Edit patient, routing, shipping, billing, documents">✏️ Edit Transfer</button>
             <button class="btn btn-secondary btn-sm" id="askQBtn" title="Ask the other team a question about this transfer">❓ Ask Question</button>
             <button class="btn btn-primary btn-sm" id="refillBtn" title="Start a new transfer pre-filled from this one">📋 Refill this Rx</button>
+            <button class="btn btn-secondary btn-sm" id="printSummaryBtn" title="Print a one-page summary cover sheet for this transfer (patient, drugs, addresses, billing — for hand-off or filing)">📄 Print Summary Sheet</button>
             <div class="spacer" style="flex:1"></div>
             <label style="font-size:12px;color:var(--gray-600)">Update status</label>
             <select class="status-select" id="statusSelect">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select>
@@ -2446,6 +2445,13 @@ function renderModal() {
   if (viewBulkBtn) viewBulkBtn.addEventListener('click', () => openPageViewer({ sourceFile: t.patientName + ' — attached pages', pageImages: t.pageImages || [] }));
   const printAttachBtn = document.getElementById('printAttachmentsBtn');
   if (printAttachBtn) printAttachBtn.addEventListener('click', () => printDocs(getPrintableDocsForTransfer(t)));
+  const printSummaryBtn = document.getElementById('printSummaryBtn');
+  if (printSummaryBtn) printSummaryBtn.addEventListener('click', () => printDocs([{
+    summaryHtml: buildSummarySheetHtml(t),
+    transferId: t.id, patientName: t.patientName,
+    transferMeta: `${t.originLocation} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`,
+    title: 'Transfer Summary'
+  }]));
   document.getElementById('editTransferBtn').addEventListener('click', () => {
     // Deep-clone the transfer into the draft so user can cancel without affecting the original
     state.draft = JSON.parse(JSON.stringify(t));
