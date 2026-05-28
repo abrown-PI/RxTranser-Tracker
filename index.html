@@ -2820,7 +2820,11 @@ async function uploadBlob(base64, contentType, prefix) {
 }
 
 // Build a URL the browser can use to fetch a stored blob.
-function blobUrl(name) { return location.origin + '/api/blobs/' + encodeURIComponent(name); }
+// Note: don't URL-encode the slash in the name — the function route is catch-all
+// ({*name}) and matches the literal slashes between prefix and filename. Encoding
+// the slash as %2F breaks Azure Functions route extraction. Other URL-unsafe chars
+// shouldn't appear in our server-generated blob names (timestamp + hex + ext).
+function blobUrl(name) { return location.origin + '/api/blobs/' + String(name).split('/').map(encodeURIComponent).join('/'); }
 
 // Save / load / delete bulk drafts via the backend. Drafts are scoped by location;
 // users at the same pharmacy see each other's queue.
