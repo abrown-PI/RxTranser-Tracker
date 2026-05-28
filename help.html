@@ -112,6 +112,7 @@ section { page-break-inside: avoid; }
       <li>Routing: Origin Location + Fill Location</li>
       <li>Shipping: Ship-to (Pharmacy or Patient), address. If you pick <em>Pharmacy</em>, the origin pharmacy's address auto-fills.</li>
       <li>Billing Method</li>
+      <li><strong>Patient Price</strong> (optional) — for the team to record the price charged to the patient. Surfaces on the detail modal and on the Summary Sheet printout.</li>
       <li><strong>PK Transfer Sheet</strong> upload (required — drop a PDF, app auto-fills the fields it can read)</li>
       <li>Optional: Hard Copy Scan, Formula, Transfer Notes</li>
       <li>Items / Prescriptions: Origin Rx #, Receiving Rx # (filled in by fill location later), Drug, Qty</li>
@@ -313,7 +314,25 @@ section { page-break-inside: avoid; }
   <li>After printing, the app auto-changes those transfers to <strong>In Progress</strong></li>
 </ol>
 
-<div class="tip"><strong>Every printed document gets a yellow Transfer ID stamp at the top</strong> showing the WorldShip Reference (Transfer ID), patient name, and origin → fill route. Receiving staff can read the ID directly off the paper to type into WorldShip's Customer Reference field. <em>Note: for multi-page PDF uploads, the stamp shows on the first page of each transfer's section. The stamp is per-transfer, so a batch of 11 transfers gives you 11 stamped sections.</em></div>
+<h3>Print docs for a single transfer (from the detail modal)</h3>
+<ol>
+  <li>Open any transfer → look at the <strong>Attached Documents</strong> section</li>
+  <li>Click <strong>🖨 Print all attached documents</strong> — prints PK sheets, hard copies, and signed CC form for that transfer</li>
+  <li>Doc links (PK Transfer Sheet, Hard Copy Scan, etc.) are clickable — opens the original file in a new browser tab</li>
+</ol>
+
+<h3>Print Summary Sheet (optional cover/handoff)</h3>
+<p>Sometimes you want a one-page reference for filing or hand-off without the actual attached scans. The transfer detail modal has a <strong>📄 Print Summary Sheet</strong> button (next to <em>Refill this Rx</em>) that prints a single page with:</p>
+<ul>
+  <li>Yellow WorldShip Reference / Transfer ID banner at the top</li>
+  <li>Patient name, DOB, allergies</li>
+  <li>Routing, status, anticipated ship date</li>
+  <li>Ship-to address and tracking</li>
+  <li>Billing method + <strong>Patient Price</strong> (if entered)</li>
+  <li>Prescriptions table with origin Rx, receiving Rx, doctor</li>
+  <li>Transfer notes; prior transfer info for legacy refills</li>
+</ul>
+<p>The summary doesn't auto-print with attachments — it's only printed when you click that button.</p>
 </section>
 
 <section id="fedex">
@@ -447,7 +466,7 @@ A: The shipment list only shows transfers in <strong>In Progress</strong> or <st
 </section>
 
 <hr>
-<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-05-27 — WorldShip Reference workflow, fillable CC form, doc carry-over on refills, manual legacy refill, Rx History chain, daily summary emails, Transfer ID stamp on prints. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
+<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-05-28 — added Patient Price field, Print Summary Sheet button, Print all attached documents, clickable doc links. Earlier: WorldShip Reference workflow, fillable CC form, doc carry-over on refills, manual legacy refill, Rx History chain, daily summary emails. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
 
 </body>
 </html>

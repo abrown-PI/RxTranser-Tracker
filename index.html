@@ -750,28 +750,16 @@ function printDocs(items) {
     'body { margin: 0; font-family: Arial, sans-serif; color: #111; }',
     '.doc { page-break-after: always; }',
     '.doc:last-child { page-break-after: auto; }',
-    /* Slim per-doc header strip for attached pages (the full stamp is on the summary sheet only) */
-    '.doc-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-bottom: 2px solid #233f76; padding-bottom: 4px; margin-bottom: 8px; font-size: 11px; color: #233f76; }',
-    '.doc-header .ref { font-family: "Consolas", monospace; font-weight: 700; font-size: 14px; letter-spacing: .04em; }',
-    '.doc-header .title { color: #666 }',
     'img, embed, iframe { max-width: 100%; border: 0; display: block; }',
     '</style></head><body>'].join('');
   const out = [html];
   items.forEach(it => {
     out.push('<div class="doc">');
     if (it.summaryHtml) {
-      // Cover-page summary: render its own HTML body, no separate stamp header needed
+      // Cover-page summary: render its own HTML body
       out.push(it.summaryHtml);
     } else {
-      // Attached document: slim single-line header + the file
-      if (it.transferId != null) {
-        out.push(`<div class="doc-header">
-          <div><span class="ref">${escapeHtml(String(it.transferId))}</span> · ${escapeHtml(it.patientName||'')}${it.transferMeta?' · '+escapeHtml(it.transferMeta):''}</div>
-          <div class="title">${escapeHtml(it.title||'')}</div>
-        </div>`);
-      } else {
-        out.push(`<div class="doc-header"><div></div><div class="title">${escapeHtml(it.title||'')}</div></div>`);
-      }
+      // Attached document: just the file, no header (use Print Summary Sheet for the ID/info)
       if (!it.dataUrl) {
         out.push(`<div style="color:#999;font-size:12px">[ No preview available — ${escapeHtml(it.name||'document')} was not stored with data ]</div>`);
       } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
