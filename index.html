@@ -1046,9 +1046,11 @@ function renderTransfers() {
     const t = TRANSFERS.find(x => x.id === id);
     if (!t) return;
     const newStatus = sel.value;
+    const oldStatus = t.status;
     if (newStatus === 'Canceled' && t.status !== 'Canceled') onTransferCanceled(t);
     t.status = newStatus;
     apiUpdateTransfer(t);
+    logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: newStatus });
     renderTransfers();
   }));
   root.querySelectorAll('.print-pick').forEach(cb => cb.onchange = e => {
@@ -2414,6 +2416,7 @@ function submitDraft() {
       lastEditedBy: CURRENT_USER.name, lastEditedAt: new Date().toISOString()
     });
     apiUpdateTransfer(existing);
+    logAudit('edit_transfer', 'transfer', existing.id);
     state.draft = null; state.editingTransferId = null;
     alert('Transfer updated.');
     document.querySelector('.tab[data-tab=transfers]').click();
@@ -2440,6 +2443,7 @@ function submitDraft() {
   }
   TRANSFERS.unshift(t);
   apiSaveTransfer(t);
+  logAudit('create_transfer', 'transfer', t.id, { transferType: t.transferType, originLocation: t.originLocation, fillLocation: t.fillLocation });
   state.draft = null;
   alert('Transfer submitted.');
   document.querySelector('.tab[data-tab=transfers]').click();
@@ -2448,7 +2452,30 @@ function submitDraft() {
 // =====================================================================
 // Transfer detail modal
 // =====================================================================
-function openTransfer(id) { state.openTransferId = id; renderModal(); }
+function openTransfer(id) {
+  state.openTransferId = id;
+  renderModal();
+  logAudit('view_transfer', 'transfer', id);
+}
+
+// Fire-and-forget audit logger. Records: who, what, when, on which entity.
+// Failures are swallowed so audit issues don't disrupt user actions.
+function logAudit(action, entityType, entityId, details) {
+  if (!CURRENT_USER || !CURRENT_USER.name) return;
+  try {
+    fetch('/api/audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actor: CURRENT_USER.name,
+        actorEmail: CURRENT_USER.email || '',
+        action, entityType,
+        entityId: String(entityId || ''),
+        details: details || null
+      })
+    }).catch(() => {});
+  } catch {}
+}
 
 // Jump straight into editing a transfer without first opening the detail modal.
 // Loads a deep clone of the transfer into the draft, sets editingTransferId,
@@ -2714,6 +2741,7 @@ function renderModal() {
     const idx = TRANSFERS.findIndex(x => x.id === t.id);
     if (idx !== -1) TRANSFERS.splice(idx, 1);
     await apiDeleteTransfer(t.id);
+    logAudit('delete_transfer', 'transfer', t.id);
     closeModal();
     render();
   });
@@ -3472,9 +3500,10 @@ function groupPdfPagesIntoTransfers(pages) {
     }
   });
   if (current) groups.push(current);
-  // Diagnostic logging — helps figure out why detection fails on weird PDFs
+  // Diagnostic logging when detection fails. Patient text is not logged — only
+  // structural counts — so this is safe to leave on in production.
   if (groups.length === 0) {
-    console.log('PDF text extraction summary:', pages.map(p => ({ page: p.pageNum, charCount: (p.text||'').length, sample: (p.text||'').slice(0, 80) })));
+    console.log('PDF text extraction: no transfer markers found', { pages: pages.length, charsPerPage: pages.map(p => (p.text||'').length) });
   }
   return groups;
 }
@@ -3543,11 +3572,13 @@ async function processBulkFiles(rawFiles) {
               _pngDataUrl: 'data:image/png;base64,' + base64, // in-memory fallback for instant render
               ...result
             });
+            // Diagnostic log — counts only, no patient text or Rx data, to avoid PHI in
+            // browser console / dev tools / screen-share recordings.
             console.log(`OCR page ${p}: isTransferSheet=${result.isTransferSheet}`, {
-              patientName: result.patientName,
-              rxNumber: result.rxNumber,
+              hasPatientName: !!result.patientName,
+              hasRxNumber: !!result.rxNumber,
               signals: result._signals,
-              firstChars: (result.rawText || '').slice(0, 200)
+              rawCharCount: (result.rawText || '').length
             });
           } catch (e) {
             console.warn('OCR failed for page ' + p + ':', e.message || e);
@@ -4002,8 +4033,8 @@ function onTransferCanceled(t) {
   t.canceledAt = new Date().toISOString();
   t.canceledBy = CURRENT_USER.name;
   t.cancelAcknowledged = false;
-  // Stub: in production this fires the Teams/email notification
-  console.log('[Notify] Transfer canceled — would send Teams/email alert to Erie staff for ' + t.patientName);
+  // Stub: in production this fires the Teams/email notification — no PHI logged
+  console.log('[Notify] Transfer canceled — would send alert', { transferId: t.id });
 }
 
 function renderActionItems() {
@@ -4491,6 +4522,7 @@ async function applyMsalAccount(account) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, name, location: savedLocation, role: user.role, lastSignInAt: new Date().toISOString() })
   }).catch(() => {});
+  logAudit('sign_in', 'session', email, { method: 'msal' });
   // Swap UI
   document.getElementById('signInArea').style.display = 'none';
   document.getElementById('signedInArea').style.display = 'flex';
@@ -4522,6 +4554,57 @@ function showAuthGate(message) {
 function hideAuthGate() {
   const gate = document.getElementById('authGate');
   if (gate) gate.style.display = 'none';
+  startIdleTimer();
+}
+
+// =====================================================================
+// Idle timeout — auto sign-out after inactivity to limit PHI exposure
+// =====================================================================
+const IDLE_TIMEOUT_MIN = 30;     // Sign out after this many minutes idle
+const IDLE_WARN_MIN = 28;        // Show warning starting at this many minutes
+let _lastActivityTs = Date.now();
+let _idleTimer = null;
+let _idleWarnEl = null;
+
+function bumpIdleActivity() {
+  _lastActivityTs = Date.now();
+  if (_idleWarnEl) { _idleWarnEl.remove(); _idleWarnEl = null; }
+}
+
+function startIdleTimer() {
+  if (_idleTimer) return; // already running
+  ['mousemove','keydown','click','scroll','touchstart'].forEach(evt =>
+    window.addEventListener(evt, bumpIdleActivity, { passive: true })
+  );
+  bumpIdleActivity();
+  _idleTimer = setInterval(() => {
+    const elapsedMin = (Date.now() - _lastActivityTs) / 60000;
+    if (elapsedMin >= IDLE_TIMEOUT_MIN) {
+      doIdleSignOut();
+    } else if (elapsedMin >= IDLE_WARN_MIN && !_idleWarnEl) {
+      showIdleWarning(IDLE_TIMEOUT_MIN - elapsedMin);
+    }
+  }, 30000);
+}
+
+function showIdleWarning(minutesLeft) {
+  _idleWarnEl = document.createElement('div');
+  _idleWarnEl.style.cssText = 'position:fixed;top:60px;right:20px;background:#fffbeb;border:2px solid #d97706;padding:12px 18px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:9999;font-size:13px;max-width:340px';
+  _idleWarnEl.innerHTML = `<strong style="color:#d97706">⚠ You'll be signed out soon</strong><div style="margin-top:6px">For security, this session will end in about ${Math.ceil(minutesLeft)} min of inactivity. Move your mouse or press a key to stay signed in.</div>`;
+  document.body.appendChild(_idleWarnEl);
+}
+
+async function doIdleSignOut() {
+  if (_idleTimer) { clearInterval(_idleTimer); _idleTimer = null; }
+  if (_idleWarnEl) { _idleWarnEl.remove(); _idleWarnEl = null; }
+  sessionStorage.removeItem('localUserHint');
+  CURRENT_USER = USERS[0] || { name: '', email: '', role: 'tech', location: '' };
+  const m = getMsal();
+  if (m && CURRENT_USER && !CURRENT_USER.isLocal) {
+    try { await m.logoutRedirect({ onRedirectNavigate: () => false }); } catch {}
+  }
+  // Reload to a clean state and force re-auth
+  location.replace(location.origin + location.pathname);
 }
 
 async function doSignIn(m) {
