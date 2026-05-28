@@ -4155,7 +4155,10 @@ function getMsal() {
       authority: 'https://login.microsoftonline.com/' + AZURE_AD_TENANT_ID,
       redirectUri: window.location.origin
     },
-    cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
+    // localStorage so the MSAL session is shared across browser tabs — clicking a link
+    // in Teams (or an email) opens a new tab that's already signed in. sessionStorage
+    // is per-tab, which forced a re-login every time a link was clicked.
+    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
   });
   return _msalInstance;
 }
