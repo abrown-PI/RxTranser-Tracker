@@ -720,7 +720,12 @@ function openPageViewer(bulkDraft) {
     </div>
     <div class="modal-footer"><button class="btn btn-secondary" id="pvCloseBtn">Close</button></div>
   </div></div>`;
-  const close = () => { root.innerHTML = ''; };
+  // If a transfer detail modal was open behind the page viewer, restore it on close
+  // (page viewer overwrote modalRoot when it opened).
+  const close = () => {
+    root.innerHTML = '';
+    if (state.openTransferId) renderModal();
+  };
   document.getElementById('pvClose').onclick = close;
   document.getElementById('pvCloseBtn').onclick = close;
   document.getElementById('pvOverlay').onclick = e => { if (e.target.id === 'pvOverlay') close(); };
@@ -942,23 +947,85 @@ function renderTransfers() {
   if (psbtn) psbtn.onclick = () => batchPrintTransfers([...state.printSelection]);
 }
 
+// Collect every printable document attached to a transfer. Handles three storage paths:
+//  (1) entries with an inline dataUrl (single-upload form)
+//  (2) entries with a blobName reference (server-stored)
+//  (3) bulk-upload transfers where pkSheets/hardCopies are metadata-only — falls back to
+//      transfer.pageImages (per-page PNGs in blob storage), filtered by kind
+// Each doc gets the standard transfer-ID stamp metadata for the print banner.
+function getPrintableDocsForTransfer(t) {
+  const meta = `${t.originLocation} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`;
+  const stampCommon = { transferId: t.id, patientName: t.patientName, transferMeta: meta };
+  const docs = [];
+  const resolveSrc = (f) => f.dataUrl || (f.blobName ? blobUrl(f.blobName) : null);
+
+  const pks = t.pkSheets || (t.pkSheet ? [t.pkSheet] : []);
+  const hcs = t.hardCopies || (t.hardCopy ? [t.hardCopy] : []);
+
+  // PK sheets — use the upload entry if it has data, otherwise fall back to pageImages with kind=transfer
+  const pksWithData = pks.filter(f => resolveSrc(f));
+  if (pksWithData.length) {
+    pksWithData.forEach((f, idx) => docs.push({
+      ...stampCommon,
+      title: `PK Transfer Sheet${pksWithData.length>1?' '+(idx+1):''}`,
+      name: f.name, type: f.type, dataUrl: resolveSrc(f)
+    }));
+  } else if (pks.length) {
+    // Metadata-only entries — use blob page images instead
+    const transferPages = (t.pageImages||[]).filter(p => p.kind === 'transfer' && p.blobName);
+    transferPages.forEach((p) => docs.push({
+      ...stampCommon,
+      title: `PK Transfer Sheet — page ${p.pageNum}`,
+      name: `page-${p.pageNum}.png`, type: 'image/png',
+      dataUrl: blobUrl(p.blobName)
+    }));
+    if (transferPages.length === 0) {
+      docs.push({ ...stampCommon, title: `PK Transfer Sheet — ${pks[0].name}`, name: pks[0].name, type: pks[0].type, dataUrl: null });
+    }
+  }
+
+  // Hard copies — same pattern
+  const hcsWithData = hcs.filter(f => resolveSrc(f));
+  if (hcsWithData.length) {
+    hcsWithData.forEach((f, idx) => docs.push({
+      ...stampCommon,
+      title: `Hard Copy${hcsWithData.length>1?' '+(idx+1):''}`,
+      name: f.name, type: f.type, dataUrl: resolveSrc(f)
+    }));
+  } else if (hcs.length) {
+    const hcPages = (t.pageImages||[]).filter(p => p.kind === 'hardcopy' && p.blobName);
+    hcPages.forEach((p) => docs.push({
+      ...stampCommon,
+      title: `Hard Copy — page ${p.pageNum}`,
+      name: `page-${p.pageNum}.png`, type: 'image/png',
+      dataUrl: blobUrl(p.blobName)
+    }));
+    if (hcPages.length === 0) {
+      docs.push({ ...stampCommon, title: `Hard Copy — ${hcs[0].name}`, name: hcs[0].name, type: hcs[0].type, dataUrl: null });
+    }
+  }
+
+  // CC form (only attached when billing is Credit Card and the form was uploaded)
+  if (t.ccForm && resolveSrc(t.ccForm)) {
+    docs.push({
+      ...stampCommon,
+      title: 'Credit Card Authorization (signed)',
+      name: t.ccForm.name, type: t.ccForm.type, dataUrl: resolveSrc(t.ccForm)
+    });
+  }
+
+  if (docs.length === 0) {
+    docs.push({ ...stampCommon, title: '(no documents attached)', name: '', type: '', dataUrl: null });
+  }
+  return docs;
+}
+
 // Batch-print PK transfer sheets + hard copies for selected transfers.
 // After the print window opens, auto-advance any 'New' transfers to 'In Progress'.
 function batchPrintTransfers(ids) {
   if (!ids.length) return;
   const transfers = ids.map(id => TRANSFERS.find(t => t.id === id)).filter(Boolean);
-  const docs = [];
-  transfers.forEach(t => {
-    const pks = t.pkSheets || (t.pkSheet ? [t.pkSheet] : []);
-    const hcs = t.hardCopies || (t.hardCopy ? [t.hardCopy] : []);
-    const meta = `${t.originLocation} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`;
-    const stampCommon = { transferId: t.id, patientName: t.patientName, transferMeta: meta };
-    pks.forEach((f, idx) => docs.push({ ...stampCommon, title: `PK Transfer Sheet${pks.length>1?' '+(idx+1):''}`, name: f.name, type: f.type, dataUrl: f.dataUrl }));
-    hcs.forEach((f, idx) => docs.push({ ...stampCommon, title: `Hard Copy${hcs.length>1?' '+(idx+1):''}`, name: f.name, type: f.type, dataUrl: f.dataUrl }));
-    if (pks.length === 0 && hcs.length === 0) {
-      docs.push({ ...stampCommon, title: '(no documents attached)', name: '', type: '', dataUrl: null });
-    }
-  });
+  const docs = transfers.flatMap(getPrintableDocsForTransfer);
   printDocs(docs);
   // Auto-advance status
   let advanced = 0;
@@ -2182,7 +2249,10 @@ function renderModal() {
           <button class="btn btn-secondary btn-sm" style="margin-top:10px" id="editShipBtn">Edit ship / tracking</button>
           </div>
 
-          <div class="section"><div class="section-title">Attached Documents ${(t.pageImages && t.pageImages.length) ? `<button class="btn btn-secondary btn-sm" id="viewBulkPages" style="margin-left:10px">📄 View ${t.pageImages.length} attached page${t.pageImages.length>1?'s':''}</button>` : ''}</div>
+          <div class="section"><div class="section-title">Attached Documents
+            <button class="btn btn-primary btn-sm" id="printAttachmentsBtn" style="margin-left:10px">🖨 Print all attached documents</button>
+            ${(t.pageImages && t.pageImages.length) ? `<button class="btn btn-secondary btn-sm" id="viewBulkPages" style="margin-left:6px">📄 View ${t.pageImages.length} attached page${t.pageImages.length>1?'s':''}</button>` : ''}
+          </div>
           <div style="font-size:13px;line-height:1.9">
             <div><strong>PK Transfer Sheet${(t.pkSheets&&t.pkSheets.length>1)?'s':''}:</strong> ${docList(t.pkSheets || (t.pkSheet?[t.pkSheet]:[]))}</div>
             <div><strong>Hard Copy Scan${(t.hardCopies&&t.hardCopies.length>1)?'s':''}:</strong> ${docList(t.hardCopies || (t.hardCopy?[t.hardCopy]:[]))}</div>
@@ -2254,6 +2324,8 @@ function renderModal() {
   document.getElementById('askQBtn').addEventListener('click', () => openAskQuestionModal(t.id));
   const viewBulkBtn = document.getElementById('viewBulkPages');
   if (viewBulkBtn) viewBulkBtn.addEventListener('click', () => openPageViewer({ sourceFile: t.patientName + ' — attached pages', pageImages: t.pageImages || [] }));
+  const printAttachBtn = document.getElementById('printAttachmentsBtn');
+  if (printAttachBtn) printAttachBtn.addEventListener('click', () => printDocs(getPrintableDocsForTransfer(t)));
   document.getElementById('editTransferBtn').addEventListener('click', () => {
     // Deep-clone the transfer into the draft so user can cancel without affecting the original
     state.draft = JSON.parse(JSON.stringify(t));
