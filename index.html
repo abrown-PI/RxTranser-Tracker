@@ -1238,7 +1238,7 @@ function openQuestionsForUser() {
   visibleTransfers().forEach(t => {
     if (!t.comments || !t.comments.length) return;
     const last = t.comments[t.comments.length - 1];
-    if (!last.isQuestion) return;
+    if (!last.isQuestion || last.resolved) return;
     // Determine if it's "ours to answer": current user is at one of the transfer's locations and NOT the asker
     const userLoc = CURRENT_USER.location;
     const involvedLocs = [t.originLocation, t.fillLocation].filter(Boolean);
@@ -1276,7 +1276,10 @@ function renderSLA() {
           <td>${escapeHtml(q.author)}</td>
           <td>${new Date(q.ts).toLocaleString()}</td>
           <td>${escapeHtml((q.body||'').replace(/^❓\s*/,'').slice(0,120))}${(q.body||'').length>120?'…':''}</td>
-          <td><button class="btn btn-primary btn-sm" data-answer="${t.id}">Answer →</button></td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-secondary btn-sm" data-resolve="${t.id}" data-cid="${q.id}" title="Dismiss without replying (use when resolved in person / Teams chat)">✓ Resolved</button>
+            <button class="btn btn-primary btn-sm" data-answer="${t.id}">Answer →</button>
+          </td>
         </tr>`).join('')}
       </tbody></table>`}
     </div></div>
@@ -1288,7 +1291,10 @@ function renderSLA() {
           <td>${escapeHtml([t.originLocation, t.fillLocation].filter(l => l && l !== CURRENT_USER.location).join(', '))}</td>
           <td>${new Date(q.ts).toLocaleString()}</td>
           <td>${escapeHtml((q.body||'').replace(/^❓\s*/,'').slice(0,120))}${(q.body||'').length>120?'…':''}</td>
-          <td><button class="btn btn-secondary btn-sm" data-answer="${t.id}">View</button></td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-secondary btn-sm" data-resolve="${t.id}" data-cid="${q.id}" title="Mark resolved (got answer outside the app)">✓ Resolved</button>
+            <button class="btn btn-secondary btn-sm" data-answer="${t.id}">View</button>
+          </td>
         </tr>`).join('')}
       </tbody></table>
     </div></div>` : ''}
@@ -1319,6 +1325,21 @@ function renderSLA() {
   root.querySelectorAll('[data-answer]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     openTransfer(+b.dataset.answer);
+  });
+  root.querySelectorAll('[data-resolve]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const tid = +b.dataset.resolve;
+    const cid = +b.dataset.cid;
+    const t = TRANSFERS.find(x => x.id === tid);
+    if (!t) return;
+    const c = (t.comments||[]).find(x => x.id === cid);
+    if (!c) return;
+    c.resolved = true;
+    c.resolvedBy = CURRENT_USER.name;
+    c.resolvedAt = new Date().toISOString();
+    apiUpdateTransfer(t);
+    renderSLA();
+    render();
   });
 }
 
@@ -2510,15 +2531,36 @@ function renderComments(t) {
   if (!t.comments.length) { wrap.innerHTML = '<div class="item-sub" style="padding:10px">No messages yet.</div>'; return; }
   wrap.innerHTML = t.comments.map(c => {
     const item = c.itemId ? t.items.find(i => i.id === c.itemId) : null;
+    const isOpenQuestion = c.isQuestion && !c.resolved;
+    const resolvedBadge = c.isQuestion && c.resolved
+      ? `<span class="badge badge-verified" style="font-size:10px">✓ Resolved${c.resolvedBy?` by ${escapeHtml(c.resolvedBy)}`:''}</span>`
+      : '';
+    const resolveBtn = isOpenQuestion
+      ? `<button class="btn btn-secondary btn-sm" data-resolve-comment="${c.id}" style="font-size:11px;padding:2px 8px;margin-left:6px" title="Mark resolved without replying">✓ Mark resolved</button>`
+      : '';
     return `<div class="comment">
       <div class="comment-meta">
         <span class="comment-author">${escapeHtml(c.author)}</span>
         <span>${new Date(c.ts).toLocaleString()}</span>
         ${item?`<span class="comment-scope">${escapeHtml(item.drug||'Rx '+item.id)}</span>`:''}
+        ${resolvedBadge}
+        ${resolveBtn}
       </div>
       <div class="comment-body">${escapeHtml(c.body)}</div>
     </div>`;
   }).join('');
+  // Wire up the inline resolve buttons in the comment list
+  wrap.querySelectorAll('[data-resolve-comment]').forEach(b => b.onclick = () => {
+    const cid = +b.dataset.resolveComment;
+    const c = (t.comments||[]).find(x => x.id === cid);
+    if (!c) return;
+    c.resolved = true;
+    c.resolvedBy = CURRENT_USER.name;
+    c.resolvedAt = new Date().toISOString();
+    apiUpdateTransfer(t);
+    renderComments(t);
+    updateSLABadge();
+  });
 }
 
 function editShip(t) {
