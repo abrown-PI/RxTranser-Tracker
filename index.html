@@ -750,36 +750,35 @@ function printDocs(items) {
     'body { margin: 0; font-family: Arial, sans-serif; color: #111; }',
     '.doc { page-break-after: always; }',
     '.doc:last-child { page-break-after: auto; }',
-    '.stamp { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #fff3a8; border: 2px solid #233f76; border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; font-size: 13px; }',
-    '.stamp .ref-label { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: #555; font-weight: 600; }',
-    '.stamp .ref-id { font-family: "Consolas", monospace; font-size: 22px; font-weight: 700; color: #233f76; letter-spacing: .04em; line-height: 1.1; }',
-    '.stamp .patient { font-weight: 600; }',
-    '.stamp .meta { font-size: 11px; color: #555 }',
-    '.doc-title { font-size: 11px; color: #666; margin: 0 0 6px; }',
+    /* Slim per-doc header strip for attached pages (the full stamp is on the summary sheet only) */
+    '.doc-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-bottom: 2px solid #233f76; padding-bottom: 4px; margin-bottom: 8px; font-size: 11px; color: #233f76; }',
+    '.doc-header .ref { font-family: "Consolas", monospace; font-weight: 700; font-size: 14px; letter-spacing: .04em; }',
+    '.doc-header .title { color: #666 }',
     'img, embed, iframe { max-width: 100%; border: 0; display: block; }',
     '</style></head><body>'].join('');
   const out = [html];
   items.forEach(it => {
     out.push('<div class="doc">');
-    if (it.transferId != null) {
-      out.push(`<div class="stamp">
-        <div>
-          <div class="ref-label">WorldShip Reference / Transfer ID</div>
-          <div class="ref-id">${escapeHtml(String(it.transferId))}</div>
-        </div>
-        <div style="text-align:right">
-          ${it.patientName ? `<div class="patient">${escapeHtml(it.patientName)}</div>` : ''}
-          ${it.transferMeta ? `<div class="meta">${escapeHtml(it.transferMeta)}</div>` : ''}
-        </div>
-      </div>`);
-    }
-    out.push(`<div class="doc-title">${escapeHtml(it.title)}</div>`);
-    if (!it.dataUrl) {
-      out.push(`<div style="color:#999;font-size:12px">[ No preview available — ${escapeHtml(it.name||'document')} was not stored with data ]</div>`);
-    } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
-      out.push(`<img src="${it.dataUrl}" onerror="this.outerHTML='<div style=&quot;border:2px dashed #c00;padding:14px;color:#c00;font-size:12px&quot;>⚠ Image could not be loaded — the stored file is missing or unreadable. URL: <code style=&quot;font-family:monospace&quot;>${escapeHtml(it.dataUrl)}</code></div>'" />`);
+    if (it.summaryHtml) {
+      // Cover-page summary: render its own HTML body, no separate stamp header needed
+      out.push(it.summaryHtml);
     } else {
-      out.push(`<embed src="${it.dataUrl}" type="application/pdf" style="width:100%;height:90vh" />`);
+      // Attached document: slim single-line header + the file
+      if (it.transferId != null) {
+        out.push(`<div class="doc-header">
+          <div><span class="ref">${escapeHtml(String(it.transferId))}</span> · ${escapeHtml(it.patientName||'')}${it.transferMeta?' · '+escapeHtml(it.transferMeta):''}</div>
+          <div class="title">${escapeHtml(it.title||'')}</div>
+        </div>`);
+      } else {
+        out.push(`<div class="doc-header"><div></div><div class="title">${escapeHtml(it.title||'')}</div></div>`);
+      }
+      if (!it.dataUrl) {
+        out.push(`<div style="color:#999;font-size:12px">[ No preview available — ${escapeHtml(it.name||'document')} was not stored with data ]</div>`);
+      } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
+        out.push(`<img src="${it.dataUrl}" onerror="this.outerHTML='<div style=&quot;border:2px dashed #c00;padding:14px;color:#c00;font-size:12px&quot;>⚠ Image could not be loaded — the stored file is missing or unreadable. URL: <code style=&quot;font-family:monospace&quot;>${escapeHtml(it.dataUrl)}</code></div>'" />`);
+      } else {
+        out.push(`<embed src="${it.dataUrl}" type="application/pdf" style="width:100%;height:90vh" />`);
+      }
     }
     out.push('</div>');
   });
@@ -954,6 +953,115 @@ function renderTransfers() {
   if (psbtn) psbtn.onclick = () => batchPrintTransfers([...state.printSelection]);
 }
 
+// Build the cover-page summary HTML for a transfer. Prints as the first page when the
+// user clicks "Print all attached documents" or batch-prints from the All Transfers tab.
+// Carries everything the receiving pharmacy might need to reference if the attached
+// scans are misplaced or hard to read — patient info, drugs, addresses, billing, notes.
+function buildSummarySheetHtml(t) {
+  const billing = `${escapeHtml(billingLabel(t.billing))}${t.ccOnFileInPaladin?' (CC on file)':''}`;
+  const addrLines = [t.shipAddr1, t.shipAddr2, t.shipCity ? `${t.shipCity}, ${t.shipState||''} ${t.shipZip||''}` : null].filter(Boolean);
+  const itemRows = (t.items||[]).map(i => `<tr>
+    <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">${escapeHtml(i.drug||'—')}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">${escapeHtml(i.qty||'—')}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-family:monospace">${escapeHtml(i.rxNumber||'—')}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-family:monospace">${escapeHtml(i.receivingRxNumber||'—')}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">${escapeHtml(i.doctorName||'—')}</td>
+  </tr>`).join('');
+  const priorBlock = t.legacyRefill ? `
+    <div class="summary-section">
+      <h3>Prior Transfer Info <span style="font-size:11px;color:#666;font-weight:400">(original not in app)</span></h3>
+      <div class="kv">
+        <div><strong>Prior pharmacy:</strong> ${escapeHtml(t.priorPharmacy||'—')}</div>
+        <div><strong>Prior Rx #:</strong> ${escapeHtml(t.priorRxNumber||'—')}</div>
+        <div><strong>Prior date:</strong> ${t.priorTransferDate?fmtDate(t.priorTransferDate):'—'}</div>
+      </div>
+      ${t.priorTransferNote?`<div style="margin-top:6px;font-size:12px"><strong>Notes:</strong> ${escapeHtml(t.priorTransferNote)}</div>`:''}
+    </div>` : '';
+  const notesBlock = t.transferNotes ? `
+    <div class="summary-section">
+      <h3>Transfer Notes</h3>
+      <div style="font-size:12px;background:#fffbeb;border-left:4px solid #d97706;padding:8px 12px;border-radius:4px;white-space:pre-wrap">${escapeHtml(t.transferNotes)}</div>
+    </div>` : '';
+  return `<style>
+    .summary-stamp { display:flex;justify-content:space-between;align-items:center;background:#fff3a8;border:2px solid #233f76;border-radius:6px;padding:14px 18px;margin-bottom:18px }
+    .summary-stamp .ref-id { font-family:'Consolas',monospace;font-size:28px;font-weight:700;color:#233f76;letter-spacing:.04em;line-height:1.1 }
+    .summary-stamp .ref-label { font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#555;font-weight:600 }
+    .summary-stamp .patient { font-weight:700;font-size:16px;color:#0f172a }
+    .summary-stamp .meta { font-size:12px;color:#555;margin-top:2px }
+    .summary-title { font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#666;font-weight:600;margin:0 0 10px;text-align:center;border-bottom:1px solid #e2e8f0;padding-bottom:6px }
+    .summary-section { margin:14px 0;page-break-inside:avoid }
+    .summary-section h3 { color:#233f76;font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px;border-bottom:1px solid #cfdbed;padding-bottom:3px }
+    .kv { display:grid;grid-template-columns:repeat(2,1fr);gap:4px 24px;font-size:12px;line-height:1.6 }
+    .kv > div { padding:2px 0 }
+    .badge-pill { display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em }
+    .rx-table { width:100%;border-collapse:collapse;font-size:12px;margin-top:4px }
+    .rx-table thead th { background:#233f76;color:white;padding:6px 8px;text-align:left;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.04em }
+  </style>
+  <div class="summary-stamp">
+    <div>
+      <div class="ref-label">WorldShip Reference / Transfer ID</div>
+      <div class="ref-id">${escapeHtml(String(t.id))}</div>
+    </div>
+    <div style="text-align:right">
+      <div class="patient">${escapeHtml(t.patientName||'(unnamed)')}</div>
+      <div class="meta">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)} · <span class="badge-pill" style="background:#cfdbed;color:#233f76">${escapeHtml(t.transferType==='Refill'?'Refill':'New Rx')}</span>${t.coldItem?' · <span class="badge-pill" style="background:#dbeafe;color:#1e40af">Cold</span>':''}</div>
+      <div class="meta">Submitted ${fmtDate(t.createdAt)} by ${escapeHtml(t.submittedBy||'—')}</div>
+    </div>
+  </div>
+
+  <div class="summary-title">Transfer Summary Sheet</div>
+
+  <div class="summary-section">
+    <h3>Patient</h3>
+    <div class="kv">
+      <div><strong>Name:</strong> ${escapeHtml(t.patientName||'—')}</div>
+      <div><strong>DOB:</strong> ${fmtDate(t.patientDOB)||'—'}</div>
+      <div style="grid-column:1/-1"><strong>Allergies:</strong> ${escapeHtml(t.patientAllergies||'NKA')}</div>
+    </div>
+  </div>
+
+  <div class="summary-section">
+    <h3>Routing &amp; Status</h3>
+    <div class="kv">
+      <div><strong>Origin:</strong> ${escapeHtml(t.originLocation)}</div>
+      <div><strong>Fill:</strong> ${escapeHtml(t.fillLocation)}</div>
+      <div><strong>Status:</strong> ${escapeHtml(t.status||'—')}</div>
+      <div><strong>Anticipated ship:</strong> ${fmtDate(t.anticipatedShipDate)||'—'}</div>
+    </div>
+  </div>
+
+  <div class="summary-section">
+    <h3>Shipping</h3>
+    <div class="kv">
+      <div><strong>Ship to:</strong> ${escapeHtml(t.shipTo||'—')}</div>
+      <div><strong>Tracking:</strong> ${escapeHtml(t.trackingNumber||'—')}</div>
+    </div>
+    ${addrLines.length?`<div style="font-size:12px;margin-top:4px"><strong>Address:</strong><br>${addrLines.map(escapeHtml).join('<br>')}</div>`:''}
+  </div>
+
+  <div class="summary-section">
+    <h3>Billing</h3>
+    <div class="kv">
+      <div><strong>Method:</strong> ${billing}</div>
+      <div><strong>Paid:</strong> ${escapeHtml(t.paid||'Pending')}</div>
+      ${t.patientPrice?`<div><strong>Patient Price:</strong> $${escapeHtml(t.patientPrice)}</div>`:''}
+    </div>
+  </div>
+
+  <div class="summary-section">
+    <h3>Prescriptions (${(t.items||[]).length})</h3>
+    <table class="rx-table">
+      <thead><tr><th>Drug</th><th style="width:60px">Qty</th><th style="width:90px">Origin Rx</th><th style="width:90px">Receiving Rx</th><th>Doctor</th></tr></thead>
+      <tbody>${itemRows || `<tr><td colspan="5" style="padding:8px;color:#999;font-style:italic">(no items)</td></tr>`}</tbody>
+    </table>
+  </div>
+
+  ${priorBlock}
+  ${notesBlock}
+
+  <div style="margin-top:20px;font-size:10px;color:#94a3b8;text-align:center">PI Transfer Tracker · Reference ${escapeHtml(String(t.id))} · Printed ${escapeHtml(new Date().toLocaleString())}</div>`;
+}
+
 // Collect every printable document attached to a transfer. Handles three storage paths:
 //  (1) entries with an inline dataUrl (single-upload form)
 //  (2) entries with a blobName reference (server-stored)
@@ -964,6 +1072,8 @@ function getPrintableDocsForTransfer(t) {
   const meta = `${t.originLocation} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`;
   const stampCommon = { transferId: t.id, patientName: t.patientName, transferMeta: meta };
   const docs = [];
+  // Cover page: always print first
+  docs.push({ summaryHtml: buildSummarySheetHtml(t), transferId: t.id, patientName: t.patientName, transferMeta: meta, title: 'Transfer Summary' });
   const resolveSrc = (f) => f.dataUrl || (f.blobName ? blobUrl(f.blobName) : null);
 
   const pks = t.pkSheets || (t.pkSheet ? [t.pkSheet] : []);
@@ -1722,6 +1832,7 @@ function renderNewForm() {
           <div class="hint" id="f-ccForm-name">${d.ccForm?escapeHtml(d.ccForm.name):'Upload the patient-signed authorization form. Billing team will retrieve this from the app.'}</div>
         </div>
         <div class="form-group"><label>Anticipated Ship Date</label><input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" /></div>
+        <div class="form-group"><label>Patient Price <span class="hint" style="text-transform:none;font-weight:400">(optional)</span></label><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--gray-500)">$</span><input id="f-patientPrice" value="${escapeHtml(d.patientPrice||'')}" placeholder="0.00" inputmode="decimal" style="flex:1" /></div></div>
       </div></div>
 
       <div class="section"><div class="section-title">Documents</div>
@@ -1933,7 +2044,7 @@ function freshDraft() {
     originLocation: CURRENT_USER.location, fillLocation: 'Erie',
     shipTo: 'Pharmacy', deliveryCharge: '',
     shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
-    billing: 'HealNow', ccOnFileInPaladin: false, ccForm: null,
+    billing: 'HealNow', ccOnFileInPaladin: false, ccForm: null, patientPrice: '',
     coldItem: false,
     anticipatedShipDate: '',
     pkSheets: [], formula: null, hardCopies: [],
@@ -1960,6 +2071,7 @@ function draftFromRefill(source) {
     billing: source.billing,
     ccOnFileInPaladin: !!source.ccOnFileInPaladin,
     ccForm: null,
+    patientPrice: source.patientPrice || '',
     coldItem: !!source.coldItem,
     anticipatedShipDate: '',
     // Carry over docs from the source transfer — same prescription, same paperwork.
@@ -2013,7 +2125,7 @@ function renderDraftItems() {
 }
 
 function bindDraftInputs() {
-  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote'];
+  const fields = ['patientName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote','patientPrice'];
   fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => state.draft[f] = el.value); });
 
   // Ship-to-Pharmacy auto-fill: when user picks Pharmacy or changes origin, fill ship address from origin pharmacy
@@ -2133,6 +2245,7 @@ function submitDraft() {
       shipTo: d.shipTo, deliveryCharge: d.deliveryCharge,
       shipAddr1: d.shipAddr1, shipAddr2: d.shipAddr2, shipCity: d.shipCity, shipState: d.shipState, shipZip: d.shipZip,
       billing: d.billing, ccOnFileInPaladin: d.ccOnFileInPaladin, ccForm: d.ccForm,
+      patientPrice: d.patientPrice || '',
       coldItem: d.coldItem, anticipatedShipDate: d.anticipatedShipDate,
       pkSheets: d.pkSheets, formula: d.formula, hardCopies: d.hardCopies,
       items: d.items, transferNotes: d.transferNotes,
@@ -2246,7 +2359,7 @@ function renderModal() {
           <div class="section"><div class="section-title">Shipping & Billing</div>
           <div class="form-grid">
             <div><strong>Ship to:</strong> ${escapeHtml(t.shipTo)}${t.deliveryCharge?` ($${t.deliveryCharge})`:''}</div>
-            <div><strong>Billing:</strong> ${escapeHtml(billingLabel(t.billing))}${t.ccOnFileInPaladin?' (CC on file)':''}</div>
+            <div><strong>Billing:</strong> ${escapeHtml(billingLabel(t.billing))}${t.ccOnFileInPaladin?' (CC on file)':''}${t.patientPrice?` · <strong>Patient Price:</strong> $${escapeHtml(t.patientPrice)}`:''}</div>
             <div class="form-group full"><strong>Address:</strong><br>${escapeHtml(t.shipAddr1||'—')}${t.shipAddr2?'<br>'+escapeHtml(t.shipAddr2):''}${t.shipCity?'<br>'+escapeHtml(t.shipCity)+', '+escapeHtml(t.shipState)+' '+escapeHtml(t.shipZip):''}</div>
             <div><strong>Anticipated ship:</strong> ${fmtDate(t.anticipatedShipDate)}</div>
             <div><strong>Shipped:</strong> ${fmtDate(t.dateShipped)}</div>
