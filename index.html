@@ -490,6 +490,27 @@ function docList(files) {
     return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--primary)">${escapeHtml(f.name)}</a>`;
   }).join(', ');
 }
+
+// Smarter doc list for the transfer detail modal: if pkSheets/hardCopies entries are
+// metadata-only (typical for bulk-uploaded transfers), fall back to clickable links to
+// the actual page images blob-stored on the transfer.
+function docListForTransfer(t, kind) {
+  // kind = 'pkSheets' | 'hardCopies'
+  const legacyKey = kind === 'pkSheets' ? 'pkSheet' : 'hardCopy';
+  const files = t[kind] || (t[legacyKey] ? [t[legacyKey]] : []);
+  if (!files.length) return '<span class="item-sub">— none attached</span>';
+  const pageImageKind = kind === 'pkSheets' ? 'transfer' : 'hardcopy';
+  const fallbackPages = (t.pageImages || []).filter(p => p.kind === pageImageKind && p.blobName);
+  return files.map(f => {
+    const url = f.dataUrl || (f.blobName ? blobUrl(f.blobName) : null);
+    if (url) return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--primary)">${escapeHtml(f.name)}</a>`;
+    if (fallbackPages.length) {
+      const links = fallbackPages.map(p => `<a href="${escapeHtml(blobUrl(p.blobName))}" target="_blank" rel="noopener" style="color:var(--primary)">page ${p.pageNum}</a>`).join(' · ');
+      return `<span class="item-sub">${escapeHtml(f.name)}</span> → ${links}`;
+    }
+    return `<span class="item-sub" style="color:var(--gray-500)">${escapeHtml(f.name)} <em>(no data)</em></span>`;
+  }).join(', ');
+}
 // Build a bulk shipment ID like BULK-20260529-CPL-001.
 // Sequence is per-day per-destination to make collisions unlikely without a real DB.
 function generateBulkShipmentId(toLocation, dateISO) {
@@ -623,9 +644,11 @@ function printCCAuthForm(source, opts) {
     ? `<input type="text" class="fill-input" placeholder="${escapeHtml(placeholder)}" />`
     : `<div class="blank"></div>`;
   const html = `<!DOCTYPE html><html><head><title>CC Authorization — ${escapeHtml(name)}</title>
+${fillable ? '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>' : ''}
 <style>
   @page { size: letter; margin: 0.6in; }
-  body { font-family: 'Arial', sans-serif; color: #111; font-size: 13px; line-height: 1.5; }
+  html { background: #f1f5f9 }
+  body { font-family: 'Arial', sans-serif; color: #111; font-size: 13px; line-height: 1.5; max-width: 8.5in; margin: 0 auto; background: white; padding: 18px 32px; box-shadow: 0 2px 12px rgba(0,0,0,.05); }
   .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2a6ebb; padding-bottom: 8px; margin-bottom: 18px; gap: 16px; }
   .header-left { display: flex; align-items: center; gap: 14px; }
   .header-logo { height: 56px; width: auto; }
@@ -643,19 +666,30 @@ function printCCAuthForm(source, opts) {
   .acknowledgment { font-size: 12px; line-height: 1.5; background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 12px; border-radius: 4px; margin: 14px 0; }
   .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #666; text-align: center; }
   .small { font-size: 10px; color: #777; }
-  .toolbar { position: sticky; top: 0; background: #233f76; color: white; padding: 10px 14px; margin: -0.4in -0.4in 18px; display: flex; justify-content: space-between; align-items: center; gap: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-  .toolbar .tb-msg { font-size: 12px; opacity: .9 }
+  .toolbar { position: sticky; top: 0; z-index: 100; background: #233f76; color: white; padding: 10px 14px; margin: -18px -32px 18px; display: flex; justify-content: space-between; align-items: center; gap: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.15); flex-wrap: wrap; }
+  .toolbar .tb-msg { font-size: 12px; opacity: .9; flex: 1; min-width: 240px; }
+  .toolbar .tb-actions { display: flex; gap: 8px; flex-shrink: 0; }
   .toolbar button { background: white; color: #233f76; border: none; padding: 8px 14px; border-radius: 4px; font-weight: 600; font-size: 13px; cursor: pointer; }
-  .toolbar button:hover { background: #f1f5f9 }
+  .toolbar button.primary { background: #16a34a; color: white }
+  .toolbar button:hover { opacity: .9 }
+  .toolbar button:disabled { opacity: .55; cursor: wait }
+  .savedmsg { display: none; background: #16a34a; color: white; padding: 8px 14px; border-radius: 4px; font-size: 13px; margin-bottom: 10px; }
   @media print {
-    .toolbar { display: none !important }
+    html { background: white }
+    body { box-shadow: none; padding: 0; max-width: none }
+    .toolbar, .savedmsg { display: none !important }
     .field .fill-input { background: white !important; border-bottom-color: #999 !important }
   }
 </style></head><body>
 ${fillable ? `<div class="toolbar">
-  <div class="tb-msg">Fill out the card information below. When done, click <strong>Save as PDF</strong> (choose <em>"Save as PDF"</em> as the destination), then upload the saved file to the transfer.</div>
-  <button type="button" onclick="window.print()">🖨 Save as PDF / Print</button>
-</div>` : ''}
+  <div class="tb-msg">Fill out the card information below, then click <strong>Save &amp; Attach to Transfer</strong> to send it back to the app automatically.</div>
+  <div class="tb-actions">
+    <button type="button" id="saveAttachBtn" class="primary">💾 Save &amp; Attach to Transfer</button>
+    <button type="button" onclick="window.print()">🖨 Save as PDF</button>
+  </div>
+</div>
+<div class="savedmsg" id="savedMsg">✓ Saved &amp; attached to transfer. You can close this window now.</div>` : ''}
+<div id="ccDocBody">
 <div class="header">
   <div class="header-left">
     <img src="${logoUrl}" alt="Pharmacy Innovations" class="header-logo" onerror="this.style.display='none'" />
@@ -675,7 +709,6 @@ ${fillable ? `<div class="toolbar">
   <div class="field" style="flex:2"><label>Patient Name</label><div class="filled">${escapeHtml(name || '')}</div></div>
   <div class="field"><label>Date of Birth</label><div class="filled">${escapeHtml(dob || '')}</div></div>
 </div>
-${drugs ? `<div class="row"><div class="field"><label>Prescription(s)</label><div class="filled">${escapeHtml(drugs)}</div></div></div>` : ''}
 
 <h2>Cardholder &amp; Card Information</h2>
 <div class="row">
@@ -696,14 +729,90 @@ ${drugs ? `<div class="row"><div class="field"><label>Prescription(s)</label><di
 </div>
 
 <div class="footer">
-  ${fillable ? 'Click <strong>Save as PDF</strong> at the top, then upload the saved file to this transfer.' : 'Scan and upload this completed form to the transfer in the PI Transfer Tracker — or hand to the billing team.'}
+  ${fillable ? 'Click <strong>Save &amp; Attach to Transfer</strong> above when finished — the filled form is attached automatically.' : 'Scan and upload this completed form to the transfer in the PI Transfer Tracker — or hand to the billing team.'}
   <strong>Do not email or text this form.</strong>
 </div>
+</div><!-- /#ccDocBody -->
+${fillable ? `<script>
+(function(){
+  const btn = document.getElementById('saveAttachBtn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Capturing form…';
+    try {
+      // Inline the typed input values as text so they render in the snapshot
+      document.querySelectorAll('.fill-input').forEach(i => i.setAttribute('value', i.value));
+      const target = document.getElementById('ccDocBody');
+      const canvas = await html2canvas(target, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+      const dataUrl = canvas.toDataURL('image/png');
+      // Send the snapshot back to the opener tab and let it persist
+      if (!window.opener || window.opener.closed) {
+        alert('The portal tab is closed. Cannot attach automatically — please use Save as PDF instead.');
+        btn.disabled = false;
+        btn.textContent = '💾 Save & Attach to Transfer';
+        return;
+      }
+      const ok = await window.opener.attachCCAuthFromFillWindow(${JSON.stringify(String(tid))}, dataUrl);
+      if (ok) {
+        document.getElementById('savedMsg').style.display = 'block';
+        btn.textContent = '✓ Attached';
+        // Clear the card-number / CVV inputs in the source DOM as a precaution before
+        // the user might close or share this window
+        document.querySelectorAll('.fill-input').forEach(i => i.value = '');
+      } else {
+        alert('Could not attach to the transfer. Try Save as PDF and upload manually.');
+        btn.disabled = false;
+        btn.textContent = '💾 Save & Attach to Transfer';
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Capture failed: ' + e.message);
+      btn.disabled = false;
+      btn.textContent = '💾 Save & Attach to Transfer';
+    }
+  });
+})();
+<\/script>` : ''}
 ${(fillable || preview) ? '' : '<script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script>'}
 </body></html>`;
   w.document.write(html);
   w.document.close();
 }
+
+// Called by the CC fill window's "Save & Attach to Transfer" button. Uploads the
+// PNG snapshot to blob storage, then sets t.ccForm on the matching transfer/draft.
+window.attachCCAuthFromFillWindow = async function(targetId, dataUrl) {
+  try {
+    const base64 = dataUrl.split(',')[1];
+    const blobName = await uploadBlob(base64, 'image/png', 'ccauth');
+    if (!blobName) return false;
+    const ccForm = {
+      name: 'CC Auth Form (filled in app).png',
+      type: 'image/png',
+      blobName,
+      size: Math.round(base64.length * 0.75)
+    };
+    // If we have an in-progress draft for this transfer ID, attach there
+    if (state.draft && String(state.draft.id || state.editingTransferId || '') === String(targetId)) {
+      state.draft.ccForm = ccForm;
+      // Update the form UI to reflect attached file
+      const lbl = document.getElementById('f-ccForm-name');
+      if (lbl) lbl.textContent = ccForm.name;
+    }
+    // If the transfer already exists in storage, attach + persist
+    const t = TRANSFERS.find(x => String(x.id) === String(targetId));
+    if (t) {
+      t.ccForm = ccForm;
+      await apiUpdateTransfer(t);
+      if (state.openTransferId === t.id) renderModal();
+    }
+    return true;
+  } catch (e) {
+    console.error('attachCCAuthFromFillWindow failed', e);
+    return false;
+  }
+};
 
 // Open the page images attached to a bulk-upload draft in a modal so the user can
 // visually inspect which pages got assigned to this transfer.
@@ -2162,34 +2271,62 @@ function bindDraftInputs() {
   const fillCCBtn = document.getElementById('f-fillCCForm');
   if (fillCCBtn) fillCCBtn.addEventListener('click', () => printCCAuthForm(state.draft, { mode: 'fill' }));
 
-  const ccForm = document.getElementById('f-ccForm');
-  if (ccForm) ccForm.addEventListener('change', () => {
-    const file = ccForm.files[0];
-    if (!file) { state.draft.ccForm = null; return; }
+  // Helper: read a File into base64 (strips the data: prefix)
+  const readBase64 = (file) => new Promise((resolve, reject) => {
     const rd = new FileReader();
-    rd.onload = ev => {
-      state.draft.ccForm = { name: file.name, size: file.size, type: file.type, dataUrl: ev.target.result };
-      document.getElementById('f-ccForm-name').textContent = `${file.name} (${(file.size/1024).toFixed(0)} KB)`;
-    };
+    rd.onload = () => resolve((rd.result || '').split(',')[1] || '');
+    rd.onerror = () => reject(new Error('Read failed'));
     rd.readAsDataURL(file);
   });
 
-  // Multi-file uploads: PK sheets and hard copies
-  [['pkSheet','pkSheets'],['hardCopy','hardCopies']].forEach(([elId,key]) => {
+  const ccForm = document.getElementById('f-ccForm');
+  if (ccForm) ccForm.addEventListener('change', async () => {
+    const file = ccForm.files[0];
+    const lbl = document.getElementById('f-ccForm-name');
+    if (!file) { state.draft.ccForm = null; if (lbl) lbl.textContent = ''; return; }
+    if (lbl) lbl.textContent = `Uploading ${file.name}…`;
+    try {
+      const base64 = await readBase64(file);
+      const blobName = await uploadBlob(base64, file.type || 'application/octet-stream', 'ccauth');
+      state.draft.ccForm = {
+        name: file.name, size: file.size, type: file.type,
+        blobName: blobName || null
+      };
+      if (lbl) lbl.textContent = `${file.name} (${(file.size/1024).toFixed(0)} KB)`;
+    } catch (e) {
+      console.error('CC form upload failed', e);
+      if (lbl) lbl.textContent = `Upload failed: ${e.message}`;
+    }
+  });
+
+  // Multi-file uploads: PK sheets and hard copies — upload to blob storage so the
+  // documents are actually retrievable and previewable later.
+  [['pkSheet','pkSheets','pksheets'],['hardCopy','hardCopies','hardcopies']].forEach(([elId,key,prefix]) => {
     const el = document.getElementById('f-'+elId);
     if (!el) return;
     el.addEventListener('change', async () => {
       const rawFiles = [...el.files];
-      const files = rawFiles.map(f => ({ name: f.name, size: f.size, type: f.type }));
-      state.draft[key] = files;
       const lbl = document.getElementById('f-'+elId+'-name');
-      if (lbl) lbl.textContent = files.length ? files.map(f => `${f.name} (${(f.size/1024).toFixed(0)} KB)`).join(', ') : '';
+      if (lbl) lbl.textContent = `Uploading ${rawFiles.length} file(s)…`;
+      const uploaded = [];
+      for (const f of rawFiles) {
+        try {
+          const base64 = await readBase64(f);
+          const blobName = await uploadBlob(base64, f.type || 'application/octet-stream', prefix);
+          uploaded.push({ name: f.name, size: f.size, type: f.type, blobName: blobName || null });
+        } catch (e) {
+          console.warn('Upload failed for', f.name, e);
+          uploaded.push({ name: f.name, size: f.size, type: f.type, blobName: null });
+        }
+      }
+      state.draft[key] = uploaded;
+      if (lbl) lbl.textContent = uploaded.map(f => `${f.name} (${(f.size/1024).toFixed(0)} KB)${f.blobName?'':' ⚠ upload failed'}`).join(', ');
       // PK transfer sheet auto-parse: try each uploaded PDF and apply matched fields to the draft
       if (key === 'pkSheets' && rawFiles.length) {
-        if (lbl) lbl.innerHTML = lbl.textContent + ' <span style="color:var(--primary)">· Reading sheet…</span>';
+        if (lbl) lbl.innerHTML = lbl.innerHTML + ' <span style="color:var(--primary)">· Reading sheet…</span>';
         const applied = await autoFillFromTransferSheets(rawFiles);
         if (lbl) {
-          lbl.textContent = files.map(f => `${f.name} (${(f.size/1024).toFixed(0)} KB)`).join(', ');
+          lbl.textContent = uploaded.map(f => `${f.name} (${(f.size/1024).toFixed(0)} KB)${f.blobName?'':' ⚠ upload failed'}`).join(', ');
           if (applied.count > 0) lbl.innerHTML += ` <span style="color:var(--success)">· ✓ Auto-filled ${applied.count} field${applied.count>1?'s':''} from ${applied.parsedFiles} sheet${applied.parsedFiles>1?'s':''}</span>`;
           else lbl.innerHTML += ' <span style="color:var(--gray-500)">· Could not auto-fill (image PDF or unrecognized layout — enter manually)</span>';
         }
@@ -2382,8 +2519,8 @@ function renderModal() {
             ${(t.pageImages && t.pageImages.length) ? `<button class="btn btn-secondary btn-sm" id="viewBulkPages" style="margin-left:6px">📄 View ${t.pageImages.length} attached page${t.pageImages.length>1?'s':''}</button>` : ''}
           </div>
           <div style="font-size:13px;line-height:1.9">
-            <div><strong>PK Transfer Sheet${(t.pkSheets&&t.pkSheets.length>1)?'s':''}:</strong> ${docList(t.pkSheets || (t.pkSheet?[t.pkSheet]:[]))}</div>
-            <div><strong>Hard Copy Scan${(t.hardCopies&&t.hardCopies.length>1)?'s':''}:</strong> ${docList(t.hardCopies || (t.hardCopy?[t.hardCopy]:[]))}</div>
+            <div><strong>PK Transfer Sheet${(t.pkSheets&&t.pkSheets.length>1)?'s':''}:</strong> ${docListForTransfer(t,'pkSheets')}</div>
+            <div><strong>Hard Copy Scan${(t.hardCopies&&t.hardCopies.length>1)?'s':''}:</strong> ${docListForTransfer(t,'hardCopies')}</div>
             <div><strong>Formula Worksheet:</strong> ${t.formula?(t.formula.fromLibrary?`<a href="${escapeHtml(t.formula.link||'#')}" target="_blank" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a> <span class="item-sub">(from ${escapeHtml(t.originLocation)} library)</span>`:`<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(t.formula.name)}</a>`):'<span class="item-sub">— (not needed)</span>'}</div>
             ${t.billing==='CreditCard'?`<div><strong>Credit Card Auth Form:</strong> ${t.ccForm?`<a href="#" data-cc="${t.id}" style="color:var(--primary)">${escapeHtml(t.ccForm.name)}</a> <button class="btn btn-secondary btn-sm" data-cc-print="${t.id}" style="margin-left:6px">View / Print Signed Form</button>`:(t.ccOnFileInPaladin?'<span class="item-sub">On file</span>':'<span style="color:var(--danger)">Missing</span>')} <button class="btn btn-secondary btn-sm" id="modal-printCCBlank" style="margin-left:6px">🖨 Print blank form</button></div>`:''}
             ${(t.status==='Canceled' && !t.cancelAcknowledged)?`<div style="margin-top:10px;padding:10px 12px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:6px"><strong style="color:var(--danger)">⚠ This transfer was canceled and has not been acknowledged.</strong> Go to <em>Action Items</em> to acknowledge before this transfer can be shipped.</div>`:''}
