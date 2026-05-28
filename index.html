@@ -4468,12 +4468,22 @@ function openAskQuestionModal(transferId) {
     const result = await notifyTeamsAboutQuestion(t, body);
     if (result.sent && result.sent.length) {
       resEl.innerHTML = `<div style="background:var(--success-bg);border:1px solid var(--success);padding:8px 12px;border-radius:6px;font-size:12px"><strong style="color:var(--success)">✓ Sent to:</strong> ${result.sent.map(escapeHtml).join(', ')}${result.skipped&&result.skipped.length?` <span class="item-sub">(skipped: ${result.skipped.join(', ')} — no webhook configured)</span>`:''}</div>`;
+      setTimeout(close, 2000);
+    } else if (result.failed && result.failed.length) {
+      // Teams rejected the request — keep the modal open so we can see the error details
+      const lines = result.failed.map(f => `<li><strong>${escapeHtml(f.location || '?')}:</strong> ${escapeHtml(f.error || 'unknown error')}</li>`).join('');
+      resEl.innerHTML = `<div style="background:var(--danger-bg);border:1px solid var(--danger);padding:10px 12px;border-radius:6px;font-size:12px">
+        <strong style="color:var(--danger)">⚠ Teams rejected the notification.</strong>
+        <ul style="margin:6px 0 0;padding-left:18px">${lines}</ul>
+        <div style="margin-top:8px">The question was still saved to the transfer's discussion.</div>
+      </div>`;
     } else if (result.skipped && result.skipped.length) {
       resEl.innerHTML = `<div style="background:var(--warning-bg);border:1px solid var(--warning);padding:8px 12px;border-radius:6px;font-size:12px">Question saved to the transfer's discussion, but no Teams webhook configured for ${result.skipped.join(', ')}. Set up in Admin → Teams Webhooks.</div>`;
+      setTimeout(close, 2000);
     } else {
       resEl.innerHTML = '<div class="item-sub">Question saved. (No Teams notification sent.)</div>';
+      setTimeout(close, 2000);
     }
-    setTimeout(close, 2000);
     render();
   };
 }

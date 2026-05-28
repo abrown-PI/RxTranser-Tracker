@@ -25,36 +25,13 @@ async function loadWebhooks() {
   }
 }
 
-// Build a dual-format Teams payload: an Adaptive Card (rendered in channels via Power Automate
-// channel templates) AND plain text fields (used by chat flows). Power Automate flows can
-// map whichever field they want — `text` for chat messages, `attachments` for channel cards.
-function buildCard({ patientName, drug, askedBy, question, transferId, portalUrl, askedLocation }) {
+// Build a Teams Adaptive Card payload in the exact format Power Automate's
+// "Send webhook alerts to a chat" + "Post in a channel" templates expect.
+// Both templates validate against a schema that only allows `type` + `attachments`,
+// so we keep the payload minimal (no extra convenience fields).
+function buildCard({ patientName, drug, askedBy, question, portalUrl, askedLocation }) {
   const fromLine = `From ${askedBy || 'team member'}${askedLocation ? ' (' + askedLocation + ')' : ''}`;
-  const drugLine = drug ? `Drug: ${drug}` : '';
-  // Plain text version — readable in chats, with markdown-style formatting that Teams renders
-  const textLines = [
-    `**❓ Question on transfer: ${patientName || '(unnamed)'}**`,
-    fromLine,
-    drugLine,
-    '',
-    question || '(no question text)',
-    '',
-    portalUrl ? `[View Transfer in Portal](${portalUrl})` : ''
-  ].filter(Boolean);
-  const text = textLines.join('\n');
-
   return {
-    // Used by chat-format flows (just .text)
-    text,
-    // Convenience fields chat flows can map individually
-    patientName: patientName || '',
-    askedBy: askedBy || '',
-    askedLocation: askedLocation || '',
-    drug: drug || '',
-    question: question || '',
-    portalUrl: portalUrl || '',
-    transferId: transferId || '',
-    // Used by channel-format flows (adaptive card attachment)
     type: 'message',
     attachments: [{
       contentType: 'application/vnd.microsoft.card.adaptive',
