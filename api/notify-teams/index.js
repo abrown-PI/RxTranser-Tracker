@@ -59,12 +59,21 @@ function buildCard({ patientName, drug, askedBy, question, portalUrl, askedLocat
 async function postToTeams(url, payload) {
   const resp = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Accept': 'application/json',
+      'User-Agent': 'PI-Transfer-Tracker/1.0'
+    },
     body: JSON.stringify(payload)
   });
   if (!resp.ok) {
     const txt = await resp.text();
-    throw new Error(`Teams webhook ${resp.status}: ${txt.slice(0, 200)}`);
+    // Capture useful response headers so we can see what's going on
+    const allow = resp.headers.get('allow') || resp.headers.get('Allow') || '';
+    const ct = resp.headers.get('content-type') || '';
+    const detail = txt ? txt.slice(0, 300) : '(empty body)';
+    const hdrs = allow ? ` [allow=${allow}]` : '';
+    throw new Error(`${resp.status} ${resp.statusText || ''}${hdrs} ${ct?'('+ct+')':''} — ${detail}`);
   }
 }
 
