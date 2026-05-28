@@ -977,7 +977,7 @@ function renderTransfers() {
       <thead><tr>
         <th style="width:30px"></th>
         <th>ID</th><th>Patient</th><th>From → Fill</th><th>Ship To</th><th>Items</th><th>Status</th><th>SLA</th>
-        <th>Transfer Date</th><th>Ship Date</th><th>Tracking</th><th>Submitted</th>
+        <th>Transfer Date</th><th>Ship Date</th><th>Tracking</th><th>Submitted</th><th>Actions</th>
       </tr></thead>
       <tbody>
         ${filtered.map(t => {
@@ -997,7 +997,13 @@ function renderTransfers() {
             <td>${fmtDate(t.createdAt)}</td>
             <td>${fmtDate(t.dateShipped)}</td>
             <td>${escapeHtml(t.trackingNumber||'—')}</td>
-            <td>${escapeHtml(t.submittedBy)}<div style="margin-top:4px"><a href="#" data-ask="${t.id}" style="font-size:11px;color:var(--primary);text-decoration:none">❓ Ask question</a></div></td>
+            <td>${escapeHtml(t.submittedBy)}</td>
+            <td onclick="event.stopPropagation()" style="white-space:nowrap">
+              <button class="btn btn-secondary btn-sm" data-view-tx="${t.id}" title="View transfer details" style="padding:3px 7px;font-size:11px">👁 View</button>
+              <button class="btn btn-secondary btn-sm" data-edit-tx="${t.id}" title="Edit transfer" style="padding:3px 7px;font-size:11px">✏️ Edit</button>
+              <button class="btn btn-primary btn-sm" data-rcvrx-tx="${t.id}" title="Enter Receiving Rx #" style="padding:3px 7px;font-size:11px">💊 Rx #</button>
+              <button class="btn btn-secondary btn-sm" data-ask="${t.id}" title="Ask a question on this transfer" style="padding:3px 7px;font-size:11px">❓ Ask</button>
+            </td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -1020,6 +1026,18 @@ function renderTransfers() {
   root.querySelectorAll('[data-ask]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault(); e.stopPropagation();
     openAskQuestionModal(+a.dataset.ask);
+  }));
+  root.querySelectorAll('[data-view-tx]').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    openTransfer(+b.dataset.viewTx);
+  }));
+  root.querySelectorAll('[data-edit-tx]').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    editTransferDirectly(+b.dataset.editTx);
+  }));
+  root.querySelectorAll('[data-rcvrx-tx]').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    openReceivingRxModal(+b.dataset.rcvrxTx);
   }));
   // Inline status change from the Transfers table — no need to open the detail modal
   root.querySelectorAll('[data-status-id]').forEach(sel => sel.addEventListener('change', e => {
@@ -2431,6 +2449,88 @@ function submitDraft() {
 // Transfer detail modal
 // =====================================================================
 function openTransfer(id) { state.openTransferId = id; renderModal(); }
+
+// Jump straight into editing a transfer without first opening the detail modal.
+// Loads a deep clone of the transfer into the draft, sets editingTransferId,
+// and switches to the New Transfer tab (which doubles as the Edit form).
+function editTransferDirectly(id) {
+  const t = TRANSFERS.find(x => x.id === id);
+  if (!t) return;
+  state.draft = JSON.parse(JSON.stringify(t));
+  state.editingTransferId = t.id;
+  closeModal();
+  document.querySelector('.tab[data-tab=new]').click();
+}
+
+// Quick popup for entering the Receiving Rx number(s). For single-Rx transfers it
+// shows one focused input. For multi-Rx, one input per Rx (with drug names so the
+// user knows which is which). Saves all at once.
+function openReceivingRxModal(id) {
+  const t = TRANSFERS.find(x => x.id === id);
+  if (!t) return;
+  // Only fill location (or admin) is supposed to set receiving Rx numbers
+  if (CURRENT_USER.role !== 'admin' && CURRENT_USER.location !== t.fillLocation) {
+    alert(`Only the fill location (${t.fillLocation}) or an admin can enter Receiving Rx numbers.`);
+    return;
+  }
+  const root = document.getElementById('modalRoot');
+  const items = t.items || [];
+  const isSingle = items.length === 1;
+  const rows = items.map((i, idx) => `
+    <div style="display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px;background:var(--gray-50)">
+      <div style="flex:1;font-size:13px">
+        <strong>${escapeHtml(i.drug||'(no drug name)')}</strong>
+        <div class="item-sub">${i.qty?escapeHtml(i.qty)+' · ':''}Origin Rx ${escapeHtml(i.rxNumber||'—')}</div>
+      </div>
+      <input
+        type="text"
+        data-rcvrx-input="${i.id}"
+        value="${escapeHtml(i.receivingRxNumber||'')}"
+        placeholder="Receiving Rx #"
+        style="width:160px;padding:8px 10px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:14px"
+        ${isSingle && idx===0 ? 'autofocus' : ''}
+      />
+    </div>
+  `).join('');
+  root.innerHTML = `<div class="modal-overlay" id="rcvOverlay"><div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Enter Receiving Rx Number${isSingle?'':'s'}</div>
+        <div class="item-sub">${escapeHtml(t.patientName)} · Transfer ${t.id}</div>
+      </div>
+      <button class="modal-close" id="rcvClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      ${rows}
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="rcvCancel">Cancel</button>
+      <button class="btn btn-primary" id="rcvSave">Save</button>
+    </div>
+  </div></div>`;
+  const close = () => {
+    root.innerHTML = '';
+    if (state.openTransferId) renderModal();
+  };
+  document.getElementById('rcvClose').onclick = close;
+  document.getElementById('rcvCancel').onclick = close;
+  document.getElementById('rcvOverlay').onclick = e => { if (e.target.id === 'rcvOverlay') close(); };
+  // Focus the first input (autofocus attr is unreliable in dynamic content)
+  const firstInput = root.querySelector('[data-rcvrx-input]');
+  if (firstInput) { firstInput.focus(); firstInput.select(); }
+  // Enter key submits when single Rx
+  if (isSingle && firstInput) firstInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('rcvSave').click(); } });
+  document.getElementById('rcvSave').onclick = () => {
+    root.querySelectorAll('[data-rcvrx-input]').forEach(inp => {
+      const itemId = +inp.dataset.rcvrxInput;
+      const item = items.find(x => x.id === itemId);
+      if (item) item.receivingRxNumber = inp.value.trim();
+    });
+    apiUpdateTransfer(t);
+    close();
+    renderTransfers();
+  };
+}
 function closeModal() { state.openTransferId = null; document.getElementById('modalRoot').innerHTML = ''; }
 
 function renderModal() {
