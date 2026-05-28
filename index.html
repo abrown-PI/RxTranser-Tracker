@@ -484,7 +484,11 @@ function billingLabel(value) {
 }
 function docList(files) {
   if (!files || !files.length) return '<span class="item-sub">— none attached</span>';
-  return files.map(f => `<a href="#" onclick="return false" style="color:var(--primary)">${escapeHtml(f.name)}</a>`).join(', ');
+  return files.map(f => {
+    const url = f.dataUrl || (f.blobName ? blobUrl(f.blobName) : null);
+    if (!url) return `<span class="item-sub" style="color:var(--gray-500)" title="No data stored — bulk-uploaded transfers use the View attached pages button">${escapeHtml(f.name)} <em>(no data)</em></span>`;
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--primary)">${escapeHtml(f.name)}</a>`;
+  }).join(', ');
 }
 // Build a bulk shipment ID like BULK-20260529-CPL-001.
 // Sequence is per-day per-destination to make collisions unlikely without a real DB.
@@ -715,7 +719,10 @@ function openPageViewer(bulkDraft) {
     <div class="modal-body" style="background:var(--gray-100)">
       ${pages.map(p => {
         const src = p.dataUrl || (p.blobName ? blobUrl(p.blobName) : '');
-        return `<div style="margin-bottom:18px"><div style="font-weight:600;margin-bottom:6px">Page ${p.pageNum} <span class="badge ${p.kind==='transfer'?'badge-verified':'badge-progress'}" style="font-size:10px">${p.kind==='transfer'?'Transfer Sheet':'Hard Copy'}</span></div>${src?`<img src="${escapeHtml(src)}" alt="Page ${p.pageNum}" style="width:100%;border:1px solid var(--gray-300);border-radius:4px;background:white" />`:'<div class="item-sub" style="font-style:italic">No image stored</div>'}</div>`;
+        const imgHtml = src
+          ? `<img src="${escapeHtml(src)}" alt="Page ${p.pageNum}" style="width:100%;border:1px solid var(--gray-300);border-radius:4px;background:white" onerror="this.outerHTML='<div style=\\'border:2px dashed #c00;padding:14px;color:#c00;font-size:13px;background:white;border-radius:4px\\'>⚠ Image could not be loaded.<br><span style=\\'font-family:monospace;font-size:11px;color:#666\\'>${escapeHtml(src)}</span><br><a href=${escapeHtml(src)} target=_blank style=\\'color:#2a6ebb\\'>Open URL directly →</a></div>'" />`
+          : '<div class="item-sub" style="font-style:italic">No image stored</div>';
+        return `<div style="margin-bottom:18px"><div style="font-weight:600;margin-bottom:6px">Page ${p.pageNum} <span class="badge ${p.kind==='transfer'?'badge-verified':'badge-progress'}" style="font-size:10px">${p.kind==='transfer'?'Transfer Sheet':'Hard Copy'}</span> ${p.blobName?`<a href="${escapeHtml(src)}" target="_blank" style="font-size:11px;color:var(--primary);margin-left:8px">Open in new tab →</a>`:''}</div>${imgHtml}</div>`;
       }).join('')}
     </div>
     <div class="modal-footer"><button class="btn btn-secondary" id="pvCloseBtn">Close</button></div>
@@ -770,7 +777,7 @@ function printDocs(items) {
     if (!it.dataUrl) {
       out.push(`<div style="color:#999;font-size:12px">[ No preview available — ${escapeHtml(it.name||'document')} was not stored with data ]</div>`);
     } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
-      out.push(`<img src="${it.dataUrl}" />`);
+      out.push(`<img src="${it.dataUrl}" onerror="this.outerHTML='<div style=&quot;border:2px dashed #c00;padding:14px;color:#c00;font-size:12px&quot;>⚠ Image could not be loaded — the stored file is missing or unreadable. URL: <code style=&quot;font-family:monospace&quot;>${escapeHtml(it.dataUrl)}</code></div>'" />`);
     } else {
       out.push(`<embed src="${it.dataUrl}" type="application/pdf" style="width:100%;height:90vh" />`);
     }
@@ -2813,7 +2820,7 @@ async function uploadBlob(base64, contentType, prefix) {
 }
 
 // Build a URL the browser can use to fetch a stored blob.
-function blobUrl(name) { return '/api/blobs/' + encodeURIComponent(name); }
+function blobUrl(name) { return location.origin + '/api/blobs/' + encodeURIComponent(name); }
 
 // Save / load / delete bulk drafts via the backend. Drafts are scoped by location;
 // users at the same pharmacy see each other's queue.
