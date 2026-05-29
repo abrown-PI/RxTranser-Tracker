@@ -2987,8 +2987,14 @@ function renderModal() {
             <div class="form-group full"><strong>Address:</strong>${t.tempAddress?` <span class="badge" style="background:var(--warning-bg);color:var(--warning);font-size:10px">🏖 TEMPORARY${t.tempThroughDate?' through '+fmtDate(t.tempThroughDate):''}</span>`:''}<br>${escapeHtml(t.shipAddr1||'—')}${t.shipAddr2?'<br>'+escapeHtml(t.shipAddr2):''}${t.shipCity?'<br>'+escapeHtml(t.shipCity)+', '+escapeHtml(t.shipState)+' '+escapeHtml(t.shipZip):''}${t.tempAddress?'<div style="margin-top:6px;font-size:11px;color:var(--warning);font-weight:600">⚠ Do not update patient\\'s permanent address in your system.</div>':''}</div>
             <div><strong>Anticipated ship:</strong> ${fmtDate(t.anticipatedShipDate)}</div>
             <div><strong>Shipped:</strong> ${fmtDate(t.dateShipped)}</div>
-            <div><strong>Tracking:</strong> ${escapeHtml(t.trackingNumber||'—')}</div>
-            <div><strong>Paid:</strong> ${escapeHtml(t.paid)}</div>
+            <div style="display:flex;align-items:center;gap:8px"><strong>Tracking:</strong>
+              <input id="inline-tracking" value="${escapeHtml(t.trackingNumber||'')}" placeholder="Type tracking # then press Enter" style="flex:1;max-width:240px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:13px" />
+              <span class="item-sub" id="inline-tracking-msg" style="font-size:11px"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <strong>Paid:</strong>
+              ${t.paid === 'Paid' ? `<span class="badge badge-shipped" style="font-size:11px">✓ Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}</span> <button class="btn btn-secondary btn-sm" id="unpaidBtn" style="padding:2px 8px;font-size:11px">Undo</button>` : `<span>${escapeHtml(t.paid||'Pending')}</span> <button class="btn btn-primary btn-sm" id="paidBtn" style="padding:2px 10px;font-size:12px">💲 Mark Paid / Charged</button>`}
+            </div>
           </div>
           <button class="btn btn-secondary btn-sm" style="margin-top:10px" id="editShipBtn">Edit ship / tracking</button>
           </div>
@@ -5087,18 +5093,22 @@ async function initAuth() {
     document.getElementById('gateSignInBtn').style.display = 'none';
     return;
   }
-  await m.initialize();
+  // CRITICAL: bind the sign-in button handlers FIRST, before any await.
+  // If a later async op throws or hangs (slow /api/users, audit log POST, etc.) the
+  // login screen would otherwise be visible but unclickable — the freeze users hit.
+  document.getElementById('signInBtn').onclick = () => doSignIn(m);
+  document.getElementById('gateSignInBtn').onclick = () => doSignIn(m);
+
+  try { await m.initialize(); } catch (e) { console.warn('msal initialize failed', e); }
   try { await m.handleRedirectPromise(); } catch (e) { console.warn('handleRedirectPromise', e); }
-  await loadAdminEmails();
+  try { await loadAdminEmails(); } catch (e) { console.warn('loadAdminEmails failed', e); }
   const accounts = m.getAllAccounts();
   if (accounts.length > 0) {
-    await applyMsalAccount(accounts[0]);
-    hideAuthGate();
+    try { await applyMsalAccount(accounts[0]); hideAuthGate(); }
+    catch (e) { console.warn('applyMsalAccount failed during auto sign-in — staying on auth gate', e); showAuthGate(); }
   } else if (!localHint) {
     showAuthGate();
   }
-  document.getElementById('signInBtn').onclick = () => doSignIn(m);
-  document.getElementById('gateSignInBtn').onclick = () => doSignIn(m);
   document.getElementById('signOutBtn').onclick = async () => {
     sessionStorage.removeItem('localUserHint');
     if (CURRENT_USER && CURRENT_USER.isLocal) {
