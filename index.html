@@ -951,7 +951,9 @@ function updateIncomingBadge() {
   if (b) { if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; } }
   const ab = document.getElementById('actionsBadge');
   if (ab) {
-    const n = visibleTransfers().filter(t => t.status === 'Canceled' && !t.cancelAcknowledged).length;
+    const cancelN = visibleTransfers().filter(t => t.status === 'Canceled' && !t.cancelAcknowledged).length;
+    const deliveredN = visibleShipments().filter(s => s.toLocation === CURRENT_USER.location && s.status === 'Delivered').length;
+    const n = cancelN + deliveredN;
     if (n > 0) { ab.textContent = n; ab.style.display = 'inline-block'; } else { ab.style.display = 'none'; }
   }
 }
@@ -3478,8 +3480,11 @@ function renderShipments() {
     </div>
 
     <div class="scan-bar">
-      <span class="label">📷 Scan tracking barcode:</span>
-      <input id="shipScan" placeholder="Focus here and scan — will open the matching shipment" autocomplete="off" />
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:160px">
+        <span class="label">📦 To receive an incoming shipment:</span>
+        <span style="font-size:11px;color:var(--gray-600);font-weight:400">Scan barcode here OR find the row below and click Receive</span>
+      </div>
+      <input id="shipScan" placeholder="Focus here and scan the FedEx barcode (or the packing slip barcode) — opens the shipment to check in" autocomplete="off" />
       <span class="item-sub" id="shipScanHint"></span>
     </div>
 
@@ -4656,9 +4661,48 @@ function renderActionItems() {
   const acknowledged = visibleTransfers().filter(t => t.status === 'Canceled' && t.cancelAcknowledged)
     .sort((a,b) => new Date(b.acknowledgedAt||0) - new Date(a.acknowledgedAt||0)).slice(0, 20);
 
+  // Delivered shipments that haven't been checked in (status=Received) yet.
+  // Only show shipments INCOMING to current user's location (their pharmacy
+  // is the one that needs to check the box in).
+  const TWENTY_FOUR_H = 24 * 3600000;
+  const myLoc = CURRENT_USER.location;
+  const deliveredToReceive = visibleShipments().filter(s =>
+    s.toLocation === myLoc
+    && s.status === 'Delivered'
+  ).sort((a,b) => new Date(a.deliveredDate||0) - new Date(b.deliveredDate||0));
+  const overdueCheckIn = deliveredToReceive.filter(s => s.deliveredDate && (Date.now() - Date.parse(s.deliveredDate)) > TWENTY_FOUR_H);
+  const totalPending = canceled.length + deliveredToReceive.length;
+
   root.innerHTML = `
-    <div class="page-header"><div class="page-title">Action Items <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${canceled.length} pending)</span></div></div>
-    <p style="color:var(--gray-600);margin-bottom:14px">Items that need to be acknowledged so they don't get accidentally processed. A canceled transfer cannot be added to a shipment until someone here acknowledges it. In production, cancellations also trigger a Teams/email alert to Erie staff.</p>
+    <div class="page-header"><div class="page-title">Action Items <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${totalPending} pending)</span></div></div>
+    <p style="color:var(--gray-600);margin-bottom:14px">Items that need attention before they fall through the cracks. Canceled transfers need acknowledgment so they don't get accidentally processed. Delivered shipments need to be checked in once the box is actually opened at the receiving pharmacy.</p>
+
+    <div class="card"><div class="card-header">📦 Delivered — Needs Check-In (${deliveredToReceive.length}${overdueCheckIn.length?` · <span style="color:var(--danger)">${overdueCheckIn.length} over 24h</span>`:''})</div><div class="card-body">
+      ${deliveredToReceive.length === 0 ? `<div class="empty" style="padding:20px"><h3>🎉 No deliveries waiting</h3><p>All incoming shipments are either still in transit or already checked in.</p></div>` : `
+      <p class="item-sub" style="margin-bottom:8px">FedEx says these are delivered to your pharmacy, but they haven't been checked in yet. Click <strong>Check In</strong> when the box is in your hands so we know the contents have been verified.</p>
+      <table style="box-shadow:none"><thead><tr>
+        <th>From → To</th><th>Tracking / BULK ID</th><th>Contents</th><th>Delivered</th><th>Age</th><th></th>
+      </tr></thead><tbody>
+        ${deliveredToReceive.map(s => {
+          const delivered = s.deliveredDate ? new Date(s.deliveredDate) : null;
+          const ageMs = delivered ? Date.now() - delivered.getTime() : 0;
+          const ageH = Math.floor(ageMs / 3600000);
+          const ageStr = !delivered ? '—' : ageH < 24 ? `${ageH}h` : `${Math.floor(ageH/24)}d ${ageH%24}h`;
+          const isOverdue = ageMs > TWENTY_FOUR_H;
+          return `<tr style="background:${isOverdue?'var(--danger-bg)':'var(--warning-bg)'}">
+            <td><strong>${escapeHtml(s.fromLocation)}</strong> → ${escapeHtml(s.toLocation)}</td>
+            <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<div style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</div>`:''}${escapeHtml(s.trackingNumber||'—')}</td>
+            <td>${(s.transferIds||[]).length} transfer${(s.transferIds||[]).length===1?'':'s'}</td>
+            <td>${delivered?delivered.toLocaleString():'—'}</td>
+            <td>${isOverdue?`<strong style="color:var(--danger)">⚠ ${ageStr}</strong>`:ageStr}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-secondary btn-sm" data-open-ship="${s.id}">Open</button>
+              <button class="btn btn-primary btn-sm" data-checkin="${s.id}">📦 Check In</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody></table>`}
+    </div></div>
 
     <div class="card"><div class="card-header">Canceled — Needs Acknowledgment (${canceled.length})</div><div class="card-body">
       ${canceled.length === 0 ? `<div class="empty"><h3>🎉 All clear</h3><p>No canceled transfers awaiting acknowledgment.</p></div>` : `
@@ -4691,6 +4735,8 @@ function renderActionItems() {
     </div></div>` : ''}
   `;
   root.querySelectorAll('[data-open-ack]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openAck));
+  root.querySelectorAll('[data-open-ship]').forEach(b => b.onclick = () => openShipment(+b.dataset.openShip));
+  root.querySelectorAll('[data-checkin]').forEach(b => b.onclick = () => openShipment(+b.dataset.checkin));
   root.querySelectorAll('[data-open]').forEach(tr => tr.onclick = () => openTransfer(+tr.dataset.open));
   root.querySelectorAll('[data-ack]').forEach(b => b.onclick = () => {
     const t = TRANSFERS.find(x => x.id === +b.dataset.ack);
