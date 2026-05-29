@@ -951,9 +951,12 @@ function updateIncomingBadge() {
   if (b) { if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; } }
   const ab = document.getElementById('actionsBadge');
   if (ab) {
+    const today = new Date().toISOString().slice(0,10);
     const cancelN = visibleTransfers().filter(t => t.status === 'Canceled' && !t.cancelAcknowledged).length;
     const deliveredN = visibleShipments().filter(s => s.toLocation === CURRENT_USER.location && s.status === 'Delivered').length;
-    const n = cancelN + deliveredN;
+    const lateN = visibleTransfers().filter(t => t.anticipatedShipDate && t.anticipatedShipDate.slice(0,10) < today && !['Shipped','Delivered','Canceled'].includes(t.status)).length;
+    const heldN = visibleTransfers().filter(t => DELAY_STATUSES.includes(t.status)).length;
+    const n = cancelN + deliveredN + lateN + heldN;
     if (n > 0) { ab.textContent = n; ab.style.display = 'inline-block'; } else { ab.style.display = 'none'; }
   }
 }
@@ -3450,6 +3453,10 @@ function transferSummary(id) { const t = TRANSFERS.find(x => x.id === id); retur
 
 function renderShipments() {
   const root = document.getElementById('view-shipments');
+  // Capture which input the user was typing in BEFORE we blow away the DOM
+  // (root.innerHTML = ... destroys all child elements and clears focus).
+  const wasFocused = (document.activeElement && document.activeElement.id) || null;
+  const focusedCaret = (wasFocused && document.activeElement.selectionStart != null) ? document.activeElement.selectionStart : null;
   // direction: '' = both incoming + outgoing, 'in' = only to my location, 'out' = only from my location
   if (!state.shipFilter) state.shipFilter = { direction: '', search: '', dateFrom: '', dateTo: '' };
   // Migrate legacy `mine` flag to the new direction filter
@@ -3511,7 +3518,9 @@ function renderShipments() {
       ${filtered.map(s => {
         const isIncoming = s.toLocation === myLoc;
         const isOutgoing = s.fromLocation === myLoc;
-        const canReceive = isIncoming && s.status !== 'Received';
+        // Show the Receive button only when the box is actually here (Delivered).
+        // For In Transit shipments, there's nothing to check in yet.
+        const canReceive = isIncoming && s.status === 'Delivered';
         const dirChip = isIncoming
           ? '<span style="display:inline-block;padding:3px 8px;font-size:11px;font-weight:700;background:#dcfce7;color:#166534;border-radius:4px">← Incoming</span>'
           : isOutgoing
@@ -3551,7 +3560,20 @@ function renderShipments() {
   root.querySelectorAll('[data-receive-btn]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openShipment(+b.dataset['receiveBtn']); }));
 
   const scan = document.getElementById('shipScan');
-  scan.focus();
+  // Restore whichever input had focus before the re-render. If the user was
+  // typing in the search box, don't snatch focus back to the scan barcode.
+  if (wasFocused && wasFocused !== 'shipScan') {
+    const target = document.getElementById(wasFocused);
+    if (target) {
+      target.focus();
+      if (focusedCaret != null && target.setSelectionRange) {
+        try { target.setSelectionRange(focusedCaret, focusedCaret); } catch {}
+      }
+    }
+  } else {
+    // No prior focus or scan was the active input — auto-focus the scanner
+    scan.focus();
+  }
   scan.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     const q = scan.value.trim();
@@ -4662,21 +4684,67 @@ function renderActionItems() {
   const acknowledged = visibleTransfers().filter(t => t.status === 'Canceled' && t.cancelAcknowledged)
     .sort((a,b) => new Date(b.acknowledgedAt||0) - new Date(a.acknowledgedAt||0)).slice(0, 20);
 
-  // Delivered shipments that haven't been checked in (status=Received) yet.
-  // Only show shipments INCOMING to current user's location (their pharmacy
-  // is the one that needs to check the box in).
+  // Delivered shipments that haven't been checked in yet (incoming only).
   const TWENTY_FOUR_H = 24 * 3600000;
   const myLoc = CURRENT_USER.location;
+  const todayISO = new Date().toISOString().slice(0,10);
   const deliveredToReceive = visibleShipments().filter(s =>
     s.toLocation === myLoc
     && s.status === 'Delivered'
   ).sort((a,b) => new Date(a.deliveredDate||0) - new Date(b.deliveredDate||0));
   const overdueCheckIn = deliveredToReceive.filter(s => s.deliveredDate && (Date.now() - Date.parse(s.deliveredDate)) > TWENTY_FOUR_H);
-  const totalPending = canceled.length + deliveredToReceive.length;
+
+  // Transfers past their anticipated ship date and not yet Shipped/Delivered/Canceled
+  const lateShipping = visibleTransfers().filter(t =>
+    t.anticipatedShipDate
+    && t.anticipatedShipDate.slice(0,10) < todayISO
+    && !['Shipped','Delivered','Canceled'].includes(t.status)
+  ).sort((a,b) => (a.anticipatedShipDate||'').localeCompare(b.anticipatedShipDate||''));
+
+  // Transfers in Pending Clarification or Needs Formula — held up, need attention
+  const held = visibleTransfers().filter(t =>
+    DELAY_STATUSES.includes(t.status)
+  ).sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
+
+  const totalPending = canceled.length + deliveredToReceive.length + lateShipping.length + held.length;
 
   root.innerHTML = `
     <div class="page-header"><div class="page-title">Action Items <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${totalPending} pending)</span></div></div>
-    <p style="color:var(--gray-600);margin-bottom:14px">Items that need attention before they fall through the cracks. Canceled transfers need acknowledgment so they don't get accidentally processed. Delivered shipments need to be checked in once the box is actually opened at the receiving pharmacy.</p>
+    <p style="color:var(--gray-600);margin-bottom:14px">Items that need attention before they fall through the cracks. Each card below is a different kind of action. Click an item to open it for the next step.</p>
+
+    ${lateShipping.length ? `<div class="card"><div class="card-header">⏰ Past Anticipated Ship Date (${lateShipping.length})</div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:8px">Transfers whose anticipated ship date has passed but haven't shipped yet. Either get them out the door, push the date, or change status to Pending Clarification / Needs Formula if there's a holdup.</p>
+      <table style="box-shadow:none"><thead><tr>
+        <th>Patient</th><th>Origin → Fill</th><th>Status</th><th>Anticipated Ship</th><th>Days late</th><th></th>
+      </tr></thead><tbody>
+        ${lateShipping.map(t => {
+          const daysLate = Math.floor((Date.parse(todayISO) - Date.parse(t.anticipatedShipDate.slice(0,10))) / 86400000);
+          return `<tr style="background:var(--danger-bg)">
+            <td><strong>${escapeHtml(t.patientName||'(bulk pickup)')}</strong></td>
+            <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+            <td><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
+            <td>${fmtDate(t.anticipatedShipDate)}</td>
+            <td><strong style="color:var(--danger)">${daysLate}d</strong></td>
+            <td><button class="btn btn-primary btn-sm" data-open-late="${t.id}">Open</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody></table>
+    </div></div>` : ''}
+
+    ${held.length ? `<div class="card"><div class="card-header">⚠ Held — Needs Action (${held.length})</div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:8px">Transfers in <strong>Pending Clarification</strong> or <strong>Needs Formula</strong> status. The origin pharmacy has been notified via Teams; respond by editing the transfer and changing status back to In Progress once resolved.</p>
+      <table style="box-shadow:none"><thead><tr>
+        <th>Patient</th><th>Origin → Fill</th><th>Status</th><th>Since</th><th></th>
+      </tr></thead><tbody>
+        ${held.map(t => `<tr style="background:var(--warning-bg)">
+          <td><strong>${escapeHtml(t.patientName||'(bulk pickup)')}</strong></td>
+          <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+          <td><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
+          <td>${fmtDate(t.createdAt)}</td>
+          <td><button class="btn btn-primary btn-sm" data-open-held="${t.id}">Open</button></td>
+        </tr>`).join('')}
+      </tbody></table>
+    </div></div>` : ''}
 
     <div class="card"><div class="card-header">📦 Delivered — Needs Check-In (${deliveredToReceive.length}${overdueCheckIn.length?` · <span style="color:var(--danger)">${overdueCheckIn.length} over 24h</span>`:''})</div><div class="card-body">
       ${deliveredToReceive.length === 0 ? `<div class="empty" style="padding:20px"><h3>🎉 No deliveries waiting</h3><p>All incoming shipments are either still in transit or already checked in.</p></div>` : `
@@ -4738,6 +4806,8 @@ function renderActionItems() {
   root.querySelectorAll('[data-open-ack]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openAck));
   root.querySelectorAll('[data-open-ship]').forEach(b => b.onclick = () => openShipment(+b.dataset.openShip));
   root.querySelectorAll('[data-checkin]').forEach(b => b.onclick = () => openShipment(+b.dataset.checkin));
+  root.querySelectorAll('[data-open-late]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openLate));
+  root.querySelectorAll('[data-open-held]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openHeld));
   root.querySelectorAll('[data-open]').forEach(tr => tr.onclick = () => openTransfer(+tr.dataset.open));
   root.querySelectorAll('[data-ack]').forEach(b => b.onclick = () => {
     const t = TRANSFERS.find(x => x.id === +b.dataset.ack);
