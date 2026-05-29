@@ -1318,22 +1318,24 @@ function renderStats() {
     return true;
   });
 
+  const filterStyle = 'width:100%;padding:4px 6px;font-size:12px;border:1px solid var(--gray-300);border-radius:4px';
+  const labelStyle = 'display:block;font-size:10px;text-transform:uppercase;color:var(--gray-500);letter-spacing:.03em;margin-bottom:2px;white-space:nowrap';
   const filtersHtml = `
-    <div class="card" style="margin-bottom:14px"><div class="card-body">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:600;font-size:13px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.04em">Filters</div>
-        <button class="btn btn-secondary btn-sm" id="rep-clear">Clear all</button>
+    <div class="card" style="margin-bottom:14px"><div class="card-body" style="padding:10px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-weight:600;font-size:12px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.04em">Filters</div>
+        <button class="btn btn-secondary btn-sm" id="rep-clear" style="padding:2px 8px;font-size:11px">Clear all</button>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">
-        <div><label class="hint" style="display:block">Origin</label><select id="rep-origin"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===f.origin?'selected':''}>${l}</option>`).join('')}</select></div>
-        <div><label class="hint" style="display:block">Fill</label><select id="rep-fill"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===f.fill?'selected':''}>${l}</option>`).join('')}</select></div>
-        <div><label class="hint" style="display:block">Status</label><select id="rep-status"><option value="">All</option>${STATUSES.map(s=>`<option ${s===f.status?'selected':''}>${s}</option>`).join('')}</select></div>
-        <div><label class="hint" style="display:block">Type</label><select id="rep-type"><option value="">All</option><option value="New" ${f.type==='New'?'selected':''}>New</option><option value="Refill" ${f.type==='Refill'?'selected':''}>Refill</option></select></div>
-        <div><label class="hint" style="display:block">Ship to</label><select id="rep-shipTo"><option value="">All</option>${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===f.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
-        <div><label class="hint" style="display:block">Created from</label><input type="date" id="rep-createdFrom" value="${escapeHtml(f.createdFrom)}" /></div>
-        <div><label class="hint" style="display:block">Created to</label><input type="date" id="rep-createdTo" value="${escapeHtml(f.createdTo)}" /></div>
-        <div><label class="hint" style="display:block">Anticipated ship from</label><input type="date" id="rep-antShipFrom" value="${escapeHtml(f.antShipFrom)}" /></div>
-        <div><label class="hint" style="display:block">Anticipated ship to</label><input type="date" id="rep-antShipTo" value="${escapeHtml(f.antShipTo)}" /></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:110px"><label style="${labelStyle}">Origin</label><select id="rep-origin" style="${filterStyle}"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===f.origin?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div style="flex:1;min-width:110px"><label style="${labelStyle}">Fill</label><select id="rep-fill" style="${filterStyle}"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===f.fill?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div style="flex:1;min-width:100px"><label style="${labelStyle}">Status</label><select id="rep-status" style="${filterStyle}"><option value="">All</option>${STATUSES.map(s=>`<option ${s===f.status?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div style="flex:0 0 80px"><label style="${labelStyle}">Type</label><select id="rep-type" style="${filterStyle}"><option value="">All</option><option value="New" ${f.type==='New'?'selected':''}>New</option><option value="Refill" ${f.type==='Refill'?'selected':''}>Refill</option></select></div>
+        <div style="flex:0 0 110px"><label style="${labelStyle}">Ship to</label><select id="rep-shipTo" style="${filterStyle}"><option value="">All</option>${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===f.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div style="flex:0 0 125px"><label style="${labelStyle}">Created from</label><input type="date" id="rep-createdFrom" value="${escapeHtml(f.createdFrom)}" style="${filterStyle}" /></div>
+        <div style="flex:0 0 125px"><label style="${labelStyle}">Created to</label><input type="date" id="rep-createdTo" value="${escapeHtml(f.createdTo)}" style="${filterStyle}" /></div>
+        <div style="flex:0 0 125px"><label style="${labelStyle}">Ant ship from</label><input type="date" id="rep-antShipFrom" value="${escapeHtml(f.antShipFrom)}" style="${filterStyle}" /></div>
+        <div style="flex:0 0 125px"><label style="${labelStyle}">Ant ship to</label><input type="date" id="rep-antShipTo" value="${escapeHtml(f.antShipTo)}" style="${filterStyle}" /></div>
       </div>
     </div></div>
   `;
