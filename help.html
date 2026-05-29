@@ -59,17 +59,20 @@ section { page-break-inside: avoid; }
   <ul>
     <li><a href="#signin">Signing In (365 or Local Account)</a></li>
     <li><a href="#new">Creating a New Transfer</a> (Single + Bulk Upload with OCR)</li>
-    <li><a href="#refill">Refilling an Existing Transfer</a></li>
+    <li><a href="#pickup">Non-Transfer Pickup at Another Pharmacy</a> (incl. bulk pickup orders)</li>
+    <li><a href="#refill">Refilling an Existing Transfer</a> <em>(receiving pharmacies — use this, not + New Transfer)</em></li>
     <li><a href="#edit">Editing or Deleting a Transfer</a></li>
     <li><a href="#ask">Asking a Question (with Teams Notification)</a></li>
     <li><a href="#alerts">The Alerts Tab</a></li>
     <li><a href="#cc">Credit Card Workflow</a></li>
-    <li><a href="#shipments">Shipments — Create + Receive</a></li>
+    <li><a href="#shipments">Shipments — Direction Filter, Create, Receive</a></li>
     <li><a href="#print">Printing &amp; Batch Operations</a></li>
     <li><a href="#fedex">Pulling Tracking from FedEx</a></li>
-    <li><a href="#admin">Admin Tasks</a></li>
+    <li><a href="#paid">Marking Transfers Paid / Charged</a></li>
+    <li><a href="#reports">Reports — Summary + Detail with Filters</a></li>
+    <li><a href="#admin">Admin Tasks</a> (incl. multi-day shipping schedule, audit log)</li>
     <li><a href="#emails">Email Notifications</a> (daily summary + shipment notices)</li>
-    <li><a href="#statuses">Status Definitions</a></li>
+    <li><a href="#statuses">Status Definitions</a> (incl. Pending Clarification, Needs Formula)</li>
     <li><a href="#faq">Common Questions</a></li>
   </ul>
 </div>
@@ -113,13 +116,17 @@ section { page-break-inside: avoid; }
       <li>Shipping: Ship-to (Pharmacy or Patient), address. If you pick <em>Pharmacy</em>, the origin pharmacy's address auto-fills.</li>
       <li>Billing Method</li>
       <li><strong>Patient Price</strong> (optional) — for the team to record the price charged to the patient. Surfaces on the detail modal and on the Summary Sheet printout.</li>
-      <li><strong>PK Transfer Sheet</strong> upload (required — drop a PDF, app auto-fills the fields it can read)</li>
+      <li><strong>For future appointment?</strong> (optional) — when checked, set the appointment date. The anticipated ship date auto-calculates backward from the appointment so the box arrives in time.</li>
+      <li><strong>Anticipated Ship Date</strong> — auto-calculated from the destination pharmacy's receiving day(s). Editable.</li>
+      <li><strong>PK Transfer Sheet</strong> upload (required for normal transfers — drop a PDF, app auto-fills the fields it can read)</li>
       <li>Optional: Hard Copy Scan, Formula, Transfer Notes</li>
       <li>Items / Prescriptions: Origin Rx #, Receiving Rx # (filled in by fill location later), Drug, Qty</li>
     </ul>
   </li>
   <li>Click <strong>Submit transfer</strong></li>
 </ol>
+<div class="tip"><strong>Non-transfer pickup at another pharmacy?</strong> Check the blue box at the very top of the form before entering patient details. See the <a href="#pickup">Non-Transfer Pickup</a> section above.</div>
+<div class="tip"><strong>Temporary patient address?</strong> When Ship To = Patient, a "🏖 Temporary address" checkbox appears in the Shipping section. Toggle it on, optionally set a "Through" date — the receiving pharmacy will see a warning banner telling them not to update the patient's permanent address.</div>
 <div class="tip"><strong>Tip:</strong> Upload a clean PDF transfer sheet first — the app auto-fills patient, DOB, drug, Rx# from the document. You just verify and submit.</div>
 
 <h3>Bulk Upload (recommended for the weekly stack)</h3>
@@ -153,8 +160,34 @@ section { page-break-inside: avoid; }
 <div class="tip"><strong>The queue persists.</strong> Close the tab, sign out, leave the browser — when you come back, your in-progress bulk drafts are still there waiting. Use Clear queue to remove everything if you want a fresh start. Page images (for the View Pages button) are kept only during the active session and won't survive a browser reload.</div>
 </section>
 
+<section id="pickup">
+<h2>Non-Transfer Pickup at Another Pharmacy</h2>
+<p>Use this when the order is <strong>originating from the filling pharmacy</strong> and being shipped to <strong>another pharmacy for the patient to pick up there</strong>. This is NOT a normal transfer — the receiving pharmacy doesn't put anything in their dispensing system, they just hand off the prepared scripts when the patient walks in.</p>
+
+<h3>How to use it</h3>
+<ol>
+  <li>Click <strong>+ New Transfer</strong></li>
+  <li>At the top of the form, check the blue box <strong>"📍 Prescriptions will be picked up at another pharmacy (Non-transfer)"</strong></li>
+  <li>Pick the <strong>Pickup pharmacy</strong> from the dropdown. The Shipping address fields auto-fill with that pharmacy's address.</li>
+  <li>Continue filling out the rest of the form like a normal transfer (patient, drugs, etc.)</li>
+  <li>Submit</li>
+</ol>
+<p>Both the filling pharmacy AND the pickup pharmacy will see the order on their Transfers list, so the pickup pharmacy knows they have an order coming.</p>
+
+<h3>Bulk pickup orders</h3>
+<p>Some weeks you send a stack of prepared scripts to another pharmacy as a single batch (e.g., 12 scripts for the Seminole pickup window). Instead of entering each patient:</p>
+<ol>
+  <li>Check the <strong>📦 Bulk pickup order</strong> box inside the pickup section</li>
+  <li>Enter <strong>Number of scripts</strong> and a short <strong>Description</strong> (e.g., "Weekly batch of compounds for Seminole pickup customers")</li>
+  <li>The Patient and Items sections are no longer required for bulk pickup orders</li>
+</ol>
+<div class="note"><strong>When NOT to use bulk pickup:</strong> If the receiving pharmacy will fill the script themselves (i.e., a true transfer), enter each one as a normal transfer with individual transfer sheets. Bulk pickup is only for the prepared-and-shipped-for-pickup case.</div>
+</section>
+
 <section id="refill">
 <h2>Refilling an Existing Transfer</h2>
+
+<div class="note"><strong>Receiving pharmacies — use this, not + New Transfer.</strong> If the receiving pharmacy is processing a refill for an order that's already been transferred once, always use the Refill flow (+ Refill tab or the 📋 Refill this Rx button on the transfer detail). This keeps the refill chained to the original so the full Rx History stays connected. Entering it as a brand-new transfer breaks that connection.</div>
 
 <h3>From an in-app transfer (normal path)</h3>
 <ol>
@@ -279,7 +312,8 @@ section { page-break-inside: avoid; }
 <ol>
   <li><strong>Shipments</strong> tab → <strong>+ Create Shipment</strong></li>
   <li>Destination Type: <strong>Pharmacy</strong>, To: pick the destination pharmacy</li>
-  <li>The list below auto-loads transfers in <strong>In Progress</strong> or <strong>Ready to Ship</strong> heading to that pharmacy. (New transfers must be processed first — they don't appear here.) Check the ones in this box.</li>
+  <li>The list below auto-loads transfers in <strong>In Progress</strong> heading to that pharmacy. (New / Pending Clarification / Needs Formula transfers don't appear here — they have to be moved to In Progress first.) Check the ones in this box.</li>
+  <li><em>Tip:</em> filter the list by <strong>Anticipated ship on or before</strong> to focus on what's due today.</li>
   <li>Carrier: FedEx. <strong>Tracking number is optional here</strong> — leave it blank.</li>
   <li>Click <strong>Create Shipment</strong></li>
   <li>The app shows the new <strong>BULK Shipment ID</strong> prominently. Write it down or memorize it.</li>
@@ -292,6 +326,18 @@ section { page-break-inside: avoid; }
 <h3>Creating a Ship-to-Patient transfer</h3>
 <p>Patient-direct ships don't need a bulk shipment record. When you generate the FedEx label in WorldShip, type the <strong>Transfer ID</strong> (shown at the top of the transfer detail modal) into the Customer Reference field. The auto-match cron picks it up and links tracking to that transfer.</p>
 
+<h3>Seeing both directions — Incoming vs Outgoing</h3>
+<p>Pharmacies see both shipments going TO them (incoming) and shipments going FROM them (outgoing) on the Shipments tab by default. Each row has a colored chip in the first column showing direction relative to your location:</p>
+<ul>
+  <li>Green <strong>← Incoming</strong> — shipments to your pharmacy</li>
+  <li>Blue <strong>→ Outgoing</strong> — shipments from your pharmacy</li>
+</ul>
+<p>Use the <strong>[All] [← Incoming] [→ Outgoing]</strong> toggle in the filter bar to scope to one direction.</p>
+<p>You can also filter by Ship date range (top of the page) to scope to a particular shipping window.</p>
+
+<h3>Next-shipment banner</h3>
+<p>The blue strip just under the navbar shows <strong>"📦 Your next pharmacy shipment to [your location] is expected on [Day MM/DD/YYYY]"</strong> — computed from your location's receiving day(s) configured in Admin → Pharmacy Mailing Addresses. If your location receives shipments multiple days a week (e.g., Tue and Thu), the banner shows the nearest upcoming day and lists the full schedule in parens.</p>
+
 <h3>Receiving a Shipment</h3>
 <ol>
   <li><strong>Shipments</strong> tab → focus the <strong>📷 Scan tracking barcode</strong> field at the top</li>
@@ -301,6 +347,38 @@ section { page-break-inside: avoid; }
   <li>Take photos of any damage with the camera button</li>
   <li>Click <strong>Mark Package Received</strong></li>
 </ol>
+</section>
+
+<section id="paid">
+<h2>Marking Transfers Paid / Charged</h2>
+<p>When the billing team has charged the patient (or HealNow has processed payment), mark the transfer paid so the team has a clear collected vs. outstanding view.</p>
+
+<h3>From the All Transfers list</h3>
+<p>The Actions column on each row has a blue <strong>💲 Mark Paid / Charged</strong> button. Click once — the button immediately changes to a green <strong>✓ Paid</strong> badge with a tooltip showing who marked it and when.</p>
+
+<h3>From the transfer detail modal</h3>
+<p>The Shipping &amp; Billing section has the same Mark Paid button. Once paid, it shows <strong>✓ Paid by [Name] on [Date]</strong> with an Undo button alongside in case it was a mistake.</p>
+
+<h3>Filter by paid status</h3>
+<p>The All Transfers filter bar has a <strong>Paid: all / ✓ Paid only / Not paid only</strong> dropdown so the billing team can pull "what's still outstanding" in one click. Same Paid filter is available on the Reports tab.</p>
+</section>
+
+<section id="reports">
+<h2>Reports — Summary + Detail with Filters</h2>
+<p>The Reports tab has a single filter bar at the top covering every common scope:</p>
+<ul>
+  <li>Origin / Fill / Status / Type (New or Refill) / Ship to / Paid</li>
+  <li>Created date range, Anticipated ship date range</li>
+  <li>Clear all in one click</li>
+</ul>
+<p>Two tabs underneath:</p>
+<ul>
+  <li><strong>📊 Summary</strong> — KPIs (Total Transfers, In Flight, Avg Cycle Time, Avg Turnaround, On-Time Ship Rate, <strong>Past Anticipated Ship</strong>, Cold Chain Items) plus charts: Volume by Status, Volume by Origin Location, Avg Turnaround by Origin.</li>
+  <li><strong>📋 Detail</strong> — full per-transfer table with ID, patient, drugs, route, ship-to, status, type, anticipated ship date, created date. Sorted by anticipated ship date. Rows past their anticipated date and not shipped highlight red.</li>
+</ul>
+<p><strong>🖨 Print this report</strong> button (Detail mode only) opens a landscape printable letter page with the filtered list + filter summary at the top — perfect for walking the pharmacy with paper in hand to verify status.</p>
+<p><strong>📥 Export CSV</strong> in either mode downloads the filtered transfers with timestamped filename.</p>
+<p>Admins see every location's data; techs/managers see only their location's data automatically.</p>
 </section>
 
 <section id="print">
@@ -372,11 +450,16 @@ section { page-break-inside: avoid; }
 <ul>
   <li><strong>SLA Rules</strong>: hour limits per status before transfers show on the Alerts tab</li>
   <li><strong>Formula Library</strong>: saved formula worksheets per pharmacy</li>
-  <li><strong>Pharmacy Mailing Addresses</strong>: used for Ship-to-Pharmacy auto-fill <em>and</em> for the From/To addresses on the bulk packing slip</li>
+  <li><strong>Pharmacy Mailing Addresses</strong>: used for Ship-to-Pharmacy auto-fill <em>and</em> for the From/To addresses on the bulk packing slip. <strong>Receives Shipments column</strong> = check the day(s) of the week each pharmacy normally gets its boxes. Multi-day support — pharmacies that receive shipments twice a week (e.g., Tue + Thu) just check both. The next-shipment banner at the top of every page is computed from this.</li>
   <li><strong>Email Notifications</strong>: per-location recipient list for both the daily summary email and shipment notification emails. Multiple emails per location (one per line or comma-separated). An optional "Always-CC" list copies managers on every location's daily summary.</li>
-  <li><strong>Teams Webhooks</strong>: paste Power Automate webhook URLs per location so Ask Question notifications go to the right place</li>
+  <li><strong>Teams Webhooks</strong>: paste Power Automate webhook URLs per location so Ask Question, status delay, and anticipated-date-change notifications go to the right place</li>
   <li><strong>Document Templates</strong>: preview what the printable docs look like (CC Auth form in either print-blank or fill-on-screen mode, plus the bulk packing slip). Sample data — useful for showing staff what to expect.</li>
+  <li><strong>Audit Log</strong>: append-only record of who viewed / created / edited / deleted / changed-status on every transfer, plus sign-in events. Filters by user / action / Transfer ID. CSV export for monthly compliance reports.</li>
 </ul>
+
+<h3>Security: idle timeout + audit logging</h3>
+<p>The app signs users out automatically after <strong>30 minutes of inactivity</strong> (a warning appears at 28 min). Move the mouse or press any key to reset the timer. This limits PHI exposure on shared/unattended workstations.</p>
+<p>Every PHI-touching action is recorded to the audit log: viewing a transfer, creating one, editing one, deleting one, changing status, marking paid, sign-in events. Admins can review the log in Admin → Audit Log.</p>
 </section>
 
 <section id="emails">
@@ -407,13 +490,15 @@ section { page-break-inside: avoid; }
 <thead><tr><th>Status</th><th>What it means</th></tr></thead>
 <tbody>
 <tr><td><strong>New</strong></td><td>Just submitted, not yet processed</td></tr>
-<tr><td><strong>In Progress</strong></td><td>Being compounded at the fill location</td></tr>
-<tr><td><strong>Ready to Ship</strong></td><td>Compounding done, awaiting shipment</td></tr>
+<tr><td><strong>In Progress</strong></td><td>Being compounded at the fill location. This is now the last stage before Shipped — "Ready to Ship" was retired and existing transfers in that status auto-migrated to In Progress.</td></tr>
+<tr><td><strong>Pending Clarification</strong></td><td>Order is on hold while the fill location waits for clarification from the originating pharmacy (e.g., dose unclear, missing info). Setting this status auto-pings the origin pharmacy's Teams chat so they know to respond.</td></tr>
+<tr><td><strong>Needs Formula</strong></td><td>Order is on hold because the fill location doesn't have the required formula. Auto-pings the origin pharmacy's Teams chat with the request.</td></tr>
 <tr><td><strong>Shipped</strong></td><td>In transit (auto-set when tracking # is added)</td></tr>
 <tr><td><strong>Delivered</strong></td><td>Patient or pharmacy has received</td></tr>
 <tr><td><strong>Canceled</strong></td><td>Transfer canceled (must be acknowledged on Action Items tab before being archived)</td></tr>
 </tbody>
 </table>
+<div class="note"><strong>Late-shipment notifications:</strong> When the anticipated ship date is updated by anyone NOT at the originating pharmacy (typically the fill location pushing the date out), the origin pharmacy gets a Teams notification with the old and new dates.</div>
 </section>
 
 <section id="faq">
@@ -462,11 +547,35 @@ A: Open the transfer (or bulk shipment) → Edit ship / tracking → paste the F
 A: Open any transfer in the chain → the <strong>Rx History</strong> section shows the original and every refill in order. Click Open on any row to switch the modal to that entry.</p>
 
 <p><strong>Q: I don't see my new transfer when trying to add it to a shipment.</strong><br>
-A: The shipment list only shows transfers in <strong>In Progress</strong> or <strong>Ready to Ship</strong> status. Open the transfer and bump the status forward, then it'll appear.</p>
+A: The shipment list only shows transfers in <strong>In Progress</strong> status. Open the transfer and bump the status to In Progress, then it'll appear. New, Pending Clarification, and Needs Formula transfers don't appear (they're still being worked).</p>
+
+<p><strong>Q: I'm at the receiving pharmacy and need to process a refill for a transfer that's already in the app. Do I enter it as a new transfer?</strong><br>
+A: <strong>No — use the Refill flow.</strong> Either + Refill tab → search for the patient → Refill this, OR open the existing transfer → 📋 Refill this Rx button at the top. This chains the refill to the original so the full Rx History stays connected. Entering it as + New Transfer breaks that connection and creates an orphan record.</p>
+
+<p><strong>Q: My pharmacy gets shipments twice a week. Can I set that?</strong><br>
+A: Yes. Admin → Pharmacy Mailing Addresses → for your location, check all the days you receive shipments (e.g., Tue and Thu). The anticipated ship date auto-calc and the next-shipment banner both use the nearest day from the multi-day schedule.</p>
+
+<p><strong>Q: Why does the next-shipment banner sometimes say "Set your location's receiving day(s)"?</strong><br>
+A: Your location doesn't have any receiving days configured. An admin needs to go to Admin → Pharmacy Mailing Addresses and check the day(s) of the week for your location.</p>
+
+<p><strong>Q: My order is held up because we need clarification from the origin pharmacy. What status do I set?</strong><br>
+A: Change the transfer's status to <strong>Pending Clarification</strong> (or <strong>Needs Formula</strong> if it's specifically a missing formula). Setting either status automatically pings the origin pharmacy's Teams chat so they know to respond. The order stays in this status until you bump it back to In Progress.</p>
+
+<p><strong>Q: The anticipated ship date needs to change because we can't ship on time. What should I do?</strong><br>
+A: Open the transfer → ✏️ Edit Transfer → change the Anticipated Ship Date → Save. If you're at the fill location (not the originating pharmacy), the origin pharmacy automatically gets a Teams notification with the old and new dates.</p>
+
+<p><strong>Q: Where does the green Paid badge come from?</strong><br>
+A: Either the row's "💲 Mark Paid / Charged" button on All Transfers OR the same button on the transfer detail. Click once — done. The badge shows who marked it and when.</p>
+
+<p><strong>Q: My session signs me out after I leave the screen for a while. Why?</strong><br>
+A: For security, the app signs users out automatically after 30 minutes of inactivity. A warning banner shows up at 28 minutes — move the mouse or press a key to reset the timer and stay signed in.</p>
+
+<p><strong>Q: Can I send the same script to multiple pharmacies for pickup?</strong><br>
+A: Each non-transfer pickup goes to one pickup pharmacy per record. If a single batch is going to multiple destinations, enter one bulk pickup per destination.</p>
 </section>
 
 <hr>
-<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-05-28 — added Patient Price field, Print Summary Sheet button, Print all attached documents, clickable doc links. Earlier: WorldShip Reference workflow, fillable CC form, doc carry-over on refills, manual legacy refill, Rx History chain, daily summary emails. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
+<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-05-29 — Non-transfer pickup + bulk pickup orders, Pending Clarification / Needs Formula statuses with Teams notifications, retired Ready to Ship status and per-status SLA hours (now alerts off anticipated ship date), Refill clarifier for receiving pharmacies, multi-day pharmacy shipping schedule, Reports filters + Summary/Detail tabs + print, All Transfers Actions column with View/Edit/Rx#/Paid/Ask, Mark Paid / Charged button, Direction filter on Shipments (Incoming/Outgoing), next-shipment banner, appointment-date driven anticipated ship, idle timeout, audit log. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
 
 </body>
 </html>
