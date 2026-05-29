@@ -211,6 +211,8 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
   </div>
 </nav>
 
+<div id="nextShipmentBanner" style="display:none;background:linear-gradient(90deg,#cfdbed,#dde7f4);border-bottom:1px solid var(--primary-light);padding:8px 24px;font-size:13px;color:var(--primary-darker);text-align:center"></div>
+
 <div class="tabs">
   <button class="tab active" data-tab="transfers">Transfers</button>
   <button class="tab" data-tab="new">+ New Transfer</button>
@@ -5079,22 +5081,29 @@ async function applyMsalAccount(account) {
     user.location = savedLocation;
   }
   CURRENT_USER = user;
-  // Best-effort persist user record + last sign-in time (non-blocking)
-  fetch('/api/users', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, location: savedLocation, role: user.role, lastSignInAt: new Date().toISOString() })
-  }).catch(() => {});
-  logAudit('sign_in', 'session', email, { method: 'msal' });
-  // Swap UI
-  document.getElementById('signInArea').style.display = 'none';
-  document.getElementById('signedInArea').style.display = 'flex';
-  document.getElementById('userInfo').textContent = `${user.name}`;
-  // Location switcher
+  // Best-effort persist user record + last sign-in time (non-blocking, never throws)
+  try {
+    fetch('/api/users', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name, location: savedLocation, role: user.role, lastSignInAt: new Date().toISOString() })
+    }).catch(() => {});
+  } catch {}
+  try { logAudit('sign_in', 'session', email, { method: 'msal' }); } catch {}
+  // Swap UI — guard every DOM lookup so a missing element doesn't blow up the whole sign-in
+  const signInArea = document.getElementById('signInArea');
+  if (signInArea) signInArea.style.display = 'none';
+  const signedInArea = document.getElementById('signedInArea');
+  if (signedInArea) signedInArea.style.display = 'flex';
+  const userInfo = document.getElementById('userInfo');
+  if (userInfo) userInfo.textContent = `${user.name}`;
+  // Location switcher (guarded)
   const locSel = document.getElementById('locationSwitcher');
+  if (!locSel) return; // navbar not present? still treat sign-in as successful
   locSel.innerHTML = LOCATIONS.map(l => `<option value="${l}" ${l===user.location?'selected':''}>${l}</option>`).join('');
   locSel.onchange = () => {
     user.location = locSel.value;
     localStorage.setItem('userLocation_' + email, locSel.value);
+    updateNextShipmentBanner();
     // Persist the change to backend so it survives across browsers + devices
     fetch('/api/users/' + encodeURIComponent(email), {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -5117,6 +5126,31 @@ function hideAuthGate() {
   const gate = document.getElementById('authGate');
   if (gate) gate.style.display = 'none';
   startIdleTimer();
+  updateNextShipmentBanner();
+}
+
+// Banner just under the navbar: 'Your next pharmacy shipment is expected on Tuesday MM/DD/YYYY'
+// Pulls the shipping day from PHARMACY_ADDRESSES[CURRENT_USER.location].shippingDay.
+function updateNextShipmentBanner() {
+  const banner = document.getElementById('nextShipmentBanner');
+  if (!banner) return;
+  if (!CURRENT_USER || !CURRENT_USER.location) { banner.style.display = 'none'; return; }
+  const addr = PHARMACY_ADDRESSES[CURRENT_USER.location] || {};
+  const dow = (typeof addr.shippingDay === 'number') ? addr.shippingDay : null;
+  if (dow === null) {
+    banner.innerHTML = `<span style="opacity:.7">Set your location's receiving day in Admin → Pharmacy Mailing Addresses to see your next shipment date.</span>`;
+    banner.style.display = 'block';
+    return;
+  }
+  const today = new Date();
+  const todayDow = today.getDay();
+  let daysAhead = (dow - todayDow + 7) % 7;
+  if (daysAhead === 0) daysAhead = 7; // today is the day → show next week's
+  const target = new Date(today.getFullYear(), today.getMonth(), today.getDate() + daysAhead);
+  const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow];
+  const dateStr = target.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  banner.innerHTML = `📦 Your next pharmacy shipment to <strong>${escapeHtml(CURRENT_USER.location)}</strong> is expected on <strong>${dayName} ${dateStr}</strong>`;
+  banner.style.display = 'block';
 }
 
 // =====================================================================
