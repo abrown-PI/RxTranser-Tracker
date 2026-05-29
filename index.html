@@ -1004,6 +1004,9 @@ function renderTransfers() {
               <button class="btn btn-secondary btn-sm" data-view-tx="${t.id}" title="View transfer details" style="padding:3px 7px;font-size:11px">👁 View</button>
               <button class="btn btn-secondary btn-sm" data-edit-tx="${t.id}" title="Edit transfer" style="padding:3px 7px;font-size:11px">✏️ Edit</button>
               <button class="btn btn-primary btn-sm" data-rcvrx-tx="${t.id}" title="Enter Receiving Rx #" style="padding:3px 7px;font-size:11px">💊 Rx #</button>
+              ${t.paid === 'Paid'
+                ? `<span class="badge badge-shipped" title="Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}" style="padding:2px 6px;font-size:11px">✓ Paid</span>`
+                : `<button class="btn btn-secondary btn-sm" data-paid-tx="${t.id}" title="Mark Paid / Charged" style="padding:3px 7px;font-size:11px;background:#d1fae5;color:#065f46">💲 Paid</button>`}
               <button class="btn btn-secondary btn-sm" data-ask="${t.id}" title="Ask a question on this transfer" style="padding:3px 7px;font-size:11px">❓ Ask</button>
             </td>
           </tr>`;
@@ -1041,6 +1044,18 @@ function renderTransfers() {
   root.querySelectorAll('[data-rcvrx-tx]').forEach(b => b.addEventListener('click', e => {
     e.stopPropagation();
     openReceivingRxModal(+b.dataset.rcvrxTx);
+  }));
+  root.querySelectorAll('[data-paid-tx]').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    const id = +b.dataset.paidTx;
+    const t = TRANSFERS.find(x => x.id === id);
+    if (!t) return;
+    t.paid = 'Paid';
+    t.paidBy = CURRENT_USER.name;
+    t.paidAt = new Date().toISOString();
+    apiUpdateTransfer(t);
+    logAudit('mark_paid', 'transfer', t.id);
+    renderTransfers();
   }));
   // Inline status change from the Transfers table — no need to open the detail modal
   root.querySelectorAll('[data-status-id]').forEach(sel => sel.addEventListener('change', e => {
@@ -3055,6 +3070,45 @@ function renderModal() {
     renderModal(); render();
   });
   document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
+  // Inline tracking input — save on blur or Enter, auto-flip status to Shipped
+  const inlineTrack = document.getElementById('inline-tracking');
+  if (inlineTrack) {
+    const saveTracking = () => {
+      const v = inlineTrack.value.trim();
+      if (v === (t.trackingNumber || '')) return;
+      t.trackingNumber = v;
+      if (v && !['Shipped','Delivered','Canceled'].includes(t.status)) {
+        t.status = 'Shipped';
+        if (!t.dateShipped) t.dateShipped = new Date().toISOString().slice(0,10);
+      }
+      apiUpdateTransfer(t);
+      const msg = document.getElementById('inline-tracking-msg');
+      if (msg) { msg.textContent = '✓ saved'; msg.style.color = 'var(--success)'; setTimeout(() => { msg.textContent = ''; }, 1500); }
+      renderModal();
+    };
+    inlineTrack.addEventListener('blur', saveTracking);
+    inlineTrack.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveTracking(); inlineTrack.blur(); } });
+  }
+  // Mark Paid / Undo Paid buttons
+  const paidBtnEl = document.getElementById('paidBtn');
+  if (paidBtnEl) paidBtnEl.addEventListener('click', () => {
+    t.paid = 'Paid';
+    t.paidBy = CURRENT_USER.name;
+    t.paidAt = new Date().toISOString();
+    apiUpdateTransfer(t);
+    logAudit('mark_paid', 'transfer', t.id);
+    renderModal();
+  });
+  const unpaidBtnEl = document.getElementById('unpaidBtn');
+  if (unpaidBtnEl) unpaidBtnEl.addEventListener('click', () => {
+    if (!confirm('Undo paid status?')) return;
+    t.paid = 'Pending';
+    t.paidBy = null;
+    t.paidAt = null;
+    apiUpdateTransfer(t);
+    logAudit('undo_paid', 'transfer', t.id);
+    renderModal();
+  });
   document.querySelectorAll('[data-cc-print]').forEach(b => b.onclick = () => {
     if (!t.ccForm) { alert('No CC form attached.'); return; }
     printDocs([{ transferId: t.id, patientName: t.patientName, transferMeta: `${t.originLocation} → ${t.fillLocation}`, title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: t.ccForm.dataUrl }]);
