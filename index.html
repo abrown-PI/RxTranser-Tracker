@@ -80,6 +80,7 @@ tbody tr:hover { background: var(--primary-bg); }
 .badge-ready { background: #fef3c7; color: #92400e; }
 .badge-shipped { background: var(--success-bg); color: var(--success); }
 .badge-delivered { background: #dbeafe; color: #1e40af; }
+.badge-received { background: #d1fae5; color: #065f46; }
 .badge-canceled { background: var(--gray-200); color: var(--gray-600); }
 .badge-cold { background: var(--info-bg); color: var(--info); margin-left: 4px; }
 
@@ -387,8 +388,8 @@ function slaStatus(t) {
   return { state: 'ok', daysOver: 0 };
 }
 
-const STATUSES = ['New', 'In Progress', 'Pending Clarification', 'Needs Formula', 'Shipped', 'Delivered', 'Canceled'];
-const STATUS_BADGE = { 'New': 'badge-new', 'In Progress': 'badge-progress', 'Pending Clarification': 'badge-pending-clar', 'Needs Formula': 'badge-needs-formula', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
+const STATUSES = ['New', 'In Progress', 'Pending Clarification', 'Needs Formula', 'Shipped', 'Delivered', 'Received', 'Canceled'];
+const STATUS_BADGE = { 'New': 'badge-new', 'In Progress': 'badge-progress', 'Pending Clarification': 'badge-pending-clar', 'Needs Formula': 'badge-needs-formula', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Received': 'badge-received', 'Canceled': 'badge-canceled' };
 // Delay statuses that trigger a notification to the originating pharmacy
 const DELAY_STATUSES = ['Pending Clarification', 'Needs Formula'];
 
@@ -3513,7 +3514,7 @@ function renderShipments() {
 
     ${filtered.length === 0 ? `<div class="empty"><h3>No shipments match</h3></div>` : `
     <table><thead><tr>
-      <th style="width:90px">Direction</th><th>From → To</th><th>Type</th><th>Carrier</th><th>Tracking</th><th>Transfers</th><th>Status</th><th>Ship Date</th><th>Delivered</th><th>Action</th>
+      <th style="width:90px">Direction</th><th>From → To</th><th>Type</th><th>Carrier</th><th>BULK ID</th><th>FedEx Tracking</th><th>Transfers</th><th>Status</th><th>Ship Date</th><th>Delivered</th><th>Action</th>
     </tr></thead><tbody>
       ${filtered.map(s => {
         const isIncoming = s.toLocation === myLoc;
@@ -3532,7 +3533,8 @@ function renderShipments() {
         <td><strong>${escapeHtml(s.fromLocation)}</strong> → ${escapeHtml(s.toLocation)}</td>
         <td>${escapeHtml(s.destinationType)}</td>
         <td>${escapeHtml(s.carrier)}${s.labelGenerated?' <span class="badge badge-verified" style="font-size:10px">Label auto-generated</span>':''}</td>
-        <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<div style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</div>`:''}${escapeHtml(s.trackingNumber||'—')}</td>
+        <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<span style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</span>`:'<span class="item-sub">—</span>'}</td>
+        <td style="font-family:monospace;font-size:12px">${escapeHtml(s.trackingNumber||'—')}</td>
         <td><span style="font-weight:600">${txCount}</span> <span class="item-sub" style="font-size:11px">${txCount===1?'transfer':'transfers'}</span></td>
         <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>${s.receivedBy?`<div class="item-sub">by ${escapeHtml(s.receivedBy)}</div>`:''}</td>
         <td>${fmtDate(s.shipDate)}</td>
@@ -3706,8 +3708,10 @@ function openCreateShipment() {
       destinationType: destType,
       carrier: document.getElementById('cm-carrier').value,
       trackingNumber: tracking, labelGenerated: false,
-      status: 'In Transit',
-      shipDate,
+      // Only call it In Transit if we already have a real FedEx tracking number.
+      // Otherwise it's just Pending (waiting for the WorldShip label + auto-match cron).
+      status: tracking ? 'In Transit' : 'Pending',
+      shipDate: tracking ? shipDate : null,
       deliveredDate: null, receivedDate: null, receivedBy: null,
       transferIds: picks,
       // Bulk shipments to a pharmacy get a printable BULK-* ID + packing slip
@@ -3718,7 +3722,17 @@ function openCreateShipment() {
     };
     SHIPMENTS.unshift(s);
     const shippedTransfers = picks.map(id => TRANSFERS.find(x => x.id === id)).filter(Boolean);
-    shippedTransfers.forEach(t => { t.status = 'Shipped'; t.dateShipped = s.shipDate; t.trackingNumber = s.trackingNumber; apiUpdateTransfer(t); });
+    // Only flip the linked transfers to Shipped if we actually have tracking data.
+    // Without tracking, the box isn't really out the door yet — leave them in their
+    // current status. The auto-match cron will flip them once it finds the FedEx record.
+    shippedTransfers.forEach(t => {
+      if (tracking) {
+        t.status = 'Shipped';
+        t.dateShipped = s.shipDate;
+        t.trackingNumber = s.trackingNumber;
+        apiUpdateTransfer(t);
+      }
+    });
     // Fire email notification to the receiving location (or fill location for patient ships)
     fetch('/api/send-shipment-notification', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3818,12 +3832,19 @@ function openShipment(id) {
   const rec = document.getElementById('sm-receive');
   if (rec) rec.onclick = () => {
     s.status = 'Received'; s.receivedDate = new Date().toISOString().slice(0,10); s.receivedBy = CURRENT_USER.name;
+    // Cascade Received status + receipt info to every transfer in the package
     s.transferIds.forEach(id => {
       const t = TRANSFERS.find(x => x.id === id);
-      if (t) { t.status = 'Delivered'; apiUpdateTransfer(t); }
+      if (t) {
+        t.status = 'Received';
+        t.dateReceivedByPatient = s.receivedDate;
+        t.receivedBy = CURRENT_USER.name;
+        apiUpdateTransfer(t);
+        logAudit('mark_received', 'transfer', t.id, { shipmentId: s.id });
+      }
     });
     close();
-    alert('Marked received.');
+    alert(`Marked received — ${s.transferIds.length} transfer${s.transferIds.length===1?'':'s'} updated.`);
     render();
   };
   const photoEl = document.getElementById('sm-photo');
