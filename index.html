@@ -2235,17 +2235,17 @@ function renderNewForm() {
           <div class="hint" id="f-ccForm-name">${d.ccForm?escapeHtml(d.ccForm.name):'Upload the patient-signed authorization form. Billing team will retrieve this from the app.'}</div>
         </div>
         <div class="form-group">
-          <label>Anticipated Ship Date <span class="hint" style="text-transform:none;font-weight:400">(auto-calculated)</span></label>
-          <input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" />
-          <div class="hint" id="f-antShipNote"></div>
-        </div>
-        <div class="form-group">
           <label>For future appointment?</label>
           <div style="display:flex;gap:8px;align-items:center">
             <input type="checkbox" id="f-isAppt" ${d.appointmentDate?'checked':''} style="margin-right:4px" />
             <input type="date" id="f-apptDate" value="${escapeHtml(d.appointmentDate||'')}" ${d.appointmentDate?'':'disabled'} style="flex:1" />
           </div>
           <div class="hint">When set, the ship date works backwards from the appointment so the box arrives in time.</div>
+        </div>
+        <div class="form-group">
+          <label>Anticipated Ship Date <span class="hint" style="text-transform:none;font-weight:400">(auto-calculated)</span></label>
+          <input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" />
+          <div class="hint" id="f-antShipNote"></div>
         </div>
         <div class="form-group"><label>Patient Price <span class="hint" style="text-transform:none;font-weight:400">(optional)</span></label><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--gray-500)">$</span><input id="f-patientPrice" value="${escapeHtml(d.patientPrice||'')}" placeholder="0.00" inputmode="decimal" style="flex:1" /></div></div>
       </div></div>
