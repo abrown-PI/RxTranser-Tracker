@@ -2081,7 +2081,19 @@ function renderNewForm() {
           <input type="file" id="f-ccForm" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" />
           <div class="hint" id="f-ccForm-name">${d.ccForm?escapeHtml(d.ccForm.name):'Upload the patient-signed authorization form. Billing team will retrieve this from the app.'}</div>
         </div>
-        <div class="form-group"><label>Anticipated Ship Date</label><input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" /></div>
+        <div class="form-group">
+          <label>Anticipated Ship Date <span class="hint" style="text-transform:none;font-weight:400">(auto-calculated)</span></label>
+          <input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" />
+          <div class="hint" id="f-antShipNote"></div>
+        </div>
+        <div class="form-group">
+          <label>For future appointment?</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="checkbox" id="f-isAppt" ${d.appointmentDate?'checked':''} style="margin-right:4px" />
+            <input type="date" id="f-apptDate" value="${escapeHtml(d.appointmentDate||'')}" ${d.appointmentDate?'':'disabled'} style="flex:1" />
+          </div>
+          <div class="hint">When set, the ship date works backwards from the appointment so the box arrives in time.</div>
+        </div>
         <div class="form-group"><label>Patient Price <span class="hint" style="text-transform:none;font-weight:400">(optional)</span></label><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--gray-500)">$</span><input id="f-patientPrice" value="${escapeHtml(d.patientPrice||'')}" placeholder="0.00" inputmode="decimal" style="flex:1" /></div></div>
       </div></div>
 
@@ -2297,6 +2309,7 @@ function freshDraft() {
     billing: 'HealNow', ccOnFileInPaladin: false, ccForm: null, patientPrice: '',
     coldItem: false,
     tempAddress: false, tempThroughDate: '',
+    appointmentDate: '',
     anticipatedShipDate: '',
     pkSheets: [], formula: null, hardCopies: [],
     items: [freshItem()],
@@ -2381,30 +2394,69 @@ function bindDraftInputs() {
 
   // Ship-to-Pharmacy auto-fill: when user picks Pharmacy or changes origin, fill ship address from origin pharmacy
   const fillPharmacyAddress = () => {
-    if (state.draft.shipTo !== 'Pharmacy') return;
+    if (state.draft.shipTo !== 'Pharmacy') { recalcAntShip(); return; }
     const addr = PHARMACY_ADDRESSES[state.draft.originLocation];
-    if (!addr) return;
+    if (!addr) { recalcAntShip(); return; }
     state.draft.shipAddr1 = addr.addr1 || '';
     state.draft.shipAddr2 = addr.addr2 || '';
     state.draft.shipCity = addr.city || '';
     state.draft.shipState = addr.state || '';
     state.draft.shipZip = addr.zip || '';
     ['shipAddr1','shipAddr2','shipCity','shipState','shipZip'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.value = state.draft[f]; });
-    // Auto-calc anticipated ship date as the next occurrence of the destination
-    // pharmacy's receiving day. If the date was already entered manually, don't overwrite.
-    if (typeof addr.shippingDay === 'number' && !state.draft.anticipatedShipDate) {
-      const target = addr.shippingDay; // 0=Sun..6=Sat
-      const today = new Date();
-      const todayDow = today.getDay();
-      let daysAhead = (target - todayDow + 7) % 7;
-      if (daysAhead === 0) daysAhead = 7; // if today is the target day, skip to next week
-      const ship = new Date(today.getFullYear(), today.getMonth(), today.getDate() + daysAhead);
-      const iso = ship.toISOString().slice(0,10);
-      state.draft.anticipatedShipDate = iso;
-      const el = document.getElementById('f-antShip');
-      if (el) el.value = iso;
-    }
+    recalcAntShip();
   };
+
+  // Recalculate the anticipated ship date whenever shipTo / origin / appointment changes.
+  // Logic:
+  //   Ship-to-Pharmacy + appt date: next destination shipping day at or before (appt - 2 days)
+  //   Ship-to-Pharmacy + no appt:   next destination shipping day from today
+  //   Ship-to-Patient + appt date:  appt date - 2 days (typical 2-day FedEx)
+  //   Ship-to-Patient + no appt:    today + 1 day
+  // Always overwrites — the field is auto-managed. User can still type a manual value
+  // but it will be replaced on the next relevant change.
+  function recalcAntShip() {
+    const d = state.draft;
+    const apptISO = d.appointmentDate || '';
+    const apptDate = apptISO ? new Date(apptISO + 'T12:00:00') : null;
+    let target = null;
+    const TWO_DAYS = 2 * 86400000;
+    if (d.shipTo === 'Pharmacy') {
+      const addr = PHARMACY_ADDRESSES[d.originLocation] || {};
+      const dow = (typeof addr.shippingDay === 'number') ? addr.shippingDay : null;
+      const noteEl = document.getElementById('f-antShipNote');
+      if (dow === null) { if (noteEl) noteEl.textContent = `(no receiving day set for ${d.originLocation || 'destination'} — set it in Admin → Pharmacy Mailing Addresses)`; return; }
+      if (noteEl) noteEl.textContent = '';
+      // Find the latest shipping day at or before targetDate (or next shipping day from today)
+      const anchor = apptDate ? new Date(apptDate.getTime() - TWO_DAYS) : new Date();
+      // step backward to find the most recent matching day (within 6 days)
+      if (apptDate) {
+        for (let i = 0; i < 7; i++) {
+          const tryDate = new Date(anchor.getTime() - i * 86400000);
+          if (tryDate.getDay() === dow) { target = tryDate; break; }
+        }
+      } else {
+        // step forward from today to find the next matching day
+        for (let i = 0; i < 7; i++) {
+          const tryDate = new Date(anchor.getTime() + i * 86400000);
+          if (tryDate.getDay() === dow) {
+            // if today matches, skip to next week (we want NEXT shipping day)
+            if (i === 0) { target = new Date(tryDate.getTime() + 7 * 86400000); break; }
+            target = tryDate; break;
+          }
+        }
+      }
+    } else if (d.shipTo === 'Patient') {
+      const noteEl = document.getElementById('f-antShipNote');
+      if (noteEl) noteEl.textContent = '';
+      if (apptDate) target = new Date(apptDate.getTime() - TWO_DAYS);
+      else target = new Date(Date.now() + 86400000); // tomorrow
+    }
+    if (!target) return;
+    const iso = target.toISOString().slice(0,10);
+    d.anticipatedShipDate = iso;
+    const el = document.getElementById('f-antShip');
+    if (el) el.value = iso;
+  }
   const shipToSel = document.getElementById('f-shipTo');
   if (shipToSel) shipToSel.addEventListener('change', fillPharmacyAddress);
   const originSel2 = document.getElementById('f-originLocation');
@@ -2425,6 +2477,24 @@ function bindDraftInputs() {
     if (tempFields) tempFields.style.display = tempChk.checked ? '' : 'none';
   });
   if (tempDate) tempDate.addEventListener('change', () => { state.draft.tempThroughDate = tempDate.value; });
+
+  // Future appointment date: checkbox enables the date input; date change triggers recalc
+  const apptChk = document.getElementById('f-isAppt');
+  const apptDateEl = document.getElementById('f-apptDate');
+  if (apptChk) apptChk.addEventListener('change', () => {
+    if (apptDateEl) apptDateEl.disabled = !apptChk.checked;
+    if (!apptChk.checked) { state.draft.appointmentDate = ''; if (apptDateEl) apptDateEl.value = ''; }
+    recalcAntShip();
+  });
+  if (apptDateEl) apptDateEl.addEventListener('change', () => {
+    state.draft.appointmentDate = apptDateEl.value;
+    recalcAntShip();
+  });
+  // Recalc on shipTo or origin change (in addition to the address auto-fill)
+  if (shipToSel) shipToSel.addEventListener('change', recalcAntShip);
+  if (originSel2) originSel2.addEventListener('change', recalcAntShip);
+  // Run once on form open so the date is populated on a fresh draft
+  recalcAntShip();
 
   // Show/hide CC form upload based on billing
   const billingSel = document.getElementById('f-billing');
@@ -2556,6 +2626,7 @@ function submitDraft() {
       patientPrice: d.patientPrice || '',
       coldItem: d.coldItem, anticipatedShipDate: d.anticipatedShipDate,
       tempAddress: !!d.tempAddress, tempThroughDate: d.tempThroughDate || '',
+      appointmentDate: d.appointmentDate || '',
       pkSheets: d.pkSheets, formula: d.formula, hardCopies: d.hardCopies,
       items: d.items, transferNotes: d.transferNotes,
       lastEditedBy: CURRENT_USER.name, lastEditedAt: new Date().toISOString()
@@ -3027,13 +3098,15 @@ function transferSummary(id) { const t = TRANSFERS.find(x => x.id === id); retur
 
 function renderShipments() {
   const root = document.getElementById('view-shipments');
-  if (!state.shipFilter) state.shipFilter = { mine: false, search: '' };
+  if (!state.shipFilter) state.shipFilter = { mine: false, search: '', dateFrom: '', dateTo: '' };
   const filtered = visibleShipments().filter(s => {
     if (state.shipFilter.mine && s.toLocation !== CURRENT_USER.location) return false;
     if (state.shipFilter.search) {
       const q = state.shipFilter.search.toLowerCase();
       if (!(s.trackingNumber||'').toLowerCase().includes(q) && !s.toLocation.toLowerCase().includes(q) && !s.fromLocation.toLowerCase().includes(q)) return false;
     }
+    if (state.shipFilter.dateFrom) { if (!s.shipDate || s.shipDate < state.shipFilter.dateFrom) return false; }
+    if (state.shipFilter.dateTo) { if (!s.shipDate || s.shipDate > state.shipFilter.dateTo) return false; }
     return true;
   });
   root.innerHTML = `
@@ -3053,8 +3126,15 @@ function renderShipments() {
     </div>
 
     <div class="filters">
-      <input placeholder="Filter tracking / location" id="shipSearch" value="${escapeHtml(state.shipFilter.search)}" style="min-width:260px" />
+      <input placeholder="Filter tracking / location" id="shipSearch" value="${escapeHtml(state.shipFilter.search)}" style="min-width:240px" />
       <label class="checkbox-row"><input type="checkbox" id="shipMine" ${state.shipFilter.mine?'checked':''} /> Only shipments to my location (${escapeHtml(CURRENT_USER.location)})</label>
+      <span style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:12px;color:var(--gray-600)">Ship date from:</label>
+        <input type="date" id="shipDateFrom" value="${escapeHtml(state.shipFilter.dateFrom||'')}" />
+        <label style="font-size:12px;color:var(--gray-600)">to:</label>
+        <input type="date" id="shipDateTo" value="${escapeHtml(state.shipFilter.dateTo||'')}" />
+        ${(state.shipFilter.dateFrom||state.shipFilter.dateTo)?'<button class="btn btn-secondary btn-sm" id="shipDateClear" style="padding:2px 8px;font-size:11px">Clear dates</button>':''}
+      </span>
     </div>
 
     ${filtered.length === 0 ? `<div class="empty"><h3>No shipments match</h3></div>` : `
@@ -3083,6 +3163,10 @@ function renderShipments() {
   updateFedexStatusPill();
   document.getElementById('shipMine').addEventListener('change', e => { state.shipFilter.mine = e.target.checked; renderShipments(); });
   document.getElementById('shipSearch').addEventListener('input', e => { state.shipFilter.search = e.target.value; renderShipments(); });
+  document.getElementById('shipDateFrom').addEventListener('change', e => { state.shipFilter.dateFrom = e.target.value; renderShipments(); });
+  document.getElementById('shipDateTo').addEventListener('change', e => { state.shipFilter.dateTo = e.target.value; renderShipments(); });
+  const clrDates = document.getElementById('shipDateClear');
+  if (clrDates) clrDates.onclick = () => { state.shipFilter.dateFrom = ''; state.shipFilter.dateTo = ''; renderShipments(); };
   root.querySelectorAll('tr[data-ship]').forEach(tr => tr.addEventListener('click', e => {
     if (e.target.closest('[data-receive-btn]')) return;
     openShipment(+tr.dataset.ship);
@@ -3111,11 +3195,13 @@ function openCreateShipment() {
   const renderUI = () => {
     const destType = document.getElementById('cm-destType')?.value || 'Pharmacy';
     const toLoc = document.getElementById('cm-to')?.value || LOCATIONS[0];
+    const antShipBefore = document.getElementById('cm-antBefore')?.value || '';
     let availableTransfers = visibleTransfers().filter(t => {
       if (SHIPMENTS.some(s => s.transferIds.includes(t.id) && s.status !== 'Canceled')) return false;
       // Only In Progress is eligible. New transfers must be processed first.
       if (t.status !== 'In Progress') return false;
       if (t.canceledAt && !t.cancelAcknowledged) return false;
+      if (antShipBefore && (!t.anticipatedShipDate || t.anticipatedShipDate > antShipBefore)) return false;
       if (destType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === toLoc;
       return t.shipTo === 'Patient';
     });
@@ -3172,7 +3258,15 @@ function openCreateShipment() {
         <div class="form-group"><label>Carrier</label><select id="cm-carrier"><option>FedEx</option><option>UPS</option><option>USPS</option><option>Courier</option></select></div>
         <div class="form-group"><label>Tracking Number</label><input id="cm-tracking" placeholder="Paste tracking # from WorldShip after creating label" /></div>
       </div>
-      <div class="section"><div class="section-title">Transfers to Include</div>
+      <div class="section">
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+          <div class="section-title" style="border:none;padding:0;margin:0">Transfers to Include</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <label style="font-size:12px;color:var(--gray-600)">Anticipated ship on or before:</label>
+            <input type="date" id="cm-antBefore" style="padding:4px 6px;font-size:12px" />
+            <button type="button" class="btn btn-secondary btn-sm" id="cm-antClear" style="padding:2px 8px;font-size:11px">Clear</button>
+          </div>
+        </div>
         <div id="cm-transfersBox"></div>
       </div>
     </div>
@@ -3195,6 +3289,8 @@ function openCreateShipment() {
     renderUI();
   };
   document.getElementById('cm-to').onchange = renderUI;
+  document.getElementById('cm-antBefore').onchange = renderUI;
+  document.getElementById('cm-antClear').onclick = () => { document.getElementById('cm-antBefore').value = ''; renderUI(); };
   document.getElementById('cmSave').onclick = () => {
     const picks = [...document.querySelectorAll('.cm-t:checked')].map(c => +c.value);
     const tracking = document.getElementById('cm-tracking').value.trim();
