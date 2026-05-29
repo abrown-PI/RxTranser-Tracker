@@ -1005,8 +1005,8 @@ function renderTransfers() {
               <button class="btn btn-secondary btn-sm" data-edit-tx="${t.id}" title="Edit transfer" style="padding:3px 7px;font-size:11px">✏️ Edit</button>
               <button class="btn btn-primary btn-sm" data-rcvrx-tx="${t.id}" title="Enter Receiving Rx #" style="padding:3px 7px;font-size:11px">💊 Rx #</button>
               ${t.paid === 'Paid'
-                ? `<span title="Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:#16a34a;color:white;border-radius:4px">✓ PAID</span>`
-                : `<button class="btn btn-sm" data-paid-tx="${t.id}" title="Click to mark this transfer Paid / Charged" style="padding:3px 9px;font-size:11px;font-weight:700;background:#dc2626;color:white;border:0;border-radius:4px;cursor:pointer">✕ NOT PAID</button>`}
+                ? `<span title="Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:#16a34a;color:white;border-radius:4px">✓ Paid</span>`
+                : `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Click to mark this transfer Paid / Charged" style="padding:3px 9px;font-size:11px;font-weight:600">💲 Mark Paid / Charged</button>`}
               <button class="btn btn-secondary btn-sm" data-ask="${t.id}" title="Ask a question on this transfer" style="padding:3px 7px;font-size:11px">❓ Ask</button>
             </td>
           </tr>`;
