@@ -3011,8 +3011,8 @@ function renderModal() {
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <strong>Paid:</strong>
               ${t.paid === 'Paid'
-                ? `<span style="display:inline-block;padding:4px 12px;font-size:12px;font-weight:700;background:#16a34a;color:white;border-radius:4px">✓ PAID${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}</span> <button class="btn btn-secondary btn-sm" id="unpaidBtn" style="padding:2px 8px;font-size:11px">Undo</button>`
-                : `<span style="display:inline-block;padding:4px 12px;font-size:12px;font-weight:700;background:#dc2626;color:white;border-radius:4px">✕ NOT PAID</span> <button class="btn btn-primary btn-sm" id="paidBtn" style="padding:3px 12px;font-size:12px">💲 Mark Paid / Charged</button>`}
+                ? `<span style="display:inline-block;padding:4px 12px;font-size:12px;font-weight:700;background:#16a34a;color:white;border-radius:4px">✓ Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}</span> <button class="btn btn-secondary btn-sm" id="unpaidBtn" style="padding:2px 8px;font-size:11px">Undo</button>`
+                : `<button class="btn btn-primary btn-sm" id="paidBtn" style="padding:4px 14px;font-size:12px;font-weight:600">💲 Mark Paid / Charged</button>`}
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" style="margin-top:10px" id="editShipBtn">Edit ship / tracking</button>
