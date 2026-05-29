@@ -323,7 +323,11 @@ let FORMULAS = [
 // transfers/shipments where their location is origin, fill, or destination.
 function canSeeTransfer(t) {
   if (CURRENT_USER.role === 'admin') return true;
-  return t.originLocation === CURRENT_USER.location || t.fillLocation === CURRENT_USER.location;
+  if (t.originLocation === CURRENT_USER.location) return true;
+  if (t.fillLocation === CURRENT_USER.location) return true;
+  // Pickup-at-other-pharmacy: the destination pharmacy should also see the transfer
+  if (t.pickupAtPharmacy && t.pickupLocation === CURRENT_USER.location) return true;
+  return false;
 }
 function canSeeShipment(s) {
   if (CURRENT_USER.role === 'admin') return true;
@@ -416,7 +420,7 @@ const nextId = () => ++_nextId;
 // =====================================================================
 // State + routing
 // =====================================================================
-const state = { tab: 'transfers', filterStatus: '', filterOrigin: '', filterFill: '', filterType: '', search: '', openTransferId: null };
+const state = { tab: 'transfers', filterStatus: '', filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
 
 function bindTabs() {
   document.querySelectorAll('.tab').forEach(btn => {
@@ -926,6 +930,12 @@ function renderTransfers() {
     if (state.filterOrigin && t.originLocation !== state.filterOrigin) return false;
     if (state.filterFill && t.fillLocation !== state.filterFill) return false;
     if (state.filterType && (t.transferType || 'New') !== state.filterType) return false;
+    if (state.filterPaid === 'Paid' && t.paid !== 'Paid') return false;
+    if (state.filterPaid === 'NotPaid' && t.paid === 'Paid') return false;
+    if (state.filterAntShipFrom && (!t.anticipatedShipDate || t.anticipatedShipDate < state.filterAntShipFrom)) return false;
+    if (state.filterAntShipTo && (!t.anticipatedShipDate || t.anticipatedShipDate > state.filterAntShipTo)) return false;
+    if (state.filterShipFrom && (!t.dateShipped || t.dateShipped.slice(0,10) < state.filterShipFrom)) return false;
+    if (state.filterShipTo && (!t.dateShipped || t.dateShipped.slice(0,10) > state.filterShipTo)) return false;
     if (state.dateFrom) { if (!t.createdAt || t.createdAt.slice(0,10) < state.dateFrom) return false; }
     if (state.dateTo) { if (!t.createdAt || t.createdAt.slice(0,10) > state.dateTo) return false; }
     if (state.search) {
@@ -957,13 +967,19 @@ function renderTransfers() {
       <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:260px" />
       <select id="f-status"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===state.filterStatus?'selected':''}>${s}</option>`).join('')}</select>
       <select id="f-type"><option value="">All types</option><option value="New" ${state.filterType==='New'?'selected':''}>New only</option><option value="Refill" ${state.filterType==='Refill'?'selected':''}>Refills only</option></select>
+      <select id="f-paid"><option value="">Paid: all</option><option value="Paid" ${state.filterPaid==='Paid'?'selected':''}>✓ Paid only</option><option value="NotPaid" ${state.filterPaid==='NotPaid'?'selected':''}>Not paid only</option></select>
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
-      <label style="font-size:12px;color:var(--gray-600)">From</label>
-      <input type="date" id="f-dateFrom" value="${escapeHtml(state.dateFrom||'')}" />
-      <label style="font-size:12px;color:var(--gray-600)">To</label>
-      <input type="date" id="f-dateTo" value="${escapeHtml(state.dateTo||'')}" />
-      ${(state.dateFrom||state.dateTo)?'<button class="btn btn-secondary btn-sm" id="clearDateRange">Clear dates</button>':''}
+      <span style="display:inline-flex;align-items:center;gap:4px"><label style="font-size:12px;color:var(--gray-600)">Created</label>
+        <input type="date" id="f-dateFrom" value="${escapeHtml(state.dateFrom||'')}" title="Created from" />
+        <input type="date" id="f-dateTo" value="${escapeHtml(state.dateTo||'')}" title="Created to" /></span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><label style="font-size:12px;color:var(--gray-600)">Ant ship</label>
+        <input type="date" id="f-antShipFrom" value="${escapeHtml(state.filterAntShipFrom||'')}" title="Anticipated ship from" />
+        <input type="date" id="f-antShipTo" value="${escapeHtml(state.filterAntShipTo||'')}" title="Anticipated ship to" /></span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><label style="font-size:12px;color:var(--gray-600)">Shipped</label>
+        <input type="date" id="f-shipFrom" value="${escapeHtml(state.filterShipFrom||'')}" title="Ship date from" />
+        <input type="date" id="f-shipTo" value="${escapeHtml(state.filterShipTo||'')}" title="Ship date to" /></span>
+      ${(state.dateFrom||state.dateTo||state.filterAntShipFrom||state.filterAntShipTo||state.filterShipFrom||state.filterShipTo)?'<button class="btn btn-secondary btn-sm" id="clearDateRange">Clear dates</button>':''}
       <label style="font-size:12px;color:var(--gray-600);margin-left:8px">Sort</label>
       <select id="f-sortBy">
         <option value="dateDesc" ${state.sortBy==='dateDesc'?'selected':''}>Transfer date (newest)</option>
@@ -978,8 +994,8 @@ function renderTransfers() {
     <table>
       <thead><tr>
         <th style="width:30px"></th>
-        <th>ID</th><th>Patient</th><th>From → Fill</th><th>Ship To</th><th>Items</th><th>Status</th><th>SLA</th>
-        <th>Transfer Date</th><th>Ship Date</th><th>Tracking</th><th>Submitted</th><th>Actions</th>
+        <th>ID</th><th>Patient</th><th>From → Fill</th><th>Ship To</th><th>Status</th><th>SLA</th>
+        <th>Transfer Date</th><th>Ant Ship</th><th>Ship Date</th><th>Tracking</th><th>Actions</th>
       </tr></thead>
       <tbody>
         ${filtered.map(t => {
@@ -990,16 +1006,15 @@ function renderTransfers() {
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
             <td><code style="font-family:monospace;font-size:12px;font-weight:600;color:var(--primary-dark)">${t.id}</code></td>
-            <td><strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div></td>
+            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
             <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
-            <td>${escapeHtml(t.shipTo)}${t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:''}</td>
-            <td>${t.items.length}</td>
+            <td>${escapeHtml(t.shipTo)}${t.pickupAtPharmacy?`<div class="item-sub" style="color:var(--primary-dark);font-weight:600">📍 ${escapeHtml(t.pickupLocation||'?')}${t.isBulkPickup?' · BULK':''}</div>`:(t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:'')}</td>
             <td onclick="event.stopPropagation()"><select class="row-status status-select" data-status-id="${t.id}" style="font-size:11px;padding:3px 4px">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
             <td>${slaCell}</td>
             <td>${fmtDate(t.createdAt)}</td>
+            <td>${fmtDate(t.anticipatedShipDate)}</td>
             <td>${fmtDate(t.dateShipped)}</td>
             <td>${escapeHtml(t.trackingNumber||'—')}</td>
-            <td>${escapeHtml(t.submittedBy)}</td>
             <td onclick="event.stopPropagation()" style="white-space:nowrap">
               <button class="btn btn-secondary btn-sm" data-view-tx="${t.id}" title="View transfer details" style="padding:3px 7px;font-size:11px">👁 View</button>
               <button class="btn btn-secondary btn-sm" data-edit-tx="${t.id}" title="Edit transfer" style="padding:3px 7px;font-size:11px">✏️ Edit</button>
@@ -1017,13 +1032,23 @@ function renderTransfers() {
   document.getElementById('f-search').addEventListener('input', e => { state.search = e.target.value; renderTransfers(); });
   document.getElementById('f-status').addEventListener('change', e => { state.filterStatus = e.target.value; renderTransfers(); });
   document.getElementById('f-type').addEventListener('change', e => { state.filterType = e.target.value; renderTransfers(); });
+  document.getElementById('f-paid').addEventListener('change', e => { state.filterPaid = e.target.value; renderTransfers(); });
   document.getElementById('f-origin').addEventListener('change', e => { state.filterOrigin = e.target.value; renderTransfers(); });
   document.getElementById('f-fill').addEventListener('change', e => { state.filterFill = e.target.value; renderTransfers(); });
+  document.getElementById('f-antShipFrom').addEventListener('change', e => { state.filterAntShipFrom = e.target.value; renderTransfers(); });
+  document.getElementById('f-antShipTo').addEventListener('change', e => { state.filterAntShipTo = e.target.value; renderTransfers(); });
+  document.getElementById('f-shipFrom').addEventListener('change', e => { state.filterShipFrom = e.target.value; renderTransfers(); });
+  document.getElementById('f-shipTo').addEventListener('change', e => { state.filterShipTo = e.target.value; renderTransfers(); });
   document.getElementById('f-dateFrom').addEventListener('change', e => { state.dateFrom = e.target.value; renderTransfers(); });
   document.getElementById('f-dateTo').addEventListener('change', e => { state.dateTo = e.target.value; renderTransfers(); });
   document.getElementById('f-sortBy').addEventListener('change', e => { state.sortBy = e.target.value; renderTransfers(); });
   const clearDates = document.getElementById('clearDateRange');
-  if (clearDates) clearDates.onclick = () => { state.dateFrom = ''; state.dateTo = ''; renderTransfers(); };
+  if (clearDates) clearDates.onclick = () => {
+    state.dateFrom = ''; state.dateTo = '';
+    state.filterAntShipFrom = ''; state.filterAntShipTo = '';
+    state.filterShipFrom = ''; state.filterShipTo = '';
+    renderTransfers();
+  };
   root.querySelectorAll('tbody tr').forEach(tr => tr.addEventListener('click', e => {
     if (e.target.classList.contains('print-pick')) return;
     if (e.target.dataset && e.target.dataset.ask) return; // let the ask link handle it
@@ -2202,6 +2227,22 @@ function renderNewForm() {
 
       <div class="section"><div class="section-title">Shipping</div>
       <div class="form-grid">
+        <div class="form-group full" id="f-pickupBox" style="display:${d.shipTo==='Pharmacy'?'':'none'};background:var(--primary-bg);border:1px solid var(--primary-light);border-radius:6px;padding:10px 14px;margin-bottom:8px">
+          <div class="checkbox-row"><input type="checkbox" id="f-pickupAt" ${d.pickupAtPharmacy?'checked':''} /><label for="f-pickupAt"><strong>📍 Patient picks up at another pharmacy</strong> <span class="hint" style="text-transform:none;font-weight:400">(box ships to that pharmacy instead of back to origin)</span></label></div>
+          <div id="f-pickupFields" style="display:${d.pickupAtPharmacy?'':'none'};margin-top:8px">
+            <div class="form-grid">
+              <div class="form-group"><label>Pickup pharmacy</label><select id="f-pickupLoc"><option value="">— pick destination —</option>${LOCATIONS.map(l=>`<option ${l===d.pickupLocation?'selected':''}>${l}</option>`).join('')}</select><div class="hint">This pharmacy will see the transfer on their list</div></div>
+              <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-bulkPickup" ${d.isBulkPickup?'checked':''} /><label for="f-bulkPickup"><strong>📦 Bulk pickup order</strong></label></div><div class="hint">No per-patient detail — just a script count and short description</div></div>
+            </div>
+            <div id="f-bulkFields" style="display:${d.isBulkPickup?'':'none'};margin-top:6px;background:white;border:1px dashed var(--primary);border-radius:6px;padding:10px 14px">
+              <div class="form-grid">
+                <div class="form-group"><label>Number of scripts</label><input type="number" id="f-bulkCount" value="${escapeHtml(String(d.bulkScriptCount||''))}" min="1" placeholder="e.g. 12" /></div>
+                <div class="form-group full"><label>Description / notes</label><input id="f-bulkDesc" value="${escapeHtml(d.bulkDescription||'')}" placeholder="e.g. Weekly batch of compounds for Seminole pickup customers" /></div>
+              </div>
+              <div class="hint" style="margin-top:4px">When checked, the Patient + Items sections below are not required.</div>
+            </div>
+          </div>
+        </div>
         <div class="form-group"><label>Ship To</label><select id="f-shipTo">${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===d.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
         <div class="form-group"><label>Delivery Charge (if applicable)</label><select id="f-deliveryCharge"><option value="">—</option>${['3','5','15'].map(v=>`<option ${v===d.deliveryCharge?'selected':''}>$${v}</option>`).join('')}</select></div>
         <div class="form-group full"><label>Address Line 1</label><input id="f-shipAddr1" value="${escapeHtml(d.shipAddr1)}" /></div>
@@ -2464,6 +2505,8 @@ function freshDraft() {
     tempAddress: false, tempThroughDate: '',
     appointmentDate: '',
     anticipatedShipDate: '',
+    pickupAtPharmacy: false, pickupLocation: '',
+    isBulkPickup: false, bulkScriptCount: '', bulkDescription: '',
     pkSheets: [], formula: null, hardCopies: [],
     items: [freshItem()],
     transferNotes: ''
@@ -2548,7 +2591,10 @@ function bindDraftInputs() {
   // Ship-to-Pharmacy auto-fill: when user picks Pharmacy or changes origin, fill ship address from origin pharmacy
   const fillPharmacyAddress = () => {
     if (state.draft.shipTo !== 'Pharmacy') { recalcAntShip(); return; }
-    const addr = PHARMACY_ADDRESSES[state.draft.originLocation];
+    // Destination is normally originLocation, but if pickup-at-other-pharmacy is on,
+    // the box ships to pickupLocation instead.
+    const destLoc = (state.draft.pickupAtPharmacy && state.draft.pickupLocation) ? state.draft.pickupLocation : state.draft.originLocation;
+    const addr = PHARMACY_ADDRESSES[destLoc];
     if (!addr) { recalcAntShip(); return; }
     state.draft.shipAddr1 = addr.addr1 || '';
     state.draft.shipAddr2 = addr.addr2 || '';
@@ -2574,10 +2620,11 @@ function bindDraftInputs() {
     let target = null;
     const TWO_DAYS = 2 * 86400000;
     if (d.shipTo === 'Pharmacy') {
-      const addr = PHARMACY_ADDRESSES[d.originLocation] || {};
+      const destLoc = (d.pickupAtPharmacy && d.pickupLocation) ? d.pickupLocation : d.originLocation;
+      const addr = PHARMACY_ADDRESSES[destLoc] || {};
       const dow = (typeof addr.shippingDay === 'number') ? addr.shippingDay : null;
       const noteEl = document.getElementById('f-antShipNote');
-      if (dow === null) { if (noteEl) noteEl.textContent = `(no receiving day set for ${d.originLocation || 'destination'} — set it in Admin → Pharmacy Mailing Addresses)`; return; }
+      if (dow === null) { if (noteEl) noteEl.textContent = `(no receiving day set for ${destLoc || 'destination'} — set it in Admin → Pharmacy Mailing Addresses)`; return; }
       if (noteEl) noteEl.textContent = '';
       // Find the latest shipping day at or before targetDate (or next shipping day from today)
       const anchor = apptDate ? new Date(apptDate.getTime() - TWO_DAYS) : new Date();
@@ -2646,6 +2693,48 @@ function bindDraftInputs() {
   // Recalc on shipTo or origin change (in addition to the address auto-fill)
   if (shipToSel) shipToSel.addEventListener('change', recalcAntShip);
   if (originSel2) originSel2.addEventListener('change', recalcAntShip);
+
+  // Pickup-at-other-pharmacy section
+  const pickupBox = document.getElementById('f-pickupBox');
+  const pickupChk = document.getElementById('f-pickupAt');
+  const pickupFields = document.getElementById('f-pickupFields');
+  const pickupLocSel = document.getElementById('f-pickupLoc');
+  const bulkChk = document.getElementById('f-bulkPickup');
+  const bulkFields = document.getElementById('f-bulkFields');
+  const bulkCountEl = document.getElementById('f-bulkCount');
+  const bulkDescEl = document.getElementById('f-bulkDesc');
+  if (shipToSel && pickupBox) shipToSel.addEventListener('change', () => {
+    pickupBox.style.display = shipToSel.value === 'Pharmacy' ? '' : 'none';
+    if (shipToSel.value !== 'Pharmacy') {
+      state.draft.pickupAtPharmacy = false;
+      state.draft.isBulkPickup = false;
+      if (pickupChk) pickupChk.checked = false;
+      if (bulkChk) bulkChk.checked = false;
+      if (pickupFields) pickupFields.style.display = 'none';
+      if (bulkFields) bulkFields.style.display = 'none';
+    }
+  });
+  if (pickupChk) pickupChk.addEventListener('change', () => {
+    state.draft.pickupAtPharmacy = pickupChk.checked;
+    if (pickupFields) pickupFields.style.display = pickupChk.checked ? '' : 'none';
+    if (!pickupChk.checked) {
+      state.draft.isBulkPickup = false;
+      if (bulkChk) bulkChk.checked = false;
+      if (bulkFields) bulkFields.style.display = 'none';
+    }
+    fillPharmacyAddress(); // re-pull address based on new destination
+  });
+  if (pickupLocSel) pickupLocSel.addEventListener('change', () => {
+    state.draft.pickupLocation = pickupLocSel.value;
+    fillPharmacyAddress();
+  });
+  if (bulkChk) bulkChk.addEventListener('change', () => {
+    state.draft.isBulkPickup = bulkChk.checked;
+    if (bulkFields) bulkFields.style.display = bulkChk.checked ? '' : 'none';
+  });
+  if (bulkCountEl) bulkCountEl.addEventListener('input', () => { state.draft.bulkScriptCount = bulkCountEl.value; });
+  if (bulkDescEl) bulkDescEl.addEventListener('input', () => { state.draft.bulkDescription = bulkDescEl.value; });
+
   // Run once on form open so the date is populated on a fresh draft
   recalcAntShip();
 
@@ -2757,8 +2846,14 @@ function bindDraftInputs() {
 function submitDraft() {
   const d = state.draft;
   const missing = [];
-  if (!d.patientName) missing.push('Patient name');
-  if (!d.pkSheets || !d.pkSheets.length) missing.push('At least one PK Transfer Sheet upload');
+  if (d.isBulkPickup) {
+    // Bulk pickup orders skip per-patient detail. Only require count + destination.
+    if (!d.pickupLocation) missing.push('Pickup pharmacy');
+    if (!d.bulkScriptCount || +d.bulkScriptCount < 1) missing.push('Number of scripts');
+  } else {
+    if (!d.patientName) missing.push('Patient name');
+    if (!d.pkSheets || !d.pkSheets.length) missing.push('At least one PK Transfer Sheet upload');
+  }
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "Credit card on file")');
   if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
 
@@ -2780,6 +2875,8 @@ function submitDraft() {
       coldItem: d.coldItem, anticipatedShipDate: d.anticipatedShipDate,
       tempAddress: !!d.tempAddress, tempThroughDate: d.tempThroughDate || '',
       appointmentDate: d.appointmentDate || '',
+      pickupAtPharmacy: !!d.pickupAtPharmacy, pickupLocation: d.pickupLocation || '',
+      isBulkPickup: !!d.isBulkPickup, bulkScriptCount: d.bulkScriptCount || '', bulkDescription: d.bulkDescription || '',
       pkSheets: d.pkSheets, formula: d.formula, hardCopies: d.hardCopies,
       items: d.items, transferNotes: d.transferNotes,
       lastEditedBy: CURRENT_USER.name, lastEditedAt: new Date().toISOString()
@@ -2962,10 +3059,17 @@ function renderModal() {
             <select class="status-select" id="statusSelect">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select>
           </div>
 
-          <div class="section-title">Patient</div>
+          ${t.pickupAtPharmacy ? `<div style="background:var(--primary-bg);border:1px solid var(--primary-light);padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px">
+            <strong style="color:var(--primary-dark)">📍 Patient pickup at:</strong> ${escapeHtml(t.pickupLocation||'—')}${t.isBulkPickup?` <span class="badge" style="background:var(--warning-bg);color:var(--warning);font-size:10px;margin-left:6px">📦 BULK PICKUP — ${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>`:''}
+            ${t.bulkDescription?`<div class="item-sub" style="margin-top:4px">${escapeHtml(t.bulkDescription)}</div>`:''}
+          </div>`:''}
+          ${t.isBulkPickup ? `<div class="section-title">Bulk Pickup Details</div>
+          <div style="font-size:13px;line-height:1.8">
+            <strong>${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</strong> to ${escapeHtml(t.pickupLocation||'?')} ${t.bulkDescription?` · ${escapeHtml(t.bulkDescription)}`:''}
+          </div>` : `<div class="section-title">Patient</div>
           <div style="font-size:13px;line-height:1.8">
             <strong>${escapeHtml(t.patientName)}</strong> · DOB ${fmtDate(t.patientDOB)} · Allergies: ${escapeHtml(t.patientAllergies||'—')}
-          </div>
+          </div>`}
           ${(() => {
             // Build the refill chain: the original (top of chain) + every refill that descends from it
             const original = t.refillOfId ? TRANSFERS.find(x => x.id === t.refillOfId) : t;
