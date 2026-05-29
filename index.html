@@ -325,6 +325,34 @@ let FORMULAS = [
 ];
 // Location-based visibility: admins see everything; everyone else sees only
 // transfers/shipments where their location is origin, fill, or destination.
+// Pharmacy shipping-day helpers. Backward compatible:
+//   - new shape: addr.shippingDays = [2, 4] (e.g., Tue + Thu)
+//   - old shape: addr.shippingDay = 2 (single)
+function getShippingDays(addr) {
+  if (!addr) return [];
+  if (Array.isArray(addr.shippingDays)) return addr.shippingDays.filter(n => typeof n === 'number');
+  if (typeof addr.shippingDay === 'number') return [addr.shippingDay];
+  return [];
+}
+function nextShippingDayFrom(addr, fromDate) {
+  const days = getShippingDays(addr);
+  if (days.length === 0) return null;
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate() + i);
+    if (days.includes(d.getDay())) return d;
+  }
+  return null;
+}
+function latestShippingDayAtOrBefore(addr, endDate) {
+  const days = getShippingDays(addr);
+  if (days.length === 0) return null;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() - i);
+    if (days.includes(d.getDay())) return d;
+  }
+  return null;
+}
+
 function canSeeTransfer(t) {
   if (CURRENT_USER.role === 'admin') return true;
   if (t.originLocation === CURRENT_USER.location) return true;
@@ -1727,11 +1755,12 @@ function renderAdmin() {
     </div></div>
 
     <div class="card"><div class="card-header">Pharmacy Mailing Addresses <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— used to auto-fill Ship-to-Pharmacy + auto-calculate anticipated ship date</span></div><div class="card-body">
-      <p class="item-sub" style="margin-bottom:10px">When a user picks "Ship to: Pharmacy" on a new transfer, the address fields are auto-filled from this list using the origin location. The <strong>Receives Shipments</strong> column is the day of the week each pharmacy normally gets its weekly box — used to auto-populate the anticipated ship date on new Ship-to-Pharmacy transfers.</p>
+      <p class="item-sub" style="margin-bottom:10px">When a user picks "Ship to: Pharmacy" on a new transfer, the address fields are auto-filled from this list using the origin location. The <strong>Receives Shipments</strong> column is the day(s) of the week each pharmacy normally gets its boxes — used to auto-populate the anticipated ship date. Check all that apply (some locations get shipments multiple days a week).</p>
       <table style="box-shadow:none;font-size:13px"><thead><tr><th>Location</th><th>Address Line 1</th><th>Line 2</th><th>City</th><th>State</th><th>Zip</th><th>Receives Shipments</th></tr></thead><tbody>
         ${LOCATIONS.map(l => {
           const a = PHARMACY_ADDRESSES[l] || { addr1:'', addr2:'', city:l, state:'', zip:'' };
-          const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+          const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+          const currentDays = getShippingDays(a);
           return `<tr>
             <td><strong>${escapeHtml(l)}</strong></td>
             <td><input data-pa="${l}" data-k="addr1" value="${escapeHtml(a.addr1)}" style="width:100%" placeholder="123 Main St" /></td>
@@ -1739,10 +1768,14 @@ function renderAdmin() {
             <td><input data-pa="${l}" data-k="city" value="${escapeHtml(a.city)}" style="width:100%" /></td>
             <td><input data-pa="${l}" data-k="state" value="${escapeHtml(a.state)}" style="width:50px" /></td>
             <td><input data-pa="${l}" data-k="zip" value="${escapeHtml(a.zip)}" style="width:80px" /></td>
-            <td><select data-pa="${l}" data-k="shippingDay" style="padding:4px 6px">
-              <option value="">—</option>
-              ${days.map((d,idx) => `<option value="${idx}" ${a.shippingDay===idx?'selected':''}>${d}</option>`).join('')}
-            </select></td>
+            <td>
+              <div style="display:flex;gap:5px;flex-wrap:wrap">
+                ${dayLabels.map((dn,idx) => `<label style="display:inline-flex;align-items:center;gap:2px;font-size:11px;background:${currentDays.includes(idx)?'var(--primary-bg)':'transparent'};padding:2px 6px;border-radius:4px;border:1px solid ${currentDays.includes(idx)?'var(--primary-light)':'var(--gray-300)'};cursor:pointer">
+                  <input type="checkbox" data-paday="${l}" data-day="${idx}" ${currentDays.includes(idx)?'checked':''} style="margin:0" />
+                  ${dn}
+                </label>`).join('')}
+              </div>
+            </td>
           </tr>`;
         }).join('')}
       </tbody></table>
@@ -1959,8 +1992,17 @@ function renderAdmin() {
   root.querySelectorAll('[data-pa]').forEach(el => el.onchange = () => {
     const loc = el.dataset.pa, k = el.dataset.k;
     if (!PHARMACY_ADDRESSES[loc]) PHARMACY_ADDRESSES[loc] = { addr1:'', addr2:'', city:loc, state:'', zip:'' };
-    // shippingDay is a numeric day-of-week (0=Sun..6=Sat); empty string means unset
-    PHARMACY_ADDRESSES[loc][k] = (k === 'shippingDay') ? (el.value === '' ? null : Number(el.value)) : el.value;
+    PHARMACY_ADDRESSES[loc][k] = el.value;
+  });
+  // Multi-day receiving checkboxes — each toggle rebuilds the shippingDays array
+  // for that location by collecting all currently-checked day boxes in that row.
+  root.querySelectorAll('[data-paday]').forEach(el => el.onchange = () => {
+    const loc = el.dataset.paday;
+    if (!PHARMACY_ADDRESSES[loc]) PHARMACY_ADDRESSES[loc] = { addr1:'', addr2:'', city:loc, state:'', zip:'' };
+    const checked = [...root.querySelectorAll(`[data-paday="${loc}"]:checked`)].map(c => +c.dataset.day).sort();
+    PHARMACY_ADDRESSES[loc].shippingDays = checked;
+    delete PHARMACY_ADDRESSES[loc].shippingDay; // retire legacy single-day field
+    renderAdmin(); // refresh the row styling to reflect new selection
   });
   root.querySelectorAll('[data-rmf]').forEach(b => b.onclick = () => { FORMULAS.splice(+b.dataset.rmf, 1); renderAdmin(); });
   document.getElementById('addFormulaBtn').onclick = () => {
@@ -2638,29 +2680,15 @@ function bindDraftInputs() {
     if (d.shipTo === 'Pharmacy' || usePickup) {
       const destLoc = usePickup ? d.pickupLocation : d.originLocation;
       const addr = PHARMACY_ADDRESSES[destLoc] || {};
-      const dow = (typeof addr.shippingDay === 'number') ? addr.shippingDay : null;
+      const days = getShippingDays(addr);
       const noteEl = document.getElementById('f-antShipNote');
-      if (dow === null) { if (noteEl) noteEl.textContent = `(no receiving day set for ${destLoc || 'destination'} — set it in Admin → Pharmacy Mailing Addresses)`; return; }
+      if (days.length === 0) { if (noteEl) noteEl.textContent = `(no receiving day set for ${destLoc || 'destination'} — set it in Admin → Pharmacy Mailing Addresses)`; return; }
       if (noteEl) noteEl.textContent = '';
-      // Find the latest shipping day at or before targetDate (or next shipping day from today)
-      const anchor = apptDate ? new Date(apptDate.getTime() - TWO_DAYS) : new Date();
-      // step backward to find the most recent matching day (within 6 days)
-      if (apptDate) {
-        for (let i = 0; i < 7; i++) {
-          const tryDate = new Date(anchor.getTime() - i * 86400000);
-          if (tryDate.getDay() === dow) { target = tryDate; break; }
-        }
-      } else {
-        // step forward from today to find the next matching day
-        for (let i = 0; i < 7; i++) {
-          const tryDate = new Date(anchor.getTime() + i * 86400000);
-          if (tryDate.getDay() === dow) {
-            // if today matches, skip to next week (we want NEXT shipping day)
-            if (i === 0) { target = new Date(tryDate.getTime() + 7 * 86400000); break; }
-            target = tryDate; break;
-          }
-        }
-      }
+      // Future appointment: walk backward from (appt - 2 days) to find the most recent
+      //   matching receiving day so the box arrives in time.
+      // No appointment: walk forward from today to find the next receiving day.
+      if (apptDate) target = latestShippingDayAtOrBefore(addr, new Date(apptDate.getTime() - TWO_DAYS));
+      else target = nextShippingDayFrom(addr, new Date());
     } else if (d.shipTo === 'Patient') {
       const noteEl = document.getElementById('f-antShipNote');
       if (noteEl) noteEl.textContent = '';
@@ -5139,20 +5167,21 @@ function updateNextShipmentBanner() {
   if (!banner) return;
   if (!CURRENT_USER || !CURRENT_USER.location) { banner.style.display = 'none'; return; }
   const addr = PHARMACY_ADDRESSES[CURRENT_USER.location] || {};
-  const dow = (typeof addr.shippingDay === 'number') ? addr.shippingDay : null;
-  if (dow === null) {
-    banner.innerHTML = `<span style="opacity:.7">Set your location's receiving day in Admin → Pharmacy Mailing Addresses to see your next shipment date.</span>`;
+  const days = getShippingDays(addr);
+  if (days.length === 0) {
+    banner.innerHTML = `<span style="opacity:.7">Set your location's receiving day(s) in Admin → Pharmacy Mailing Addresses to see your next shipment date.</span>`;
     banner.style.display = 'block';
     return;
   }
-  const today = new Date();
-  const todayDow = today.getDay();
-  let daysAhead = (dow - todayDow + 7) % 7;
-  if (daysAhead === 0) daysAhead = 7; // today is the day → show next week's
-  const target = new Date(today.getFullYear(), today.getMonth(), today.getDate() + daysAhead);
-  const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow];
+  const target = nextShippingDayFrom(addr, new Date());
+  if (!target) { banner.style.display = 'none'; return; }
+  const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][target.getDay()];
   const dateStr = target.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-  banner.innerHTML = `📦 Your next pharmacy shipment to <strong>${escapeHtml(CURRENT_USER.location)}</strong> is expected on <strong>${dayName} ${dateStr}</strong>`;
+  const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const scheduleText = days.length > 1
+    ? ` <span style="opacity:.75;font-size:12px">(receives ${days.map(d => dayLabels[d]).join(', ')})</span>`
+    : '';
+  banner.innerHTML = `📦 Your next pharmacy shipment to <strong>${escapeHtml(CURRENT_USER.location)}</strong> is expected on <strong>${dayName} ${dateStr}</strong>${scheduleText}`;
   banner.style.display = 'block';
 }
 
