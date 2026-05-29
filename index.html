@@ -2603,10 +2603,12 @@ function bindDraftInputs() {
 
   // Ship-to-Pharmacy auto-fill: when user picks Pharmacy or changes origin, fill ship address from origin pharmacy
   const fillPharmacyAddress = () => {
-    if (state.draft.shipTo !== 'Pharmacy') { recalcAntShip(); return; }
-    // Destination is normally originLocation, but if pickup-at-other-pharmacy is on,
-    // the box ships to pickupLocation instead.
-    const destLoc = (state.draft.pickupAtPharmacy && state.draft.pickupLocation) ? state.draft.pickupLocation : state.draft.originLocation;
+    // Two cases populate the ship address from a pharmacy:
+    //   1) Ship To = Pharmacy (regular transfer back to origin)
+    //   2) Pickup at another pharmacy is on (regardless of shipTo) — destination is pickup
+    const usePickup = !!(state.draft.pickupAtPharmacy && state.draft.pickupLocation);
+    if (state.draft.shipTo !== 'Pharmacy' && !usePickup) { recalcAntShip(); return; }
+    const destLoc = usePickup ? state.draft.pickupLocation : state.draft.originLocation;
     const addr = PHARMACY_ADDRESSES[destLoc];
     if (!addr) { recalcAntShip(); return; }
     state.draft.shipAddr1 = addr.addr1 || '';
@@ -2632,8 +2634,9 @@ function bindDraftInputs() {
     const apptDate = apptISO ? new Date(apptISO + 'T12:00:00') : null;
     let target = null;
     const TWO_DAYS = 2 * 86400000;
-    if (d.shipTo === 'Pharmacy') {
-      const destLoc = (d.pickupAtPharmacy && d.pickupLocation) ? d.pickupLocation : d.originLocation;
+    const usePickup = !!(d.pickupAtPharmacy && d.pickupLocation);
+    if (d.shipTo === 'Pharmacy' || usePickup) {
+      const destLoc = usePickup ? d.pickupLocation : d.originLocation;
       const addr = PHARMACY_ADDRESSES[destLoc] || {};
       const dow = (typeof addr.shippingDay === 'number') ? addr.shippingDay : null;
       const noteEl = document.getElementById('f-antShipNote');
