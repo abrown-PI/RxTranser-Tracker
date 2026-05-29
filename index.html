@@ -1594,6 +1594,28 @@ function renderAdmin() {
       </tbody></table>
       <div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="tw-save">Save webhook URLs</button> <span class="item-sub" id="tw-saveResult" style="margin-left:10px"></span></div>
     </div></div>
+
+    <div class="card"><div class="card-header">Audit Log <span class="item-sub" id="audit-status" style="font-weight:400;text-transform:none;letter-spacing:0">— who accessed/modified what, and when</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">Append-only record of transfer access and changes. Useful for HIPAA audits and investigating who saw or modified a particular transfer. Click any row to inspect details.</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div><label class="hint" style="display:block">Filter by user</label><input id="audit-fUser" placeholder="name or email" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;width:200px" /></div>
+        <div><label class="hint" style="display:block">Filter by action</label>
+          <select id="audit-fAction" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px">
+            <option value="">All actions</option>
+            <option value="view_transfer">View transfer</option>
+            <option value="create_transfer">Create transfer</option>
+            <option value="edit_transfer">Edit transfer</option>
+            <option value="delete_transfer">Delete transfer</option>
+            <option value="status_change">Status change</option>
+            <option value="sign_in">Sign in</option>
+          </select>
+        </div>
+        <div><label class="hint" style="display:block">Transfer ID</label><input id="audit-fEntity" placeholder="e.g. 20019" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;width:120px" /></div>
+        <button class="btn btn-secondary btn-sm" id="audit-refresh">↻ Refresh</button>
+        <button class="btn btn-secondary btn-sm" id="audit-export">📥 Export CSV</button>
+      </div>
+      <div id="audit-table" style="font-size:13px"><div class="item-sub">Loading…</div></div>
+    </div></div>
   `;
   // Unified Users & Access — combines 365 users (/api/users), local accounts (/api/local-users),
   // and admin email list (/api/settings.adminEmails) into one table.
@@ -1792,6 +1814,80 @@ function renderAdmin() {
       }
     };
   });
+
+  // Audit log viewer — load entries, wire filter/refresh/export
+  let _auditEntries = [];
+  const auditTable = document.getElementById('audit-table');
+  const auditStatus = document.getElementById('audit-status');
+  const fUser = document.getElementById('audit-fUser');
+  const fAction = document.getElementById('audit-fAction');
+  const fEntity = document.getElementById('audit-fEntity');
+  const ACTION_LABEL = {
+    view_transfer: '👁 Viewed', create_transfer: '➕ Created', edit_transfer: '✏️ Edited',
+    delete_transfer: '🗑 Deleted', status_change: '🔄 Status changed', sign_in: '🔐 Signed in'
+  };
+  function renderAuditTable() {
+    const q = (fUser.value || '').trim().toLowerCase();
+    const action = fAction.value;
+    const entity = (fEntity.value || '').trim();
+    const filtered = _auditEntries.filter(e => {
+      if (action && e.action !== action) return false;
+      if (entity && String(e.entityId) !== entity) return false;
+      if (q) {
+        const hay = ((e.actor||'') + ' ' + (e.actorEmail||'')).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    if (filtered.length === 0) {
+      auditTable.innerHTML = '<div class="empty" style="padding:20px"><h3>No matching entries</h3><p>Try clearing filters or refreshing.</p></div>';
+      return;
+    }
+    auditTable.innerHTML = `<table style="box-shadow:none;font-size:12px"><thead><tr>
+      <th style="width:160px">When</th><th>User</th><th style="width:140px">Action</th><th>Entity</th><th>Details</th>
+    </tr></thead><tbody>
+      ${filtered.map(e => {
+        let details = '';
+        if (e.details) {
+          try { const obj = JSON.parse(e.details); details = Object.entries(obj).map(([k,v]) => `<code style="font-size:11px">${escapeHtml(k)}=${escapeHtml(String(v))}</code>`).join(' '); }
+          catch { details = `<code style="font-size:11px">${escapeHtml(e.details.slice(0,200))}</code>`; }
+        }
+        return `<tr>
+          <td>${new Date(e.ts).toLocaleString()}</td>
+          <td><strong>${escapeHtml(e.actor||'—')}</strong><div class="item-sub" style="font-size:10px">${escapeHtml(e.actorEmail||'')}</div></td>
+          <td>${escapeHtml(ACTION_LABEL[e.action] || e.action)}</td>
+          <td><code style="font-size:11px">${escapeHtml(e.entityType||'')}${e.entityId?':'+escapeHtml(e.entityId):''}</code></td>
+          <td>${details}</td>
+        </tr>`;
+      }).join('')}
+    </tbody></table>`;
+  }
+  async function loadAudit() {
+    auditTable.innerHTML = '<div class="item-sub" style="padding:14px">Loading…</div>';
+    try {
+      const r = await fetch('/api/audit?limit=500');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      _auditEntries = data.entries || [];
+      auditStatus.textContent = ` — ${_auditEntries.length} entries loaded`;
+      renderAuditTable();
+    } catch (e) {
+      auditTable.innerHTML = `<div class="item-sub" style="color:var(--danger);padding:14px">Failed to load audit log: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+  [fUser, fAction, fEntity].forEach(el => el.oninput = el.onchange = renderAuditTable);
+  document.getElementById('audit-refresh').onclick = loadAudit;
+  document.getElementById('audit-export').onclick = () => {
+    const rows = [['Timestamp','Actor','Email','Action','Entity Type','Entity ID','Details']];
+    _auditEntries.forEach(e => rows.push([e.ts, e.actor, e.actorEmail, e.action, e.entityType, e.entityId, e.details||'']));
+    const csv = rows.map(r => r.map(v => '"'+String(v||'').replace(/"/g,'""')+'"').join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `audit-log-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  };
+  loadAudit();
 
   // Teams webhooks + email notifications — populate fields from settings
   (async () => {
