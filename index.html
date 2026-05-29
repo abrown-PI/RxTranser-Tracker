@@ -1005,8 +1005,8 @@ function renderTransfers() {
               <button class="btn btn-secondary btn-sm" data-edit-tx="${t.id}" title="Edit transfer" style="padding:3px 7px;font-size:11px">✏️ Edit</button>
               <button class="btn btn-primary btn-sm" data-rcvrx-tx="${t.id}" title="Enter Receiving Rx #" style="padding:3px 7px;font-size:11px">💊 Rx #</button>
               ${t.paid === 'Paid'
-                ? `<span class="badge badge-shipped" title="Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}" style="padding:2px 6px;font-size:11px">✓ Paid</span>`
-                : `<button class="btn btn-secondary btn-sm" data-paid-tx="${t.id}" title="Mark Paid / Charged" style="padding:3px 7px;font-size:11px;background:#d1fae5;color:#065f46">💲 Paid</button>`}
+                ? `<span title="Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:#16a34a;color:white;border-radius:4px">✓ PAID</span>`
+                : `<button class="btn btn-sm" data-paid-tx="${t.id}" title="Click to mark this transfer Paid / Charged" style="padding:3px 9px;font-size:11px;font-weight:700;background:#dc2626;color:white;border:0;border-radius:4px;cursor:pointer">✕ NOT PAID</button>`}
               <button class="btn btn-secondary btn-sm" data-ask="${t.id}" title="Ask a question on this transfer" style="padding:3px 7px;font-size:11px">❓ Ask</button>
             </td>
           </tr>`;
@@ -3008,9 +3008,11 @@ function renderModal() {
               <input id="inline-tracking" value="${escapeHtml(t.trackingNumber||'')}" placeholder="Type tracking # then press Enter" style="flex:1;max-width:240px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:13px" />
               <span class="item-sub" id="inline-tracking-msg" style="font-size:11px"></span>
             </div>
-            <div style="display:flex;align-items:center;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <strong>Paid:</strong>
-              ${t.paid === 'Paid' ? `<span class="badge badge-shipped" style="font-size:11px">✓ Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}</span> <button class="btn btn-secondary btn-sm" id="unpaidBtn" style="padding:2px 8px;font-size:11px">Undo</button>` : `<span>${escapeHtml(t.paid||'Pending')}</span> <button class="btn btn-primary btn-sm" id="paidBtn" style="padding:2px 10px;font-size:12px">💲 Mark Paid / Charged</button>`}
+              ${t.paid === 'Paid'
+                ? `<span style="display:inline-block;padding:4px 12px;font-size:12px;font-weight:700;background:#16a34a;color:white;border-radius:4px">✓ PAID${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}</span> <button class="btn btn-secondary btn-sm" id="unpaidBtn" style="padding:2px 8px;font-size:11px">Undo</button>`
+                : `<span style="display:inline-block;padding:4px 12px;font-size:12px;font-weight:700;background:#dc2626;color:white;border-radius:4px">✕ NOT PAID</span> <button class="btn btn-primary btn-sm" id="paidBtn" style="padding:3px 12px;font-size:12px">💲 Mark Paid / Charged</button>`}
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" style="margin-top:10px" id="editShipBtn">Edit ship / tracking</button>
