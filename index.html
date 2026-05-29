@@ -2219,6 +2219,26 @@ function renderNewForm() {
           <div class="form-group full"><label>Notes</label><input id="f-priorTransferNote" value="${escapeHtml(d.priorTransferNote||'')}" placeholder="Anything else worth recording about the original transfer" /></div>
         </div>
       </div>` : ''}
+      <div id="f-pickupBox" style="background:var(--primary-bg);border:1px solid var(--primary-light);border-radius:6px;padding:12px 16px;margin-bottom:14px">
+        <div class="checkbox-row">
+          <input type="checkbox" id="f-pickupAt" ${d.pickupAtPharmacy?'checked':''} />
+          <label for="f-pickupAt"><strong>📍 Prescriptions will be picked up at another pharmacy (Non-transfer)</strong></label>
+        </div>
+        <div class="hint" style="margin-top:4px;text-transform:none;font-weight:400">Only use when the order is originating from the filling pharmacy and shipping to another pharmacy for patient pickup — not a true transfer.</div>
+        <div id="f-pickupFields" style="display:${d.pickupAtPharmacy?'':'none'};margin-top:10px">
+          <div class="form-grid">
+            <div class="form-group"><label>Pickup pharmacy</label><select id="f-pickupLoc"><option value="">— pick destination —</option>${LOCATIONS.map(l=>`<option ${l===d.pickupLocation?'selected':''}>${l}</option>`).join('')}</select><div class="hint">This pharmacy will see the order on their list</div></div>
+            <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-bulkPickup" ${d.isBulkPickup?'checked':''} /><label for="f-bulkPickup"><strong>📦 Bulk pickup order</strong></label></div><div class="hint">No per-patient detail — just a script count and short description</div></div>
+          </div>
+          <div id="f-bulkFields" style="display:${d.isBulkPickup?'':'none'};margin-top:6px;background:white;border:1px dashed var(--primary);border-radius:6px;padding:10px 14px">
+            <div class="form-grid">
+              <div class="form-group"><label>Number of scripts</label><input type="number" id="f-bulkCount" value="${escapeHtml(String(d.bulkScriptCount||''))}" min="1" placeholder="e.g. 12" /></div>
+              <div class="form-group full"><label>Description / notes</label><input id="f-bulkDesc" value="${escapeHtml(d.bulkDescription||'')}" placeholder="e.g. Weekly batch of compounds for Seminole pickup customers" /></div>
+            </div>
+            <div class="hint" style="margin-top:4px">When checked, the Patient + Items sections below are not required.</div>
+          </div>
+        </div>
+      </div>
       <div class="section-title">Patient</div>
       <div class="form-grid">
         <div class="form-group"><label>Patient Name</label><input id="f-patientName" value="${escapeHtml(d.patientName)}" /></div>
@@ -2234,22 +2254,6 @@ function renderNewForm() {
 
       <div class="section"><div class="section-title">Shipping</div>
       <div class="form-grid">
-        <div class="form-group full" id="f-pickupBox" style="display:${d.shipTo==='Pharmacy'?'':'none'};background:var(--primary-bg);border:1px solid var(--primary-light);border-radius:6px;padding:10px 14px;margin-bottom:8px">
-          <div class="checkbox-row"><input type="checkbox" id="f-pickupAt" ${d.pickupAtPharmacy?'checked':''} /><label for="f-pickupAt"><strong>📍 Patient picks up at another pharmacy</strong> <span class="hint" style="text-transform:none;font-weight:400">(box ships to that pharmacy instead of back to origin)</span></label></div>
-          <div id="f-pickupFields" style="display:${d.pickupAtPharmacy?'':'none'};margin-top:8px">
-            <div class="form-grid">
-              <div class="form-group"><label>Pickup pharmacy</label><select id="f-pickupLoc"><option value="">— pick destination —</option>${LOCATIONS.map(l=>`<option ${l===d.pickupLocation?'selected':''}>${l}</option>`).join('')}</select><div class="hint">This pharmacy will see the transfer on their list</div></div>
-              <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-bulkPickup" ${d.isBulkPickup?'checked':''} /><label for="f-bulkPickup"><strong>📦 Bulk pickup order</strong></label></div><div class="hint">No per-patient detail — just a script count and short description</div></div>
-            </div>
-            <div id="f-bulkFields" style="display:${d.isBulkPickup?'':'none'};margin-top:6px;background:white;border:1px dashed var(--primary);border-radius:6px;padding:10px 14px">
-              <div class="form-grid">
-                <div class="form-group"><label>Number of scripts</label><input type="number" id="f-bulkCount" value="${escapeHtml(String(d.bulkScriptCount||''))}" min="1" placeholder="e.g. 12" /></div>
-                <div class="form-group full"><label>Description / notes</label><input id="f-bulkDesc" value="${escapeHtml(d.bulkDescription||'')}" placeholder="e.g. Weekly batch of compounds for Seminole pickup customers" /></div>
-              </div>
-              <div class="hint" style="margin-top:4px">When checked, the Patient + Items sections below are not required.</div>
-            </div>
-          </div>
-        </div>
         <div class="form-group"><label>Ship To</label><select id="f-shipTo">${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===d.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
         <div class="form-group"><label>Delivery Charge (if applicable)</label><select id="f-deliveryCharge"><option value="">—</option>${['3','5','15'].map(v=>`<option ${v===d.deliveryCharge?'selected':''}>$${v}</option>`).join('')}</select></div>
         <div class="form-group full"><label>Address Line 1</label><input id="f-shipAddr1" value="${escapeHtml(d.shipAddr1)}" /></div>
@@ -2710,17 +2714,7 @@ function bindDraftInputs() {
   const bulkFields = document.getElementById('f-bulkFields');
   const bulkCountEl = document.getElementById('f-bulkCount');
   const bulkDescEl = document.getElementById('f-bulkDesc');
-  if (shipToSel && pickupBox) shipToSel.addEventListener('change', () => {
-    pickupBox.style.display = shipToSel.value === 'Pharmacy' ? '' : 'none';
-    if (shipToSel.value !== 'Pharmacy') {
-      state.draft.pickupAtPharmacy = false;
-      state.draft.isBulkPickup = false;
-      if (pickupChk) pickupChk.checked = false;
-      if (bulkChk) bulkChk.checked = false;
-      if (pickupFields) pickupFields.style.display = 'none';
-      if (bulkFields) bulkFields.style.display = 'none';
-    }
-  });
+  // Pickup box is always visible — it's its own top-level toggle independent of shipTo
   if (pickupChk) pickupChk.addEventListener('change', () => {
     state.draft.pickupAtPharmacy = pickupChk.checked;
     if (pickupFields) pickupFields.style.display = pickupChk.checked ? '' : 'none';
