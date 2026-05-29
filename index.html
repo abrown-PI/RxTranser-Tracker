@@ -1280,80 +1280,216 @@ function batchPrintTransfers(ids) {
 
 function renderStats() {
   const root = document.getElementById('view-stats');
-  const scope = visibleTransfers();
-  const byStatus = {}; STATUSES.forEach(s => byStatus[s] = 0);
-  scope.forEach(t => byStatus[t.status] = (byStatus[t.status]||0)+1);
+  if (!state.reportFilter) state.reportFilter = {
+    mode: 'summary', // 'summary' or 'detail'
+    origin: '', fill: '', status: '', type: '', shipTo: '',
+    createdFrom: '', createdTo: '',
+    antShipFrom: '', antShipTo: ''
+  };
+  const f = state.reportFilter;
 
-  // Volume by origin
-  const byOrigin = {};
-  scope.forEach(t => byOrigin[t.originLocation] = (byOrigin[t.originLocation]||0)+1);
+  // Apply filters
+  const scope = visibleTransfers().filter(t => {
+    if (f.origin && t.originLocation !== f.origin) return false;
+    if (f.fill && t.fillLocation !== f.fill) return false;
+    if (f.status && t.status !== f.status) return false;
+    if (f.type && (t.transferType || 'New') !== f.type) return false;
+    if (f.shipTo && t.shipTo !== f.shipTo) return false;
+    const createdISO = (t.createdAt || '').slice(0,10);
+    if (f.createdFrom && createdISO < f.createdFrom) return false;
+    if (f.createdTo && createdISO > f.createdTo) return false;
+    if (f.antShipFrom && (!t.anticipatedShipDate || t.anticipatedShipDate < f.antShipFrom)) return false;
+    if (f.antShipTo && (!t.anticipatedShipDate || t.anticipatedShipDate > f.antShipTo)) return false;
+    return true;
+  });
 
-  // Avg cycle times for shipped/delivered
-  const cycles = scope.filter(t => t.dateShipped && t.txEmailedDate).map(t => (new Date(t.dateShipped) - new Date(t.txEmailedDate)) / 86400000);
-  const avgCycle = cycles.length ? (cycles.reduce((a,b)=>a+b,0)/cycles.length).toFixed(1) : '—';
-
-  // Avg turnaround: Tx Emailed → Delivered (end-to-end)
-  const tats = scope.filter(t => t.txEmailedDate && t.dateReceivedByPatient).map(t => ({
-    days: (new Date(t.dateReceivedByPatient) - new Date(t.txEmailedDate)) / 86400000,
-    origin: t.originLocation
-  }));
-  const avgTAT = tats.length ? (tats.reduce((a,b)=>a+b.days,0)/tats.length).toFixed(1) : '—';
-  const tatByOrigin = {};
-  tats.forEach(x => { (tatByOrigin[x.origin] ||= []).push(x.days); });
-
-  // On-time %
-  const shipped = scope.filter(t => t.dateShipped && t.anticipatedShipDate);
-  const onTime = shipped.filter(t => new Date(t.dateShipped) <= new Date(t.anticipatedShipDate)).length;
-  const onTimePct = shipped.length ? Math.round(100 * onTime / shipped.length) : 0;
-
-  // SLA breaches
-  const breaches = scope.filter(t => slaStatus(t).state === 'breach').length;
-
-  // Cold chain
-  const coldCount = scope.filter(t => t.coldItem).length;
-
-  root.innerHTML = `
-    <div class="page-header"><div class="page-title">Reports</div></div>
-
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-      <div class="kpi-card"><div class="kpi-label">Total Transfers${CURRENT_USER.role==='admin'?'':' (your location)'}</div><div class="kpi-value">${scope.length}</div></div>
-      <div class="kpi-card"><div class="kpi-label">In Flight</div><div class="kpi-value">${scope.filter(t=>!['Delivered','Canceled'].includes(t.status)).length}</div><div class="kpi-sub">not yet delivered</div></div>
-      <div class="kpi-card"><div class="kpi-label">Avg Cycle Time</div><div class="kpi-value">${avgCycle}<span style="font-size:14px"> days</span></div><div class="kpi-sub">Tx email → ship</div></div>
-      <div class="kpi-card"><div class="kpi-label">Avg Turnaround</div><div class="kpi-value">${avgTAT}<span style="font-size:14px"> days</span></div><div class="kpi-sub">Tx email → delivered (${tats.length} samples)</div></div>
-      <div class="kpi-card"><div class="kpi-label">On-Time Ship Rate</div><div class="kpi-value">${onTimePct}%</div><div class="kpi-sub">${onTime}/${shipped.length} shipped on or before anticipated date</div></div>
-      <div class="kpi-card"><div class="kpi-label">SLA Breaches</div><div class="kpi-value" style="color:${breaches?'var(--danger)':'var(--success)'}">${breaches}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Cold Chain Items</div><div class="kpi-value">${coldCount}</div></div>
-    </div>
-
-    <div class="card"><div class="card-header">Volume by Status</div><div class="card-body">
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
-        ${STATUSES.map(s => `<div style="padding:10px;background:var(--gray-50);border-radius:6px"><div class="kpi-label">${s}</div><div style="font-size:20px;font-weight:700;color:var(--primary-dark)">${byStatus[s]||0}</div></div>`).join('')}
+  const filtersHtml = `
+    <div class="card" style="margin-bottom:14px"><div class="card-body">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:600;font-size:13px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.04em">Filters</div>
+        <button class="btn btn-secondary btn-sm" id="rep-clear">Clear all</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">
+        <div><label class="hint" style="display:block">Origin</label><select id="rep-origin"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===f.origin?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div><label class="hint" style="display:block">Fill</label><select id="rep-fill"><option value="">All</option>${LOCATIONS.map(l=>`<option ${l===f.fill?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div><label class="hint" style="display:block">Status</label><select id="rep-status"><option value="">All</option>${STATUSES.map(s=>`<option ${s===f.status?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div><label class="hint" style="display:block">Type</label><select id="rep-type"><option value="">All</option><option value="New" ${f.type==='New'?'selected':''}>New</option><option value="Refill" ${f.type==='Refill'?'selected':''}>Refill</option></select></div>
+        <div><label class="hint" style="display:block">Ship to</label><select id="rep-shipTo"><option value="">All</option>${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===f.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div><label class="hint" style="display:block">Created from</label><input type="date" id="rep-createdFrom" value="${escapeHtml(f.createdFrom)}" /></div>
+        <div><label class="hint" style="display:block">Created to</label><input type="date" id="rep-createdTo" value="${escapeHtml(f.createdTo)}" /></div>
+        <div><label class="hint" style="display:block">Anticipated ship from</label><input type="date" id="rep-antShipFrom" value="${escapeHtml(f.antShipFrom)}" /></div>
+        <div><label class="hint" style="display:block">Anticipated ship to</label><input type="date" id="rep-antShipTo" value="${escapeHtml(f.antShipTo)}" /></div>
       </div>
     </div></div>
+  `;
 
-    <div class="card"><div class="card-header">Avg Turnaround by Origin Location</div><div class="card-body">
-      ${Object.keys(tatByOrigin).length === 0 ? '<div class="item-sub">Not enough delivered transfers yet.</div>' : `
-      <table style="box-shadow:none"><thead><tr><th>Location</th><th>Avg Turnaround (days)</th><th>Samples</th></tr></thead><tbody>
-        ${Object.entries(tatByOrigin).sort((a,b)=>a[1].reduce((s,n)=>s+n,0)/a[1].length - b[1].reduce((s,n)=>s+n,0)/b[1].length).map(([loc, arr]) => `<tr><td><strong>${escapeHtml(loc)}</strong></td><td>${(arr.reduce((s,n)=>s+n,0)/arr.length).toFixed(1)}</td><td>${arr.length}</td></tr>`).join('')}
-      </tbody></table>`}
-    </div></div>
-
-    <div class="card"><div class="card-header">Volume by Origin Location</div><div class="card-body">
-      <table style="box-shadow:none"><thead><tr><th>Location</th><th>Transfers</th><th>Bar</th></tr></thead><tbody>
-        ${Object.entries(byOrigin).sort((a,b)=>b[1]-a[1]).map(([loc,n]) => { const pct = scope.length ? 100*n/scope.length : 0; return `<tr><td><strong>${escapeHtml(loc)}</strong></td><td>${n}</td><td><div style="background:var(--primary-bg);height:16px;border-radius:3px;width:${pct*3}%;max-width:300px"></div></td></tr>`; }).join('')}
-      </tbody></table>
-    </div></div>
-
-    <div style="margin-top:16px;text-align:right">
-      <button class="btn btn-secondary" id="exportCsv">Export CSV</button>
+  const tabsHtml = `
+    <div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:2px solid var(--gray-200);padding-bottom:0">
+      <button class="rep-tab ${f.mode==='summary'?'active':''}" data-mode="summary" style="padding:8px 16px;border:0;background:${f.mode==='summary'?'var(--primary)':'transparent'};color:${f.mode==='summary'?'white':'var(--gray-700)'};border-radius:6px 6px 0 0;font-weight:600;cursor:pointer">📊 Summary</button>
+      <button class="rep-tab ${f.mode==='detail'?'active':''}" data-mode="detail" style="padding:8px 16px;border:0;background:${f.mode==='detail'?'var(--primary)':'transparent'};color:${f.mode==='detail'?'white':'var(--gray-700)'};border-radius:6px 6px 0 0;font-weight:600;cursor:pointer">📋 Detail (${scope.length} transfers)</button>
     </div>
   `;
-  root.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openTransfer(+b.dataset.open)));
+
+  // Build the body based on mode
+  let bodyHtml = '';
+  if (f.mode === 'summary') {
+    const byStatus = {}; STATUSES.forEach(s => byStatus[s] = 0);
+    scope.forEach(t => byStatus[t.status] = (byStatus[t.status]||0)+1);
+    const byOrigin = {};
+    scope.forEach(t => byOrigin[t.originLocation] = (byOrigin[t.originLocation]||0)+1);
+    const cycles = scope.filter(t => t.dateShipped && t.txEmailedDate).map(t => (new Date(t.dateShipped) - new Date(t.txEmailedDate)) / 86400000);
+    const avgCycle = cycles.length ? (cycles.reduce((a,b)=>a+b,0)/cycles.length).toFixed(1) : '—';
+    const tats = scope.filter(t => t.txEmailedDate && t.dateReceivedByPatient).map(t => ({
+      days: (new Date(t.dateReceivedByPatient) - new Date(t.txEmailedDate)) / 86400000,
+      origin: t.originLocation
+    }));
+    const avgTAT = tats.length ? (tats.reduce((a,b)=>a+b.days,0)/tats.length).toFixed(1) : '—';
+    const tatByOrigin = {};
+    tats.forEach(x => { (tatByOrigin[x.origin] ||= []).push(x.days); });
+    const shipped = scope.filter(t => t.dateShipped && t.anticipatedShipDate);
+    const onTime = shipped.filter(t => new Date(t.dateShipped) <= new Date(t.anticipatedShipDate)).length;
+    const onTimePct = shipped.length ? Math.round(100 * onTime / shipped.length) : 0;
+    const lateOpen = scope.filter(t => t.anticipatedShipDate && !['Shipped','Delivered','Canceled'].includes(t.status) && t.anticipatedShipDate < new Date().toISOString().slice(0,10)).length;
+    const coldCount = scope.filter(t => t.coldItem).length;
+    bodyHtml = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+        <div class="kpi-card"><div class="kpi-label">Total Transfers${CURRENT_USER.role==='admin'?'':' (your location)'}</div><div class="kpi-value">${scope.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">In Flight</div><div class="kpi-value">${scope.filter(t=>!['Delivered','Canceled'].includes(t.status)).length}</div><div class="kpi-sub">not yet delivered</div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Cycle Time</div><div class="kpi-value">${avgCycle}<span style="font-size:14px"> days</span></div><div class="kpi-sub">Tx email → ship</div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Turnaround</div><div class="kpi-value">${avgTAT}<span style="font-size:14px"> days</span></div><div class="kpi-sub">Tx email → delivered (${tats.length} samples)</div></div>
+        <div class="kpi-card"><div class="kpi-label">On-Time Ship Rate</div><div class="kpi-value">${onTimePct}%</div><div class="kpi-sub">${onTime}/${shipped.length} shipped on or before anticipated</div></div>
+        <div class="kpi-card"><div class="kpi-label">Past Anticipated Ship</div><div class="kpi-value" style="color:${lateOpen?'var(--danger)':'var(--success)'}">${lateOpen}</div><div class="kpi-sub">open and overdue</div></div>
+        <div class="kpi-card"><div class="kpi-label">Cold Chain Items</div><div class="kpi-value">${coldCount}</div></div>
+      </div>
+
+      <div class="card"><div class="card-header">Volume by Status</div><div class="card-body">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+          ${STATUSES.map(s => `<div style="padding:10px;background:var(--gray-50);border-radius:6px"><div class="kpi-label">${s}</div><div style="font-size:20px;font-weight:700;color:var(--primary-dark)">${byStatus[s]||0}</div></div>`).join('')}
+        </div>
+      </div></div>
+
+      <div class="card"><div class="card-header">Volume by Origin Location</div><div class="card-body">
+        ${Object.keys(byOrigin).length === 0 ? '<div class="item-sub">No transfers match.</div>' :
+        `<table style="box-shadow:none"><thead><tr><th>Location</th><th>Transfers</th><th>Bar</th></tr></thead><tbody>
+          ${Object.entries(byOrigin).sort((a,b)=>b[1]-a[1]).map(([loc,n]) => { const pct = scope.length ? 100*n/scope.length : 0; return `<tr><td><strong>${escapeHtml(loc)}</strong></td><td>${n}</td><td><div style="background:var(--primary-bg);height:16px;border-radius:3px;width:${pct*3}%;max-width:300px"></div></td></tr>`; }).join('')}
+        </tbody></table>`}
+      </div></div>
+
+      <div class="card"><div class="card-header">Avg Turnaround by Origin Location</div><div class="card-body">
+        ${Object.keys(tatByOrigin).length === 0 ? '<div class="item-sub">Not enough delivered transfers yet.</div>' : `
+        <table style="box-shadow:none"><thead><tr><th>Location</th><th>Avg Turnaround (days)</th><th>Samples</th></tr></thead><tbody>
+          ${Object.entries(tatByOrigin).sort((a,b)=>a[1].reduce((s,n)=>s+n,0)/a[1].length - b[1].reduce((s,n)=>s+n,0)/b[1].length).map(([loc, arr]) => `<tr><td><strong>${escapeHtml(loc)}</strong></td><td>${(arr.reduce((s,n)=>s+n,0)/arr.length).toFixed(1)}</td><td>${arr.length}</td></tr>`).join('')}
+        </tbody></table>`}
+      </div></div>
+    `;
+  } else {
+    // Detail mode — full transfer list with print + CSV
+    const sorted = scope.slice().sort((a,b) => (a.anticipatedShipDate||'9999').localeCompare(b.anticipatedShipDate||'9999') || (a.patientName||'').localeCompare(b.patientName||''));
+    bodyHtml = `
+      <div class="card"><div class="card-body">
+        ${sorted.length === 0 ? '<div class="empty" style="padding:20px"><h3>No transfers match the filters</h3></div>' : `
+        <div id="rep-print-area">
+          <h3 style="margin:0 0 6px;color:var(--primary-dark)">Transfer Detail Report</h3>
+          <div class="item-sub" style="margin-bottom:12px">
+            ${sorted.length} transfer${sorted.length===1?'':'s'} ·
+            ${f.antShipFrom||f.antShipTo?`Anticipated ship ${f.antShipFrom||'(any)'} → ${f.antShipTo||'(any)'} · `:''}
+            ${f.status?`Status: ${f.status} · `:''}
+            ${f.origin?`Origin: ${f.origin} · `:''}
+            ${f.fill?`Fill: ${f.fill} · `:''}
+            Printed ${new Date().toLocaleString()}
+          </div>
+          <table style="box-shadow:none;font-size:12px;width:100%"><thead><tr style="background:var(--primary);color:white">
+            <th style="padding:6px 8px;text-align:left">ID</th>
+            <th style="padding:6px 8px;text-align:left">Patient</th>
+            <th style="padding:6px 8px;text-align:left">Drugs</th>
+            <th style="padding:6px 8px;text-align:left">From → Fill</th>
+            <th style="padding:6px 8px;text-align:left">Ship To</th>
+            <th style="padding:6px 8px;text-align:left">Status</th>
+            <th style="padding:6px 8px;text-align:left">Type</th>
+            <th style="padding:6px 8px;text-align:left">Ant Ship</th>
+            <th style="padding:6px 8px;text-align:left">Created</th>
+          </tr></thead><tbody>
+            ${sorted.map(t => {
+              const drugs = (t.items||[]).map(i => i.drug).filter(Boolean).join(', ').slice(0,80);
+              const overdue = t.anticipatedShipDate && !['Shipped','Delivered','Canceled'].includes(t.status) && t.anticipatedShipDate < new Date().toISOString().slice(0,10);
+              return `<tr style="border-bottom:1px solid var(--gray-200);${overdue?'background:var(--danger-bg)':''}">
+                <td style="padding:6px 8px;font-family:monospace">${t.id}</td>
+                <td style="padding:6px 8px"><strong>${escapeHtml(t.patientName)}</strong>${t.coldItem?' ❄':''}</td>
+                <td style="padding:6px 8px">${escapeHtml(drugs)}</td>
+                <td style="padding:6px 8px">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+                <td style="padding:6px 8px">${escapeHtml(t.shipTo)}</td>
+                <td style="padding:6px 8px"><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
+                <td style="padding:6px 8px">${(t.transferType==='Refill')?'<span class="badge badge-verified" style="font-size:10px">Refill</span>':'<span class="badge badge-new" style="font-size:10px">New</span>'}</td>
+                <td style="padding:6px 8px">${fmtDate(t.anticipatedShipDate)||'—'}${overdue?' <span style="color:var(--danger);font-weight:700">⚠</span>':''}</td>
+                <td style="padding:6px 8px">${fmtDate(t.createdAt)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody></table>
+        </div>`}
+      </div></div>
+    `;
+  }
+
+  root.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Reports</div>
+      <div style="display:flex;gap:8px">
+        ${f.mode==='detail'?'<button class="btn btn-secondary" id="rep-print">🖨 Print this report</button>':''}
+        <button class="btn btn-secondary" id="exportCsv">📥 Export CSV</button>
+      </div>
+    </div>
+    ${filtersHtml}
+    ${tabsHtml}
+    ${bodyHtml}
+  `;
+
+  // Filter handlers — single helper to rebind on any field change
+  ['origin','fill','status','type','shipTo','createdFrom','createdTo','antShipFrom','antShipTo'].forEach(k => {
+    const el = document.getElementById('rep-'+k);
+    if (el) el.onchange = () => { state.reportFilter[k] = el.value; renderStats(); };
+  });
+  document.getElementById('rep-clear').onclick = () => {
+    Object.assign(state.reportFilter, { origin:'', fill:'', status:'', type:'', shipTo:'', createdFrom:'', createdTo:'', antShipFrom:'', antShipTo:'' });
+    renderStats();
+  };
+  root.querySelectorAll('.rep-tab').forEach(b => b.onclick = () => { state.reportFilter.mode = b.dataset.mode; renderStats(); });
+
+  // Detail mode: open transfer on click, print the report
+  if (f.mode === 'detail') {
+    const printBtn = document.getElementById('rep-print');
+    if (printBtn) printBtn.onclick = () => {
+      const w = window.open('', '_blank');
+      const area = document.getElementById('rep-print-area');
+      if (!w || !area) return;
+      w.document.write(`<!DOCTYPE html><html><head><title>Transfer Detail Report</title>
+        <style>
+          @page { size: letter landscape; margin: 0.5in }
+          body { font-family: Arial, sans-serif; color: #111; font-size: 11px; }
+          h3 { color: #233f76; margin: 0 0 6px }
+          .item-sub { color: #666; font-size: 11px; margin-bottom: 10px }
+          table { width: 100%; border-collapse: collapse }
+          th { background: #233f76; color: white; padding: 6px 8px; text-align: left }
+          td { padding: 4px 8px; border-bottom: 1px solid #e2e8f0 }
+          .badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 600 }
+        </style></head><body>${area.innerHTML}
+        <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
+        </body></html>`);
+      w.document.close();
+    };
+  }
+
   document.getElementById('exportCsv').onclick = () => {
-    const rows = [['ID','Patient','Origin','Fill','ShipTo','Status','TxEmailed','AntShip','Shipped','Tracking','Received']];
-    scope.forEach(t => rows.push([t.id,t.patientName,t.originLocation,t.fillLocation,t.shipTo,t.status,t.txEmailedDate||'',t.anticipatedShipDate||'',t.dateShipped||'',t.trackingNumber||'',t.dateReceivedByPatient||'']));
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'transfers.csv'; a.click();
+    const rows = [['ID','Patient','DOB','Drugs','Origin','Fill','ShipTo','Status','Type','AntShip','Created','Tracking','Shipped','Delivered']];
+    scope.forEach(t => rows.push([
+      t.id, t.patientName, t.patientDOB||'',
+      (t.items||[]).map(i=>i.drug).filter(Boolean).join('; '),
+      t.originLocation, t.fillLocation, t.shipTo, t.status,
+      t.transferType||'New', t.anticipatedShipDate||'',
+      (t.createdAt||'').slice(0,10), t.trackingNumber||'',
+      t.dateShipped||'', t.dateReceivedByPatient||''
+    ]));
+    const csv = rows.map(r => r.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = `transfers-${new Date().toISOString().slice(0,10)}.csv`; a.click();
   };
 }
 
