@@ -3506,7 +3506,7 @@ function renderShipments() {
 
     ${filtered.length === 0 ? `<div class="empty"><h3>No shipments match</h3></div>` : `
     <table><thead><tr>
-      <th style="width:90px">Direction</th><th>From → To</th><th>Type</th><th>Carrier</th><th>Tracking</th><th>Contents</th><th>Status</th><th>Ship Date</th><th>Delivered</th><th>Action</th>
+      <th style="width:90px">Direction</th><th>From → To</th><th>Type</th><th>Carrier</th><th>Tracking</th><th>Transfers</th><th>Status</th><th>Ship Date</th><th>Delivered</th><th>Action</th>
     </tr></thead><tbody>
       ${filtered.map(s => {
         const isIncoming = s.toLocation === myLoc;
@@ -3517,13 +3517,14 @@ function renderShipments() {
           : isOutgoing
             ? '<span style="display:inline-block;padding:3px 8px;font-size:11px;font-weight:700;background:#dbeafe;color:#1e40af;border-radius:4px">→ Outgoing</span>'
             : '<span class="item-sub">—</span>';
+        const txCount = (s.transferIds||[]).length;
         return `<tr data-ship="${s.id}">
         <td>${dirChip}</td>
         <td><strong>${escapeHtml(s.fromLocation)}</strong> → ${escapeHtml(s.toLocation)}</td>
         <td>${escapeHtml(s.destinationType)}</td>
         <td>${escapeHtml(s.carrier)}${s.labelGenerated?' <span class="badge badge-verified" style="font-size:10px">Label auto-generated</span>':''}</td>
         <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<div style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</div>`:''}${escapeHtml(s.trackingNumber||'—')}</td>
-        <td>${s.transferIds.map(transferSummary).join('<br>')}</td>
+        <td><span style="font-weight:600">${txCount}</span> <span class="item-sub" style="font-size:11px">${txCount===1?'transfer':'transfers'}</span></td>
         <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>${s.receivedBy?`<div class="item-sub">by ${escapeHtml(s.receivedBy)}</div>`:''}</td>
         <td>${fmtDate(s.shipDate)}</td>
         <td>${fmtDate(s.deliveredDate)}</td>
