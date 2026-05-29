@@ -305,7 +305,7 @@ let USERS = [
 let CURRENT_USER = USERS[0]; // defaults to admin for demo
 
 // SLA rules (hours allowed per status before breach)
-let SLA_RULES = { 'New': 24, 'In Progress': 72, 'Ready to Ship': 24 };
+let SLA_RULES = { 'New': 24, 'In Progress': 72 };
 
 // Formula library — reusable formulas scoped to the originating location
 let FORMULAS = [
@@ -342,8 +342,8 @@ function slaStatus(t) {
   return { state: 'ok', hoursOver: 0 };
 }
 
-const STATUSES = ['New', 'In Progress', 'Ready to Ship', 'Shipped', 'Delivered', 'Canceled'];
-const STATUS_BADGE = { 'New': 'badge-new', 'In Progress': 'badge-progress', 'Ready to Ship': 'badge-ready', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
+const STATUSES = ['New', 'In Progress', 'Shipped', 'Delivered', 'Canceled'];
+const STATUS_BADGE = { 'New': 'badge-new', 'In Progress': 'badge-progress', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
 
 // Helper to build item entries
 function mkItem(id, drug, qty, rxNumber, doctor, doctorAddr, verified=false, notes='') {
@@ -416,7 +416,7 @@ const nextId = () => ++_nextId;
 // =====================================================================
 // State + routing
 // =====================================================================
-const state = { tab: 'transfers', filterStatus: '', filterOrigin: '', filterFill: '', search: '', openTransferId: null };
+const state = { tab: 'transfers', filterStatus: '', filterOrigin: '', filterFill: '', filterType: '', search: '', openTransferId: null };
 
 function bindTabs() {
   document.querySelectorAll('.tab').forEach(btn => {
@@ -925,6 +925,7 @@ function renderTransfers() {
     if (state.filterStatus && t.status !== state.filterStatus) return false;
     if (state.filterOrigin && t.originLocation !== state.filterOrigin) return false;
     if (state.filterFill && t.fillLocation !== state.filterFill) return false;
+    if (state.filterType && (t.transferType || 'New') !== state.filterType) return false;
     if (state.dateFrom) { if (!t.createdAt || t.createdAt.slice(0,10) < state.dateFrom) return false; }
     if (state.dateTo) { if (!t.createdAt || t.createdAt.slice(0,10) > state.dateTo) return false; }
     if (state.search) {
@@ -955,6 +956,7 @@ function renderTransfers() {
     <div class="filters">
       <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:260px" />
       <select id="f-status"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===state.filterStatus?'selected':''}>${s}</option>`).join('')}</select>
+      <select id="f-type"><option value="">All types</option><option value="New" ${state.filterType==='New'?'selected':''}>New only</option><option value="Refill" ${state.filterType==='Refill'?'selected':''}>Refills only</option></select>
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
       <label style="font-size:12px;color:var(--gray-600)">From</label>
@@ -1011,6 +1013,7 @@ function renderTransfers() {
   `;
   document.getElementById('f-search').addEventListener('input', e => { state.search = e.target.value; renderTransfers(); });
   document.getElementById('f-status').addEventListener('change', e => { state.filterStatus = e.target.value; renderTransfers(); });
+  document.getElementById('f-type').addEventListener('change', e => { state.filterType = e.target.value; renderTransfers(); });
   document.getElementById('f-origin').addEventListener('change', e => { state.filterOrigin = e.target.value; renderTransfers(); });
   document.getElementById('f-fill').addEventListener('change', e => { state.filterFill = e.target.value; renderTransfers(); });
   document.getElementById('f-dateFrom').addEventListener('change', e => { state.dateFrom = e.target.value; renderTransfers(); });
@@ -1429,7 +1432,7 @@ function renderSLA() {
     </div></div>` : ''}
 
     <div class="card"><div class="card-header">Transfers Past Status Time Limit ${issues.length?`<span class="badge badge-canceled">${issues.length}</span>`:''}</div><div class="card-body">
-      <p class="item-sub" style="margin-bottom:10px">Transfers that have sat in their current status longer than allowed. Limits: New 24h · In Progress 72h · Ready to Ship 24h. Adjust in Admin.</p>
+      <p class="item-sub" style="margin-bottom:10px">Transfers that have sat in their current status longer than allowed. Adjust limits in Admin.</p>
       ${issues.length === 0 ? `<div class="empty" style="padding:20px"><h3>🎉 All transfers within their time limits</h3></div>` : `
         <table style="box-shadow:none;font-size:13px"><thead><tr><th>Status</th><th>Patient</th><th>Status</th><th>Age</th><th>Origin</th><th>Assigned</th></tr></thead><tbody>
           ${issues.map(({t,sla}) => {
@@ -1530,11 +1533,12 @@ function renderAdmin() {
       </tbody></table>
     </div></div>
 
-    <div class="card"><div class="card-header">Pharmacy Mailing Addresses <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— used to auto-fill Ship-to-Pharmacy</span></div><div class="card-body">
-      <p class="item-sub" style="margin-bottom:10px">When a user picks "Ship to: Pharmacy" on a new transfer, the address fields are auto-filled from this list using the origin location.</p>
-      <table style="box-shadow:none;font-size:13px"><thead><tr><th>Location</th><th>Address Line 1</th><th>Line 2</th><th>City</th><th>State</th><th>Zip</th></tr></thead><tbody>
+    <div class="card"><div class="card-header">Pharmacy Mailing Addresses <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— used to auto-fill Ship-to-Pharmacy + auto-calculate anticipated ship date</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">When a user picks "Ship to: Pharmacy" on a new transfer, the address fields are auto-filled from this list using the origin location. The <strong>Receives Shipments</strong> column is the day of the week each pharmacy normally gets its weekly box — used to auto-populate the anticipated ship date on new Ship-to-Pharmacy transfers.</p>
+      <table style="box-shadow:none;font-size:13px"><thead><tr><th>Location</th><th>Address Line 1</th><th>Line 2</th><th>City</th><th>State</th><th>Zip</th><th>Receives Shipments</th></tr></thead><tbody>
         ${LOCATIONS.map(l => {
           const a = PHARMACY_ADDRESSES[l] || { addr1:'', addr2:'', city:l, state:'', zip:'' };
+          const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
           return `<tr>
             <td><strong>${escapeHtml(l)}</strong></td>
             <td><input data-pa="${l}" data-k="addr1" value="${escapeHtml(a.addr1)}" style="width:100%" placeholder="123 Main St" /></td>
@@ -1542,6 +1546,10 @@ function renderAdmin() {
             <td><input data-pa="${l}" data-k="city" value="${escapeHtml(a.city)}" style="width:100%" /></td>
             <td><input data-pa="${l}" data-k="state" value="${escapeHtml(a.state)}" style="width:50px" /></td>
             <td><input data-pa="${l}" data-k="zip" value="${escapeHtml(a.zip)}" style="width:80px" /></td>
+            <td><select data-pa="${l}" data-k="shippingDay" style="padding:4px 6px">
+              <option value="">—</option>
+              ${days.map((d,idx) => `<option value="${idx}" ${a.shippingDay===idx?'selected':''}>${d}</option>`).join('')}
+            </select></td>
           </tr>`;
         }).join('')}
       </tbody></table>
@@ -1758,7 +1766,8 @@ function renderAdmin() {
   root.querySelectorAll('[data-pa]').forEach(el => el.onchange = () => {
     const loc = el.dataset.pa, k = el.dataset.k;
     if (!PHARMACY_ADDRESSES[loc]) PHARMACY_ADDRESSES[loc] = { addr1:'', addr2:'', city:loc, state:'', zip:'' };
-    PHARMACY_ADDRESSES[loc][k] = el.value;
+    // shippingDay is a numeric day-of-week (0=Sun..6=Sat); empty string means unset
+    PHARMACY_ADDRESSES[loc][k] = (k === 'shippingDay') ? (el.value === '' ? null : Number(el.value)) : el.value;
   });
   root.querySelectorAll('[data-rmf]').forEach(b => b.onclick = () => { FORMULAS.splice(+b.dataset.rmf, 1); renderAdmin(); });
   document.getElementById('addFormulaBtn').onclick = () => {
@@ -2047,6 +2056,15 @@ function renderNewForm() {
         <div class="form-group"><label>City</label><input id="f-shipCity" value="${escapeHtml(d.shipCity)}" /></div>
         <div class="form-group"><label>State / Zip</label><div style="display:flex;gap:8px"><input id="f-shipState" value="${escapeHtml(d.shipState)}" style="width:60px" /><input id="f-shipZip" value="${escapeHtml(d.shipZip)}" /></div></div>
         <div class="form-group"><div class="checkbox-row"><input type="checkbox" id="f-coldItem" ${d.coldItem?'checked':''} /><label for="f-coldItem">Cold item (requires special packaging)</label></div></div>
+        <div class="form-group full" id="f-tempAddrBox" style="display:${d.shipTo==='Patient'?'':'none'}">
+          <div class="checkbox-row" style="margin-bottom:6px"><input type="checkbox" id="f-tempAddr" ${d.tempAddress?'checked':''} /><label for="f-tempAddr"><strong>🏖 Temporary address</strong> <span class="hint" style="text-transform:none;font-weight:400">(patient is somewhere else this trip — receiving pharmacy shouldn't update permanent address)</span></label></div>
+          <div id="f-tempAddrFields" style="display:${d.tempAddress?'':'none'};background:var(--warning-bg);border:1px solid var(--warning);border-radius:6px;padding:10px 14px;margin-top:6px">
+            <div class="form-grid">
+              <div class="form-group"><label>Through (date)</label><input type="date" id="f-tempThrough" value="${escapeHtml(d.tempThroughDate||'')}" /><div class="hint">When the patient leaves this address (optional but helpful for receiving team)</div></div>
+            </div>
+            <div class="hint" style="margin-top:6px;font-weight:600;color:var(--warning)">⚠ Receiving pharmacy: ship to the above address, do NOT update patient's permanent address in your system.</div>
+          </div>
+        </div>
       </div></div>
 
       <div class="section"><div class="section-title">Billing</div>
@@ -2278,6 +2296,7 @@ function freshDraft() {
     shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
     billing: 'HealNow', ccOnFileInPaladin: false, ccForm: null, patientPrice: '',
     coldItem: false,
+    tempAddress: false, tempThroughDate: '',
     anticipatedShipDate: '',
     pkSheets: [], formula: null, hardCopies: [],
     items: [freshItem()],
@@ -2371,12 +2390,41 @@ function bindDraftInputs() {
     state.draft.shipState = addr.state || '';
     state.draft.shipZip = addr.zip || '';
     ['shipAddr1','shipAddr2','shipCity','shipState','shipZip'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.value = state.draft[f]; });
+    // Auto-calc anticipated ship date as the next occurrence of the destination
+    // pharmacy's receiving day. If the date was already entered manually, don't overwrite.
+    if (typeof addr.shippingDay === 'number' && !state.draft.anticipatedShipDate) {
+      const target = addr.shippingDay; // 0=Sun..6=Sat
+      const today = new Date();
+      const todayDow = today.getDay();
+      let daysAhead = (target - todayDow + 7) % 7;
+      if (daysAhead === 0) daysAhead = 7; // if today is the target day, skip to next week
+      const ship = new Date(today.getFullYear(), today.getMonth(), today.getDate() + daysAhead);
+      const iso = ship.toISOString().slice(0,10);
+      state.draft.anticipatedShipDate = iso;
+      const el = document.getElementById('f-antShip');
+      if (el) el.value = iso;
+    }
   };
   const shipToSel = document.getElementById('f-shipTo');
   if (shipToSel) shipToSel.addEventListener('change', fillPharmacyAddress);
   const originSel2 = document.getElementById('f-originLocation');
   if (originSel2) originSel2.addEventListener('change', fillPharmacyAddress);
   ['coldItem','ccPaladin'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('change', () => { state.draft[f==='ccPaladin'?'ccOnFileInPaladin':f] = el.checked; }); });
+  // Temporary address toggle (only shown when shipTo=Patient). Reveals a date field
+  // and adds a warning banner so the receiving pharmacy knows not to update perms.
+  const tempBox = document.getElementById('f-tempAddrBox');
+  const tempFields = document.getElementById('f-tempAddrFields');
+  const tempChk = document.getElementById('f-tempAddr');
+  const tempDate = document.getElementById('f-tempThrough');
+  if (shipToSel) shipToSel.addEventListener('change', () => {
+    if (tempBox) tempBox.style.display = shipToSel.value === 'Patient' ? '' : 'none';
+    if (shipToSel.value !== 'Patient') { state.draft.tempAddress = false; if (tempChk) tempChk.checked = false; if (tempFields) tempFields.style.display = 'none'; }
+  });
+  if (tempChk) tempChk.addEventListener('change', () => {
+    state.draft.tempAddress = tempChk.checked;
+    if (tempFields) tempFields.style.display = tempChk.checked ? '' : 'none';
+  });
+  if (tempDate) tempDate.addEventListener('change', () => { state.draft.tempThroughDate = tempDate.value; });
 
   // Show/hide CC form upload based on billing
   const billingSel = document.getElementById('f-billing');
@@ -2507,6 +2555,7 @@ function submitDraft() {
       billing: d.billing, ccOnFileInPaladin: d.ccOnFileInPaladin, ccForm: d.ccForm,
       patientPrice: d.patientPrice || '',
       coldItem: d.coldItem, anticipatedShipDate: d.anticipatedShipDate,
+      tempAddress: !!d.tempAddress, tempThroughDate: d.tempThroughDate || '',
       pkSheets: d.pkSheets, formula: d.formula, hardCopies: d.hardCopies,
       items: d.items, transferNotes: d.transferNotes,
       lastEditedBy: CURRENT_USER.name, lastEditedAt: new Date().toISOString()
@@ -2728,7 +2777,7 @@ function renderModal() {
           <div class="form-grid">
             <div><strong>Ship to:</strong> ${escapeHtml(t.shipTo)}${t.deliveryCharge?` ($${t.deliveryCharge})`:''}</div>
             <div><strong>Billing:</strong> ${escapeHtml(billingLabel(t.billing))}${t.ccOnFileInPaladin?' (CC on file)':''}${t.patientPrice?` · <strong>Patient Price:</strong> $${escapeHtml(t.patientPrice)}`:''}</div>
-            <div class="form-group full"><strong>Address:</strong><br>${escapeHtml(t.shipAddr1||'—')}${t.shipAddr2?'<br>'+escapeHtml(t.shipAddr2):''}${t.shipCity?'<br>'+escapeHtml(t.shipCity)+', '+escapeHtml(t.shipState)+' '+escapeHtml(t.shipZip):''}</div>
+            <div class="form-group full"><strong>Address:</strong>${t.tempAddress?` <span class="badge" style="background:var(--warning-bg);color:var(--warning);font-size:10px">🏖 TEMPORARY${t.tempThroughDate?' through '+fmtDate(t.tempThroughDate):''}</span>`:''}<br>${escapeHtml(t.shipAddr1||'—')}${t.shipAddr2?'<br>'+escapeHtml(t.shipAddr2):''}${t.shipCity?'<br>'+escapeHtml(t.shipCity)+', '+escapeHtml(t.shipState)+' '+escapeHtml(t.shipZip):''}${t.tempAddress?'<div style="margin-top:6px;font-size:11px;color:var(--warning);font-weight:600">⚠ Do not update patient\\'s permanent address in your system.</div>':''}</div>
             <div><strong>Anticipated ship:</strong> ${fmtDate(t.anticipatedShipDate)}</div>
             <div><strong>Shipped:</strong> ${fmtDate(t.dateShipped)}</div>
             <div><strong>Tracking:</strong> ${escapeHtml(t.trackingNumber||'—')}</div>
@@ -3064,8 +3113,8 @@ function openCreateShipment() {
     const toLoc = document.getElementById('cm-to')?.value || LOCATIONS[0];
     let availableTransfers = visibleTransfers().filter(t => {
       if (SHIPMENTS.some(s => s.transferIds.includes(t.id) && s.status !== 'Canceled')) return false;
-      // Only In Progress or Ready to Ship are eligible. New transfers must be processed first.
-      if (!['In Progress', 'Ready to Ship'].includes(t.status)) return false;
+      // Only In Progress is eligible. New transfers must be processed first.
+      if (t.status !== 'In Progress') return false;
       if (t.canceledAt && !t.cancelAcknowledged) return false;
       if (destType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === toLoc;
       return t.shipTo === 'Patient';
@@ -4514,7 +4563,11 @@ async function apiLoadTransfers() {
     const r = await fetch('/api/transfers');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
-    return data.transfers || [];
+    const list = data.transfers || [];
+    // Migrate legacy 'Ready to Ship' status → 'In Progress'. The status was
+    // retired; In Progress is now the final state before Shipped.
+    list.forEach(t => { if (t.status === 'Ready to Ship') { t.status = 'In Progress'; apiUpdateTransfer(t); } });
+    return list;
   } catch (e) { console.error('Failed to load transfers from API', e); return null; }
 }
 async function apiSaveTransfer(t) {
