@@ -3448,9 +3448,17 @@ function transferSummary(id) { const t = TRANSFERS.find(x => x.id === id); retur
 
 function renderShipments() {
   const root = document.getElementById('view-shipments');
-  if (!state.shipFilter) state.shipFilter = { mine: false, search: '', dateFrom: '', dateTo: '' };
+  // direction: '' = both incoming + outgoing, 'in' = only to my location, 'out' = only from my location
+  if (!state.shipFilter) state.shipFilter = { direction: '', search: '', dateFrom: '', dateTo: '' };
+  // Migrate legacy `mine` flag to the new direction filter
+  if (state.shipFilter.mine !== undefined) {
+    if (state.shipFilter.mine) state.shipFilter.direction = 'in';
+    delete state.shipFilter.mine;
+  }
+  const myLoc = CURRENT_USER.location;
   const filtered = visibleShipments().filter(s => {
-    if (state.shipFilter.mine && s.toLocation !== CURRENT_USER.location) return false;
+    if (state.shipFilter.direction === 'in' && s.toLocation !== myLoc) return false;
+    if (state.shipFilter.direction === 'out' && s.fromLocation !== myLoc) return false;
     if (state.shipFilter.search) {
       const q = state.shipFilter.search.toLowerCase();
       if (!(s.trackingNumber||'').toLowerCase().includes(q) && !s.toLocation.toLowerCase().includes(q) && !s.fromLocation.toLowerCase().includes(q)) return false;
@@ -3477,7 +3485,11 @@ function renderShipments() {
 
     <div class="filters">
       <input placeholder="Filter tracking / location" id="shipSearch" value="${escapeHtml(state.shipFilter.search)}" style="min-width:240px" />
-      <label class="checkbox-row"><input type="checkbox" id="shipMine" ${state.shipFilter.mine?'checked':''} /> Only shipments to my location (${escapeHtml(CURRENT_USER.location)})</label>
+      <div style="display:inline-flex;gap:0;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden">
+        <button id="shipDirAll" style="padding:5px 12px;font-size:12px;border:0;background:${state.shipFilter.direction===''?'var(--primary)':'white'};color:${state.shipFilter.direction===''?'white':'var(--gray-700)'};font-weight:600;cursor:pointer">All</button>
+        <button id="shipDirIn" style="padding:5px 12px;font-size:12px;border:0;border-left:1px solid var(--gray-300);background:${state.shipFilter.direction==='in'?'var(--success)':'white'};color:${state.shipFilter.direction==='in'?'white':'var(--gray-700)'};font-weight:600;cursor:pointer">← Incoming</button>
+        <button id="shipDirOut" style="padding:5px 12px;font-size:12px;border:0;border-left:1px solid var(--gray-300);background:${state.shipFilter.direction==='out'?'var(--primary-dark)':'white'};color:${state.shipFilter.direction==='out'?'white':'var(--gray-700)'};font-weight:600;cursor:pointer">→ Outgoing</button>
+      </div>
       <span style="display:flex;align-items:center;gap:6px">
         <label style="font-size:12px;color:var(--gray-600)">Ship date from:</label>
         <input type="date" id="shipDateFrom" value="${escapeHtml(state.shipFilter.dateFrom||'')}" />
@@ -3489,12 +3501,19 @@ function renderShipments() {
 
     ${filtered.length === 0 ? `<div class="empty"><h3>No shipments match</h3></div>` : `
     <table><thead><tr>
-      <th>From → To</th><th>Type</th><th>Carrier</th><th>Tracking</th><th>Contents</th><th>Status</th><th>Ship Date</th><th>Delivered</th><th>Action</th>
+      <th style="width:90px">Direction</th><th>From → To</th><th>Type</th><th>Carrier</th><th>Tracking</th><th>Contents</th><th>Status</th><th>Ship Date</th><th>Delivered</th><th>Action</th>
     </tr></thead><tbody>
       ${filtered.map(s => {
-        const isMine = s.toLocation === CURRENT_USER.location;
-        const canReceive = isMine && s.status !== 'Received';
+        const isIncoming = s.toLocation === myLoc;
+        const isOutgoing = s.fromLocation === myLoc;
+        const canReceive = isIncoming && s.status !== 'Received';
+        const dirChip = isIncoming
+          ? '<span style="display:inline-block;padding:3px 8px;font-size:11px;font-weight:700;background:#dcfce7;color:#166534;border-radius:4px">← Incoming</span>'
+          : isOutgoing
+            ? '<span style="display:inline-block;padding:3px 8px;font-size:11px;font-weight:700;background:#dbeafe;color:#1e40af;border-radius:4px">→ Outgoing</span>'
+            : '<span class="item-sub">—</span>';
         return `<tr data-ship="${s.id}">
+        <td>${dirChip}</td>
         <td><strong>${escapeHtml(s.fromLocation)}</strong> → ${escapeHtml(s.toLocation)}</td>
         <td>${escapeHtml(s.destinationType)}</td>
         <td>${escapeHtml(s.carrier)}${s.labelGenerated?' <span class="badge badge-verified" style="font-size:10px">Label auto-generated</span>':''}</td>
@@ -3511,7 +3530,9 @@ function renderShipments() {
   document.getElementById('newShipBtn').addEventListener('click', openCreateShipment);
   document.getElementById('pullFedexBtn').addEventListener('click', openFedexPullModal);
   updateFedexStatusPill();
-  document.getElementById('shipMine').addEventListener('change', e => { state.shipFilter.mine = e.target.checked; renderShipments(); });
+  document.getElementById('shipDirAll').onclick = () => { state.shipFilter.direction = ''; renderShipments(); };
+  document.getElementById('shipDirIn').onclick = () => { state.shipFilter.direction = 'in'; renderShipments(); };
+  document.getElementById('shipDirOut').onclick = () => { state.shipFilter.direction = 'out'; renderShipments(); };
   document.getElementById('shipSearch').addEventListener('input', e => { state.shipFilter.search = e.target.value; renderShipments(); });
   document.getElementById('shipDateFrom').addEventListener('change', e => { state.shipFilter.dateFrom = e.target.value; renderShipments(); });
   document.getElementById('shipDateTo').addEventListener('change', e => { state.shipFilter.dateTo = e.target.value; renderShipments(); });
