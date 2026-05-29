@@ -5198,12 +5198,33 @@ function updateNextShipmentBanner() {
   if (!target) { banner.style.display = 'none'; return; }
   const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][target.getDay()];
   const dateStr = target.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  const isoDate = target.toISOString().slice(0, 10);
   const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const scheduleText = days.length > 1
     ? ` <span style="opacity:.75;font-size:12px">(receives ${days.map(d => dayLabels[d]).join(', ')})</span>`
     : '';
-  banner.innerHTML = `📦 Your next pharmacy shipment to <strong>${escapeHtml(CURRENT_USER.location)}</strong> is expected on <strong>${dayName} ${dateStr}</strong>${scheduleText}`;
+  banner.innerHTML = `📦 Your next pharmacy shipment to <strong>${escapeHtml(CURRENT_USER.location)}</strong> is expected on <strong>${dayName} ${dateStr}</strong>${scheduleText}
+    <button id="seeNextOrderBtn" data-date="${isoDate}" style="margin-left:14px;padding:4px 12px;background:var(--primary);color:white;border:0;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer">👀 See what's in this order</button>`;
   banner.style.display = 'block';
+  const btn = document.getElementById('seeNextOrderBtn');
+  if (btn) btn.onclick = () => {
+    const iso = btn.dataset.date;
+    // Drop into All Transfers and filter to transfers anticipated to ship on this exact day,
+    // headed to my location (either as origin or pickup destination).
+    state.filterAntShipFrom = iso;
+    state.filterAntShipTo = iso;
+    state.filterOrigin = CURRENT_USER.location;
+    state.filterStatus = '';
+    state.filterType = '';
+    state.filterPaid = '';
+    state.filterFill = '';
+    state.search = '';
+    state.dateFrom = '';
+    state.dateTo = '';
+    state.filterShipFrom = '';
+    state.filterShipTo = '';
+    document.querySelector('.tab[data-tab=transfers]').click();
+  };
 }
 
 // =====================================================================
