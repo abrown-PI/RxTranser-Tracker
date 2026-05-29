@@ -29,8 +29,20 @@ async function loadWebhooks() {
 // "Send webhook alerts to a chat" + "Post in a channel" templates expect.
 // Both templates validate against a schema that only allows `type` + `attachments`,
 // so we keep the payload minimal (no extra convenience fields).
-function buildCard({ patientName, drug, askedBy, question, portalUrl, askedLocation }) {
-  const fromLine = `From ${askedBy || 'team member'}${askedLocation ? ' (' + askedLocation + ')' : ''}`;
+function buildCard(payload) {
+  const kind = payload.kind || 'question';
+  let title, bodyExtra;
+  if (kind === 'status_delay') {
+    title = `⚠ ${payload.newStatus}: ${payload.patientName || '(unnamed)'}`;
+    bodyExtra = [{ type: 'TextBlock', wrap: true, text: `Status changed from **${payload.oldStatus || '?'}** to **${payload.newStatus || '?'}**. This transfer is on hold until the issue is resolved.`, spacing: 'Medium' }];
+  } else if (kind === 'ant_ship_change') {
+    title = `📅 Anticipated ship date updated: ${payload.patientName || '(unnamed)'}`;
+    bodyExtra = [{ type: 'TextBlock', wrap: true, text: `Changed from **${payload.oldDate || '?'}** to **${payload.newDate || '?'}**.`, spacing: 'Medium' }];
+  } else {
+    title = `❓ Question on transfer: ${payload.patientName || '(unnamed)'}`;
+    bodyExtra = [{ type: 'TextBlock', wrap: true, text: payload.question || '(no question text)', spacing: 'Medium' }];
+  }
+  const fromLine = `From ${payload.askedBy || 'team member'}${payload.askedLocation ? ' (' + payload.askedLocation + ')' : ''}`;
   return {
     type: 'message',
     attachments: [{
@@ -41,15 +53,15 @@ function buildCard({ patientName, drug, askedBy, question, portalUrl, askedLocat
         type: 'AdaptiveCard',
         version: '1.4',
         body: [
-          { type: 'TextBlock', size: 'Medium', weight: 'Bolder', text: `❓ Question on transfer: ${patientName || '(unnamed)'}` },
+          { type: 'TextBlock', size: 'Medium', weight: 'Bolder', text: title },
           { type: 'TextBlock', wrap: true, isSubtle: true, text: fromLine },
-          ...(drug ? [{ type: 'TextBlock', wrap: true, text: `**Drug:** ${drug}` }] : []),
-          { type: 'TextBlock', wrap: true, text: question || '(no question text)', spacing: 'Medium' }
+          ...(payload.drug ? [{ type: 'TextBlock', wrap: true, text: `**Drug:** ${payload.drug}` }] : []),
+          ...bodyExtra
         ],
-        actions: portalUrl ? [{
+        actions: payload.portalUrl ? [{
           type: 'Action.OpenUrl',
           title: 'View Transfer in Portal',
-          url: portalUrl
+          url: payload.portalUrl
         }] : []
       }
     }]
@@ -85,7 +97,7 @@ module.exports = async function (context, req) {
       return;
     }
     const webhooks = await loadWebhooks();
-    const card = buildCard({ patientName, drug, askedBy, question, transferId, portalUrl, askedLocation });
+    const card = buildCard(req.body || {});
     const sent = [], skipped = [], failed = [];
     for (const loc of locations) {
       const url = webhooks[loc];

@@ -75,6 +75,8 @@ tbody tr:hover { background: var(--primary-bg); }
 .badge-new { background: var(--info-bg); color: var(--info); }
 .badge-verified { background: var(--primary-bg); color: var(--primary-dark); }
 .badge-progress { background: var(--warning-bg); color: var(--warning); }
+.badge-pending-clar { background: #fde68a; color: #92400e; }
+.badge-needs-formula { background: #fee2e2; color: #b91c1c; }
 .badge-ready { background: #fef3c7; color: #92400e; }
 .badge-shipped { background: var(--success-bg); color: var(--success); }
 .badge-delivered { background: #dbeafe; color: #1e40af; }
@@ -337,17 +339,28 @@ function visibleTransfers() { return TRANSFERS.filter(canSeeTransfer); }
 function visibleShipments() { return SHIPMENTS.filter(canSeeShipment); }
 
 function slaStatus(t) {
-  const hoursLimit = SLA_RULES[t.status];
-  if (!hoursLimit) return { state: 'none', hoursOver: 0 };
-  const lastChange = new Date(t.createdAt);
-  const hoursIn = (Date.now() - lastChange.getTime()) / 3600000;
-  if (hoursIn > hoursLimit) return { state: 'breach', hoursOver: hoursIn - hoursLimit };
-  if (hoursIn > hoursLimit * 0.75) return { state: 'warn', hoursOver: 0 };
-  return { state: 'ok', hoursOver: 0 };
+  // Anticipated-date-based alerting (replaces the old per-status hour limits).
+  // - breach = anticipated ship date passed and still not shipped
+  // - warn   = anticipated ship date is today or tomorrow and not shipped yet
+  // - ok     = anticipated date is set, in the future
+  // - none   = no anticipated date set, or already shipped / canceled
+  if (!t.anticipatedShipDate) return { state: 'none', hoursOver: 0 };
+  if (['Shipped','Delivered','Canceled'].includes(t.status)) return { state: 'none', hoursOver: 0 };
+  const today = new Date().toISOString().slice(0,10);
+  const ant = t.anticipatedShipDate.slice(0,10);
+  if (ant < today) {
+    const daysOver = Math.floor((Date.parse(today) - Date.parse(ant)) / 86400000);
+    return { state: 'breach', daysOver };
+  }
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
+  if (ant <= tomorrow) return { state: 'warn', daysOver: 0 };
+  return { state: 'ok', daysOver: 0 };
 }
 
-const STATUSES = ['New', 'In Progress', 'Shipped', 'Delivered', 'Canceled'];
-const STATUS_BADGE = { 'New': 'badge-new', 'In Progress': 'badge-progress', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
+const STATUSES = ['New', 'In Progress', 'Pending Clarification', 'Needs Formula', 'Shipped', 'Delivered', 'Canceled'];
+const STATUS_BADGE = { 'New': 'badge-new', 'In Progress': 'badge-progress', 'Pending Clarification': 'badge-pending-clar', 'Needs Formula': 'badge-needs-formula', 'Shipped': 'badge-shipped', 'Delivered': 'badge-delivered', 'Canceled': 'badge-canceled' };
+// Delay statuses that trigger a notification to the originating pharmacy
+const DELAY_STATUSES = ['Pending Clarification', 'Needs Formula'];
 
 // Helper to build item entries
 function mkItem(id, drug, qty, rxNumber, doctor, doctorAddr, verified=false, notes='') {
@@ -963,13 +976,25 @@ function renderTransfers() {
         <button class="btn btn-primary" id="printSelected" ${state.printSelection.size===0?'disabled style="opacity:.5;cursor:not-allowed"':''}>🖨 Print Selected (${state.printSelection.size})</button>
       </div>
     </div>
-    <div class="filters">
-      <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:260px" />
+    <div class="filters" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:240px;flex:0 1 260px" />
+      <label style="font-size:12px;color:var(--gray-600)">Sort</label>
+      <select id="f-sortBy">
+        <option value="dateDesc" ${state.sortBy==='dateDesc'?'selected':''}>Transfer date (newest)</option>
+        <option value="dateAsc" ${state.sortBy==='dateAsc'?'selected':''}>Transfer date (oldest)</option>
+        <option value="patient" ${state.sortBy==='patient'?'selected':''}>Patient name (A→Z)</option>
+        <option value="patientDesc" ${state.sortBy==='patientDesc'?'selected':''}>Patient name (Z→A)</option>
+      </select>
+      <span style="width:1px;height:24px;background:var(--gray-300);margin:0 4px"></span>
       <select id="f-status"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===state.filterStatus?'selected':''}>${s}</option>`).join('')}</select>
       <select id="f-type"><option value="">All types</option><option value="New" ${state.filterType==='New'?'selected':''}>New only</option><option value="Refill" ${state.filterType==='Refill'?'selected':''}>Refills only</option></select>
       <select id="f-paid"><option value="">Paid: all</option><option value="Paid" ${state.filterPaid==='Paid'?'selected':''}>✓ Paid only</option><option value="NotPaid" ${state.filterPaid==='NotPaid'?'selected':''}>Not paid only</option></select>
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
+      <div style="flex:1"></div>
+      <label class="checkbox-row" style="font-size:12px"><input type="checkbox" id="selectAllPrint" /> Select all visible for print</label>
+    </div>
+    <div class="filters" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;border-top:1px dashed var(--gray-200);padding-top:6px">
       <span style="display:inline-flex;align-items:center;gap:4px"><label style="font-size:12px;color:var(--gray-600)">Created</label>
         <input type="date" id="f-dateFrom" value="${escapeHtml(state.dateFrom||'')}" title="Created from" />
         <input type="date" id="f-dateTo" value="${escapeHtml(state.dateTo||'')}" title="Created to" /></span>
@@ -980,15 +1005,6 @@ function renderTransfers() {
         <input type="date" id="f-shipFrom" value="${escapeHtml(state.filterShipFrom||'')}" title="Ship date from" />
         <input type="date" id="f-shipTo" value="${escapeHtml(state.filterShipTo||'')}" title="Ship date to" /></span>
       ${(state.dateFrom||state.dateTo||state.filterAntShipFrom||state.filterAntShipTo||state.filterShipFrom||state.filterShipTo)?'<button class="btn btn-secondary btn-sm" id="clearDateRange">Clear dates</button>':''}
-      <label style="font-size:12px;color:var(--gray-600);margin-left:8px">Sort</label>
-      <select id="f-sortBy">
-        <option value="dateDesc" ${state.sortBy==='dateDesc'?'selected':''}>Transfer date (newest)</option>
-        <option value="dateAsc" ${state.sortBy==='dateAsc'?'selected':''}>Transfer date (oldest)</option>
-        <option value="patient" ${state.sortBy==='patient'?'selected':''}>Patient name (A→Z)</option>
-        <option value="patientDesc" ${state.sortBy==='patientDesc'?'selected':''}>Patient name (Z→A)</option>
-      </select>
-      <div style="flex:1"></div>
-      <label class="checkbox-row" style="font-size:12px"><input type="checkbox" id="selectAllPrint" /> Select all visible for print</label>
     </div>
     ${filtered.length === 0 ? `<div class="empty"><h3>No transfers match</h3><p>Try clearing filters.</p></div>` : `
     <table>
@@ -1001,7 +1017,7 @@ function renderTransfers() {
         ${filtered.map(t => {
           const sla = slaStatus(t);
           const rowClass = sla.state === 'breach' ? 'row-sla-breach' : (sla.state === 'warn' ? 'row-sla-warn' : '');
-          const slaCell = sla.state === 'breach' ? `<span class="pill-danger">⚠ Overdue ${Math.round(sla.hoursOver)}h</span>` : sla.state === 'warn' ? `<span class="pill-warn">Near SLA</span>` : sla.state === 'ok' ? `<span class="sla-ok">On track</span>` : '<span class="item-sub">—</span>';
+          const slaCell = sla.state === 'breach' ? `<span class="pill-danger" title="Anticipated ship date passed">⚠ ${sla.daysOver}d late</span>` : sla.state === 'warn' ? `<span class="pill-warn" title="Anticipated ship date is today or tomorrow">Ship soon</span>` : sla.state === 'ok' ? `<span class="sla-ok">On track</span>` : '<span class="item-sub">—</span>';
           const cancelWarn = (t.status === 'Canceled' && !t.cancelAcknowledged) ? '<span class="pill-danger" style="margin-left:4px">⚠ unack</span>' : '';
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
@@ -1094,6 +1110,9 @@ function renderTransfers() {
     t.status = newStatus;
     apiUpdateTransfer(t);
     logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: newStatus });
+    if (DELAY_STATUSES.includes(newStatus) && !DELAY_STATUSES.includes(oldStatus)) {
+      notifyTeamsStatusDelay(t, oldStatus, newStatus);
+    }
     renderTransfers();
   }));
   root.querySelectorAll('.print-pick').forEach(cb => cb.onchange = e => {
@@ -1691,12 +1710,6 @@ function renderAdmin() {
       </div>
     </div></div>
 
-    <div class="card"><div class="card-header">SLA Rules (hours)</div><div class="card-body">
-      <div class="form-grid">
-        ${Object.keys(SLA_RULES).map(s => `<div class="form-group"><label>${s}</label><input type="number" data-sla="${s}" value="${SLA_RULES[s]}" /></div>`).join('')}
-      </div>
-      <button class="btn btn-primary btn-sm" id="saveSla" style="margin-top:10px">Save SLA rules</button>
-    </div></div>
 
     <div class="card"><div class="card-header">Formula Library <button class="btn btn-primary btn-sm" id="addFormulaBtn">+ Add Formula</button></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">Formulas are scoped to a single location. Users from that location can pick them by name when creating a transfer instead of re-uploading.</p>
@@ -1956,12 +1969,6 @@ function renderAdmin() {
     FORMULAS.push({ id: nextId(), name, location: loc, link, fileName: '', createdBy: CURRENT_USER.name, createdAt: new Date().toISOString() });
     renderAdmin();
   };
-  document.getElementById('saveSla').onclick = () => {
-    root.querySelectorAll('[data-sla]').forEach(el => SLA_RULES[el.dataset.sla] = +el.value || SLA_RULES[el.dataset.sla]);
-    alert('SLA rules updated.');
-    render();
-  };
-
   // Document Templates — preview buttons open sample versions with placeholder data
   root.querySelectorAll('[data-doc-preview]').forEach(btn => {
     btn.onclick = () => {
@@ -2861,6 +2868,8 @@ function submitDraft() {
   if (state.editingTransferId) {
     const existing = TRANSFERS.find(x => x.id === state.editingTransferId);
     if (!existing) { alert('Original transfer not found.'); return; }
+    // Capture the prior anticipated ship date so we can notify origin if it shifted
+    const oldAntShipDate = existing.anticipatedShipDate || '';
     // Merge: preserve fields we don't edit in this form (status, tracking, dates, comments)
     Object.assign(existing, {
       transferType: d.transferType, refillOfId: d.refillOfId, legacyRefill: !!d.legacyRefill,
@@ -2883,6 +2892,11 @@ function submitDraft() {
     });
     apiUpdateTransfer(existing);
     logAudit('edit_transfer', 'transfer', existing.id);
+    // If the anticipated ship date changed AND the editor is not at the originating
+    // pharmacy, the fill location is shifting the schedule — notify origin.
+    if (oldAntShipDate !== existing.anticipatedShipDate) {
+      notifyTeamsAntShipChange(existing, oldAntShipDate, existing.anticipatedShipDate);
+    }
     state.draft = null; state.editingTransferId = null;
     alert('Transfer updated.');
     document.querySelector('.tab[data-tab=transfers]').click();
@@ -3170,11 +3184,16 @@ function renderModal() {
   document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
   document.getElementById('statusSelect').addEventListener('change', e => {
     const newStatus = e.target.value;
-    if (newStatus === 'Canceled' && t.status !== 'Canceled') {
+    const oldStatus = t.status;
+    if (newStatus === 'Canceled' && oldStatus !== 'Canceled') {
       onTransferCanceled(t);
     }
     t.status = newStatus;
     apiUpdateTransfer(t);
+    logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: newStatus });
+    if (DELAY_STATUSES.includes(newStatus) && !DELAY_STATUSES.includes(oldStatus)) {
+      notifyTeamsStatusDelay(t, oldStatus, newStatus);
+    }
     renderModal(); render();
   });
   document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
@@ -5311,6 +5330,53 @@ initAuth();
     if (t) openTransfer(t.id);
   }
 })();
+
+// Teams notification: status changed to Pending Clarification or Needs Formula.
+// Pings the origin pharmacy so they know their order is held up.
+async function notifyTeamsStatusDelay(transfer, oldStatus, newStatus) {
+  if (!transfer.originLocation || transfer.originLocation === CURRENT_USER.location) return;
+  const portalUrl = window.location.origin + window.location.pathname + '?transfer=' + encodeURIComponent(transfer.id);
+  try {
+    await fetch('/api/notify-teams', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'status_delay',
+        locations: [transfer.originLocation],
+        transferId: transfer.id,
+        patientName: transfer.patientName,
+        drug: (transfer.items[0] && transfer.items[0].drug) || '',
+        askedBy: CURRENT_USER.name,
+        askedLocation: CURRENT_USER.location,
+        oldStatus, newStatus,
+        portalUrl
+      })
+    });
+  } catch (e) { console.warn('Teams status notification failed', e); }
+}
+
+// Teams notification: anticipated ship date was changed by someone NOT at the
+// originating pharmacy. Pings origin so they know shipping plans shifted.
+async function notifyTeamsAntShipChange(transfer, oldDate, newDate) {
+  if (!transfer.originLocation || transfer.originLocation === CURRENT_USER.location) return;
+  if (!oldDate && !newDate) return;
+  const portalUrl = window.location.origin + window.location.pathname + '?transfer=' + encodeURIComponent(transfer.id);
+  try {
+    await fetch('/api/notify-teams', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'ant_ship_change',
+        locations: [transfer.originLocation],
+        transferId: transfer.id,
+        patientName: transfer.patientName,
+        drug: (transfer.items[0] && transfer.items[0].drug) || '',
+        askedBy: CURRENT_USER.name,
+        askedLocation: CURRENT_USER.location,
+        oldDate: oldDate || '(unset)', newDate: newDate || '(unset)',
+        portalUrl
+      })
+    });
+  } catch (e) { console.warn('Teams ant-ship-change notification failed', e); }
+}
 
 // Teams notification: routes a question to the OTHER side(s) of the transfer.
 async function notifyTeamsAboutQuestion(transfer, question) {
