@@ -134,6 +134,15 @@ async function searchByReferences(refs, context) {
       const first = (r.trackResults || [])[0] || {};
       const trackingNumber = (r.trackingNumber || (first.trackingNumberInfo && first.trackingNumberInfo.trackingNumber) || '').replace(/\s+/g, '');
       if (!trackingNumber) return;
+      // FedEx Track API echoes the input reference as `trackingNumber` when it
+      // can't find a real shipment. Filter those echoes out — a real FedEx
+      // tracking number is 12-22 digits and won't match our short refs.
+      if (String(trackingNumber).trim() === String(reference).trim()) return;
+      // Additional guards: real FedEx tracking numbers are all-digit, 10-22 long.
+      // Our BULK-* and short transfer IDs would never match this pattern.
+      if (!/^\d{10,22}$/.test(trackingNumber)) return;
+      // Skip results that came back with an explicit error or notFound flag
+      if (first.error || (first.latestStatusDetail && first.latestStatusDetail.code === 'CA')) return;
       const dates = first.dateAndTimes || [];
       const shipDate = (dates.find(d => d.type === 'ACTUAL_PICKUP') || dates.find(d => d.type === 'SHIP') || {}).dateTime || null;
       found[reference] = {

@@ -92,6 +92,17 @@ module.exports = async function (context, req) {
           shipments.push({ reference, found: false });
           return;
         }
+        // FedEx Track API echoes the reference as `trackingNumber` when nothing
+        // is found — guard against treating that as a match.
+        if (String(trackingNumber).trim() === String(reference).trim()) {
+          shipments.push({ reference, found: false, reason: 'no matching FedEx shipment' });
+          return;
+        }
+        // Real FedEx tracking numbers are all-digit, 10-22 long.
+        if (!/^\d{10,22}$/.test(trackingNumber)) {
+          shipments.push({ reference, found: false, reason: 'returned value is not a valid FedEx tracking number' });
+          return;
+        }
         const latest = first.latestStatusDetail || {};
         const dates = first.dateAndTimes || [];
         const shipDate = (dates.find(d => d.type === 'ACTUAL_PICKUP') || dates.find(d => d.type === 'SHIP') || {}).dateTime || null;

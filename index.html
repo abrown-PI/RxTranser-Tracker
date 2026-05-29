@@ -5078,9 +5078,27 @@ async function apiLoadTransfers() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     const list = data.transfers || [];
-    // Migrate legacy 'Ready to Ship' status → 'In Progress'. The status was
-    // retired; In Progress is now the final state before Shipped.
-    list.forEach(t => { if (t.status === 'Ready to Ship') { t.status = 'In Progress'; apiUpdateTransfer(t); } });
+    list.forEach(t => {
+      let needsSave = false;
+      // Migrate legacy 'Ready to Ship' status → 'In Progress'.
+      if (t.status === 'Ready to Ship') { t.status = 'In Progress'; needsSave = true; }
+      // Clean up bad FedEx auto-match data: when the tracking number equals the transfer
+      // ID, that's the symptom of the prior FedEx Track API echo bug — FedEx returned the
+      // reference back as if it were a tracking number, and we wrote it as the tracking
+      // and flipped status to Shipped. Real FedEx tracking numbers are 10-22 digit strings
+      // that should NEVER equal our short transfer IDs. Revert the bad records.
+      const tn = String(t.trackingNumber || '').trim();
+      const idStr = String(t.id);
+      if (tn === idStr || (tn && !/^\d{10,22}$/.test(tn) && tn === idStr)) {
+        t.trackingNumber = '';
+        t.dateShipped = null;
+        if (['Shipped','Delivered'].includes(t.status)) t.status = 'In Progress';
+        t.fedexAutoMatched = false;
+        delete t.fedexAutoMatchedAt;
+        needsSave = true;
+      }
+      if (needsSave) apiUpdateTransfer(t);
+    });
     return list;
   } catch (e) { console.error('Failed to load transfers from API', e); return null; }
 }
