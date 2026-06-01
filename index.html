@@ -2354,9 +2354,9 @@ function renderNewForm() {
 
       <div class="section"><div class="section-title">Documents</div>
       <div class="form-grid">
-        <div class="form-group full"><label>PK Transfer Sheet(s) <span style="color:var(--danger)">*</span></label>
+        <div class="form-group full"><label>PK Transfer Sheet(s) ${d.transferType==='Refill'?'<span class="hint" style="text-transform:none;font-weight:400">(optional for refills)</span>':'<span style="color:var(--danger)">*</span>'}</label>
           <input type="file" id="f-pkSheet" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" multiple />
-          <div class="hint" id="f-pkSheet-name">${(d.pkSheets&&d.pkSheets.length)?d.pkSheets.map(f=>escapeHtml(f.name)).join(', '):'Required — printed PK transfer form. Select multiple files to attach more than one.'}</div>
+          <div class="hint" id="f-pkSheet-name">${(d.pkSheets&&d.pkSheets.length)?d.pkSheets.map(f=>escapeHtml(f.name)).join(', '):(d.transferType==='Refill'?'Optional — refills inherit the original prescription, no new transfer sheet needed.':'Required — printed PK transfer form. Select multiple files to attach more than one.')}</div>
         </div>
         <div class="form-group full"><label>Hard Copy Scan(s) <span class="hint" style="text-transform:none;font-weight:400">(optional for refills)</span></label>
           <input type="file" id="f-hardCopy" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" multiple />
@@ -2892,7 +2892,13 @@ function submitDraft() {
     if (!d.bulkScriptCount || +d.bulkScriptCount < 1) missing.push('Number of scripts');
   } else {
     if (!d.patientName) missing.push('Patient name');
-    if (!d.pkSheets || !d.pkSheets.length) missing.push('At least one PK Transfer Sheet upload');
+    // PK Transfer Sheet is only required on brand-new transfers — refills (whether
+    // chained to an in-app original via refillOfId or entered manually as a legacy
+    // refill) inherit the paperwork from the original prescription, so the sheet is
+    // not required at submission.
+    if (d.transferType !== 'Refill' && (!d.pkSheets || !d.pkSheets.length)) {
+      missing.push('At least one PK Transfer Sheet upload');
+    }
   }
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "Credit card on file")');
   if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
