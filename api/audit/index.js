@@ -84,6 +84,40 @@ module.exports = async function (context, req) {
       return;
     }
 
+    if (method === 'DELETE') {
+      // Bulk wipe for go-live cleanup. Body must include confirm=WIPE-TEST-DATA and
+      // a tables array drawn from {transfers, shipments, bulkDrafts, audit}.
+      const body = req.body || {};
+      if (body.confirm !== 'WIPE-TEST-DATA') {
+        context.res = { status: 400, body: { error: 'confirm must equal "WIPE-TEST-DATA"' } };
+        return;
+      }
+      const ALLOWED = ['transfers', 'shipments', 'bulkDrafts', 'audit'];
+      const requested = Array.isArray(body.tables) ? body.tables : ALLOWED;
+      const tables = requested.filter(t => ALLOWED.includes(t));
+      const conn = process.env.AZURE_STORAGE_CONNECTION;
+      if (!conn) { context.res = { status: 503, body: { error: 'AZURE_STORAGE_CONNECTION not set' } }; return; }
+      const results = [];
+      for (const t of tables) {
+        try {
+          const c = require('@azure/data-tables').TableClient.fromConnectionString(conn, t);
+          const rows = [];
+          try { for await (const e of c.listEntities()) rows.push({ partitionKey: e.partitionKey, rowKey: e.rowKey }); }
+          catch (e) { if (e.statusCode !== 404) throw e; }
+          let deleted = 0;
+          for (const r of rows) {
+            try { await c.deleteEntity(r.partitionKey, r.rowKey); deleted++; }
+            catch (e) { if (e.statusCode !== 404) throw e; }
+          }
+          results.push({ table: t, deleted });
+        } catch (e) {
+          results.push({ table: t, error: e.message });
+        }
+      }
+      context.res = { status: 200, body: { ok: true, results } };
+      return;
+    }
+
     context.res = { status: 405, body: { error: 'Method not allowed' } };
   } catch (err) {
     context.log.error('audit error', err);
