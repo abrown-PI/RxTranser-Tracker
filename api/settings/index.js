@@ -58,7 +58,8 @@ function redactWebhooks(settings) {
     askQuestionRouting: settings.askQuestionRouting || 'opposite-side',
     adminEmails: settings.adminEmails || [],
     dailySummaryRecipients: settings.dailySummaryRecipients || [],
-    locationEmails: settings.locationEmails || {}
+    locationEmails: settings.locationEmails || {},
+    pharmacyAddresses: settings.pharmacyAddresses || {}
   };
 }
 
@@ -103,12 +104,18 @@ module.exports = async function (context, req) {
           else locationEmails[loc] = arr;
         });
       }
+      // Pharmacy addresses (incl. multi-day shippingDays) — full replace if provided
+      let pharmacyAddresses = current.pharmacyAddresses || {};
+      if (incoming.pharmacyAddresses && typeof incoming.pharmacyAddresses === 'object') {
+        pharmacyAddresses = incoming.pharmacyAddresses;
+      }
       const merged = {
         ...current,
         teamsWebhooks,
         adminEmails,
         dailySummaryRecipients,
         locationEmails,
+        pharmacyAddresses,
         askQuestionRouting: incoming.askQuestionRouting || current.askQuestionRouting || 'opposite-side'
       };
       await writeSettings(merged);

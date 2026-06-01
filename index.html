@@ -1995,10 +1995,22 @@ function renderAdmin() {
     } catch (e) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(e.message)}</span>`; }
   };
   root.querySelectorAll('[data-fi]').forEach(el => el.onchange = () => { FORMULAS[+el.dataset.fi][el.dataset.k] = el.value; });
+  // Debounced save of pharmacy addresses to /api/settings so edits persist
+  let _paSaveTimer = null;
+  const persistPharmacyAddresses = () => {
+    clearTimeout(_paSaveTimer);
+    _paSaveTimer = setTimeout(() => {
+      fetch('/api/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pharmacyAddresses: PHARMACY_ADDRESSES })
+      }).catch(() => {});
+    }, 600);
+  };
   root.querySelectorAll('[data-pa]').forEach(el => el.onchange = () => {
     const loc = el.dataset.pa, k = el.dataset.k;
     if (!PHARMACY_ADDRESSES[loc]) PHARMACY_ADDRESSES[loc] = { addr1:'', addr2:'', city:loc, state:'', zip:'' };
     PHARMACY_ADDRESSES[loc][k] = el.value;
+    persistPharmacyAddresses();
   });
   // Multi-day receiving checkboxes — each toggle rebuilds the shippingDays array
   // for that location by collecting all currently-checked day boxes in that row.
@@ -2008,6 +2020,7 @@ function renderAdmin() {
     const checked = [...root.querySelectorAll(`[data-paday="${loc}"]:checked`)].map(c => +c.dataset.day).sort();
     PHARMACY_ADDRESSES[loc].shippingDays = checked;
     delete PHARMACY_ADDRESSES[loc].shippingDay; // retire legacy single-day field
+    persistPharmacyAddresses();
     renderAdmin(); // refresh the row styling to reflect new selection
   });
   root.querySelectorAll('[data-rmf]').forEach(b => b.onclick = () => { FORMULAS.splice(+b.dataset.rmf, 1); renderAdmin(); });
@@ -5257,6 +5270,13 @@ async function loadAdminEmails() {
     if (!r.ok) return [];
     const data = await r.json();
     _adminEmails = (data.adminEmails || []).map(e => e.toLowerCase());
+    // Merge any persisted pharmacy addresses (incl. multi-day shippingDays) into the
+    // in-memory PHARMACY_ADDRESSES object so admin edits survive page reloads.
+    const persisted = data.pharmacyAddresses || {};
+    Object.entries(persisted).forEach(([loc, addr]) => {
+      if (!addr) return;
+      PHARMACY_ADDRESSES[loc] = { ...(PHARMACY_ADDRESSES[loc] || {}), ...addr };
+    });
     return _adminEmails;
   } catch { return []; }
 }
