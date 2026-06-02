@@ -377,13 +377,15 @@ function slaStatus(t) {
   // - none   = no anticipated date set, or already shipped / canceled
   if (!t.anticipatedShipDate) return { state: 'none', hoursOver: 0 };
   if (['Shipped','Delivered','Canceled'].includes(t.status)) return { state: 'none', hoursOver: 0 };
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   const ant = t.anticipatedShipDate.slice(0,10);
   if (ant < today) {
     const daysOver = Math.floor((Date.parse(today) - Date.parse(ant)) / 86400000);
     return { state: 'breach', daysOver };
   }
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
+  const t2 = new Date();
+  t2.setDate(t2.getDate() + 1);
+  const tomorrow = `${t2.getFullYear()}-${String(t2.getMonth()+1).padStart(2,'0')}-${String(t2.getDate()).padStart(2,'0')}`;
   if (ant <= tomorrow) return { state: 'warn', daysOver: 0 };
   return { state: 'ok', daysOver: 0 };
 }
@@ -520,7 +522,37 @@ function bindGlobalSearch() {
 // Render functions
 // =====================================================================
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fmtDate(s) { if (!s) return '—'; const d = new Date(s); if (isNaN(d)) return s; return d.toLocaleDateString(); }
+function fmtDate(s) {
+  if (!s) return '—';
+  const d = parseDateLocal(s);
+  return d ? d.toLocaleDateString() : (typeof s === 'string' ? s : '—');
+}
+// Parse a date string in a timezone-safe way. YYYY-MM-DD plain dates are
+// treated as local-calendar dates (not UTC midnight) so users in EST/CST/MST
+// all see the same calendar day. Full ISO timestamps (with T and time) are
+// parsed normally as instants in time.
+function parseDateLocal(s) {
+  if (!s) return null;
+  if (typeof s === 'string') {
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  }
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+// Today's date as YYYY-MM-DD in the user's local calendar (NOT UTC).
+// Critical for EST/CST/MST users — a UTC-based "today" lands on tomorrow's
+// date for anyone who logs in after ~7pm local time, which made transfers
+// look overdue and stored receipt dates one day late.
+function todayLocal() {
+  return toDateISO(new Date());
+}
+// Format a Date as YYYY-MM-DD in the LOCAL calendar (vs .toISOString() which gives UTC).
+// Use this anywhere we need to emit a date-only string for storage or display.
+function toDateISO(d) {
+  if (!d) return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 const BILLING_OPTIONS = [
   ['HealNow', 'HealNow'],
   ['CreditCard', 'Credit Card'],
@@ -640,7 +672,7 @@ function printPackingSlip(shipment, opts) {
   <thead><tr><th style="width:30%">Patient</th><th>Drug</th><th>Qty</th><th>Origin Rx #</th><th>Receiving Rx #</th><th>Cold</th></tr></thead>
   <tbody>
     ${manifest.flatMap(t => t.items.map((i, idx) => `<tr>
-      <td>${idx === 0 ? `<strong>${escapeHtml(t.patientName)}</strong>${t.patientDOB?`<div style="font-size:10px;color:#666">DOB ${escapeHtml(new Date(t.patientDOB).toLocaleDateString())}</div>`:''}` : ''}</td>
+      <td>${idx === 0 ? `<strong>${escapeHtml(t.patientName)}</strong>${t.patientDOB?`<div style="font-size:10px;color:#666">DOB ${escapeHtml(fmtDate(t.patientDOB))}</div>`:''}` : ''}</td>
       <td>${escapeHtml(i.drug||'—')}</td>
       <td>${escapeHtml(i.qty||'')}</td>
       <td style="font-family:monospace">${escapeHtml(i.rxNumber||'—')}</td>
@@ -682,7 +714,7 @@ function printCCAuthForm(source, opts) {
   const w = window.open('', '_blank');
   if (!w) { alert('Pop-up blocked — allow pop-ups for this site so the form can print.'); return; }
   const name = source.patientName || '';
-  const dob = source.patientDOB ? new Date(source.patientDOB).toLocaleDateString() : '';
+  const dob = source.patientDOB ? fmtDate(source.patientDOB) : '';
   const drugs = (source.items || []).map(i => i.drug).filter(Boolean).join(', ');
   const tid = source.id || '(new transfer)';
   const today = new Date().toLocaleDateString();
@@ -952,7 +984,7 @@ function updateIncomingBadge() {
   if (b) { if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; } }
   const ab = document.getElementById('actionsBadge');
   if (ab) {
-    const today = new Date().toISOString().slice(0,10);
+    const today = todayLocal();
     const cancelN = visibleTransfers().filter(t => t.status === 'Canceled' && !t.cancelAcknowledged).length;
     const deliveredN = visibleShipments().filter(s => s.toLocation === CURRENT_USER.location && s.status === 'Delivered').length;
     const lateN = visibleTransfers().filter(t => t.anticipatedShipDate && t.anticipatedShipDate.slice(0,10) < today && !['Shipped','Delivered','Canceled'].includes(t.status)).length;
@@ -1446,7 +1478,7 @@ function renderStats() {
     const shipped = scope.filter(t => t.dateShipped && t.anticipatedShipDate);
     const onTime = shipped.filter(t => new Date(t.dateShipped) <= new Date(t.anticipatedShipDate)).length;
     const onTimePct = shipped.length ? Math.round(100 * onTime / shipped.length) : 0;
-    const lateOpen = scope.filter(t => t.anticipatedShipDate && !['Shipped','Delivered','Canceled'].includes(t.status) && t.anticipatedShipDate < new Date().toISOString().slice(0,10)).length;
+    const lateOpen = scope.filter(t => t.anticipatedShipDate && !['Shipped','Delivered','Canceled'].includes(t.status) && t.anticipatedShipDate < todayLocal()).length;
     const coldCount = scope.filter(t => t.coldItem).length;
     bodyHtml = `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
@@ -1508,7 +1540,7 @@ function renderStats() {
           </tr></thead><tbody>
             ${sorted.map(t => {
               const drugs = (t.items||[]).map(i => i.drug).filter(Boolean).join(', ').slice(0,80);
-              const overdue = t.anticipatedShipDate && !['Shipped','Delivered','Canceled'].includes(t.status) && t.anticipatedShipDate < new Date().toISOString().slice(0,10);
+              const overdue = t.anticipatedShipDate && !['Shipped','Delivered','Canceled'].includes(t.status) && t.anticipatedShipDate < todayLocal();
               return `<tr style="border-bottom:1px solid var(--gray-200);${overdue?'background:var(--danger-bg)':''}">
                 <td style="padding:6px 8px;font-family:monospace">${t.id}</td>
                 <td style="padding:6px 8px"><strong>${escapeHtml(t.patientName)}</strong>${t.coldItem?' ❄':''}</td>
@@ -1586,7 +1618,7 @@ function renderStats() {
       t.dateShipped||'', t.dateReceivedByPatient||''
     ]));
     const csv = rows.map(r => r.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = `transfers-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = `transfers-${todayLocal()}.csv`; a.click();
   };
 }
 
@@ -2048,7 +2080,7 @@ function renderAdmin() {
         toLocation: 'Seminole',
         carrier: 'FedEx',
         trackingNumber: '794612345678',
-        shipDate: new Date().toISOString().slice(0,10),
+        shipDate: todayLocal(),
         transferIds: [1,2,3]
       };
       // Add sample transfers to the in-memory list temporarily so printPackingSlip can find them
@@ -2141,7 +2173,7 @@ function renderAdmin() {
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `audit-log-${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `audit-log-${todayLocal()}.csv`;
     a.click();
   };
   loadAudit();
@@ -2712,10 +2744,13 @@ function bindDraftInputs() {
       const noteEl = document.getElementById('f-antShipNote');
       if (noteEl) noteEl.textContent = '';
       if (apptDate) target = new Date(apptDate.getTime() - TWO_DAYS);
-      else target = new Date(Date.now() + 86400000); // tomorrow
+      else {
+        const tdy = new Date();
+        target = new Date(tdy.getFullYear(), tdy.getMonth(), tdy.getDate() + 1); // tomorrow local
+      }
     }
     if (!target) return;
-    const iso = target.toISOString().slice(0,10);
+    const iso = toDateISO(target);
     d.anticipatedShipDate = iso;
     const el = document.getElementById('f-antShip');
     if (el) el.value = iso;
@@ -3258,7 +3293,7 @@ function renderModal() {
       t.trackingNumber = v;
       if (v && !['Shipped','Delivered','Canceled'].includes(t.status)) {
         t.status = 'Shipped';
-        if (!t.dateShipped) t.dateShipped = new Date().toISOString().slice(0,10);
+        if (!t.dateShipped) t.dateShipped = todayLocal();
       }
       apiUpdateTransfer(t);
       const msg = document.getElementById('inline-tracking-msg');
@@ -3455,7 +3490,7 @@ function editShip(t) {
     // Auto-advance to Shipped when a tracking number is first entered
     if (t.trackingNumber && !prevTracking && !['Shipped','Delivered','Canceled'].includes(t.status)) {
       t.status = 'Shipped';
-      if (!t.dateShipped) t.dateShipped = new Date().toISOString().slice(0,10);
+      if (!t.dateShipped) t.dateShipped = todayLocal();
     }
     apiUpdateTransfer(t);
     overlay.remove();
@@ -3719,7 +3754,7 @@ function openCreateShipment() {
     // takes that to WorldShip as the Customer Reference, then comes back to add tracking later.
     const destType = document.getElementById('cm-destType').value;
     const toLoc = document.getElementById('cm-to').value;
-    const shipDate = new Date().toISOString().slice(0,10);
+    const shipDate = todayLocal();
     const s = {
       id: nextId(),
       fromLocation: document.getElementById('cm-from').value,
@@ -3845,12 +3880,12 @@ function openShipment(id) {
   root.querySelectorAll('[data-unpack]').forEach(cb => cb.onchange = e => { s.unpacked[+cb.dataset.unpack] = e.target.checked; openShipment(s.id); });
   const arrived = document.getElementById('sm-arrived');
   if (arrived) arrived.onclick = () => {
-    s.status = 'Delivered'; s.deliveredDate = new Date().toISOString().slice(0,10);
+    s.status = 'Delivered'; s.deliveredDate = todayLocal();
     openShipment(s.id);
   };
   const rec = document.getElementById('sm-receive');
   if (rec) rec.onclick = () => {
-    s.status = 'Received'; s.receivedDate = new Date().toISOString().slice(0,10); s.receivedBy = CURRENT_USER.name;
+    s.status = 'Received'; s.receivedDate = todayLocal(); s.receivedBy = CURRENT_USER.name;
     // Cascade Received status + receipt info to every transfer in the package
     s.transferIds.forEach(id => {
       const t = TRANSFERS.find(x => x.id === id);
@@ -4371,7 +4406,7 @@ async function processBulkFiles(rawFiles) {
     });
   }
   // Detect same-patient/same-day groups within this batch
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayLocal();
   const groupKey = (d) => `${(d.patientName||'').toLowerCase().trim()}|${today}`;
   const groups = {};
   newDrafts.forEach(b => {
@@ -4727,12 +4762,15 @@ function renderActionItems() {
   // Delivered shipments that haven't been checked in yet (incoming only).
   const TWENTY_FOUR_H = 24 * 3600000;
   const myLoc = CURRENT_USER.location;
-  const todayISO = new Date().toISOString().slice(0,10);
+  const todayISO = todayLocal();
   const deliveredToReceive = visibleShipments().filter(s =>
     s.toLocation === myLoc
     && s.status === 'Delivered'
   ).sort((a,b) => new Date(a.deliveredDate||0) - new Date(b.deliveredDate||0));
-  const overdueCheckIn = deliveredToReceive.filter(s => s.deliveredDate && (Date.now() - Date.parse(s.deliveredDate)) > TWENTY_FOUR_H);
+  const overdueCheckIn = deliveredToReceive.filter(s => {
+    const d = parseDateLocal(s.deliveredDate);
+    return d && (Date.now() - d.getTime()) > TWENTY_FOUR_H;
+  });
 
   // Transfers past their anticipated ship date and not yet Shipped/Delivered/Canceled
   const lateShipping = visibleTransfers().filter(t =>
@@ -4793,7 +4831,7 @@ function renderActionItems() {
         <th>From → To</th><th>Tracking / BULK ID</th><th>Contents</th><th>Delivered</th><th>Age</th><th></th>
       </tr></thead><tbody>
         ${deliveredToReceive.map(s => {
-          const delivered = s.deliveredDate ? new Date(s.deliveredDate) : null;
+          const delivered = parseDateLocal(s.deliveredDate);
           const ageMs = delivered ? Date.now() - delivered.getTime() : 0;
           const ageH = Math.floor(ageMs / 3600000);
           const ageStr = !delivered ? '—' : ageH < 24 ? `${ageH}h` : `${Math.floor(ageH/24)}d ${ageH%24}h`;
@@ -4802,7 +4840,7 @@ function renderActionItems() {
             <td><strong>${escapeHtml(s.fromLocation)}</strong> → ${escapeHtml(s.toLocation)}</td>
             <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<div style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</div>`:''}${escapeHtml(s.trackingNumber||'—')}</td>
             <td>${(s.transferIds||[]).length} transfer${(s.transferIds||[]).length===1?'':'s'}</td>
-            <td>${delivered?delivered.toLocaleString():'—'}</td>
+            <td>${delivered?fmtDate(s.deliveredDate):'—'}</td>
             <td>${isOverdue?`<strong style="color:var(--danger)">⚠ ${ageStr}</strong>`:ageStr}</td>
             <td style="white-space:nowrap">
               <button class="btn btn-secondary btn-sm" data-open-ship="${s.id}">Open</button>
@@ -5384,7 +5422,7 @@ function updateNextShipmentBanner() {
   if (!target) { banner.style.display = 'none'; return; }
   const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][target.getDay()];
   const dateStr = target.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-  const isoDate = target.toISOString().slice(0, 10);
+  const isoDate = toDateISO(target);
   const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const scheduleText = days.length > 1
     ? ` <span style="opacity:.75;font-size:12px">(receives ${days.map(d => dayLabels[d]).join(', ')})</span>`
