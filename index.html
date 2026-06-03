@@ -1382,13 +1382,15 @@ function getPrintableDocsForTransfer(t) {
   return docs;
 }
 
-// Pre-print prompt: ask the user for the anticipated ship date and apply it to
-// every transfer about to be printed. Allows Skip (proceed without setting).
-// Called by batchPrintTransfers and the per-transfer Print all attached button.
+// Pre-print prompt: ask the user for the anticipated ship date.
+// Calls onProceed(newDate) where newDate is the entered date string or null
+// (Cancel returns nothing — onProceed is never called).
+// Note: this helper does NOT mutate transfers or call apiUpdateTransfer — the
+// caller is responsible for applying the date AND any other changes (e.g.,
+// status auto-advance) in a single combined PUT per transfer, to avoid races.
 function askAntShipDateBeforePrint(transfers, onProceed) {
-  if (!transfers || transfers.length === 0) { onProceed(); return; }
+  if (!transfers || transfers.length === 0) { onProceed(null); return; }
   const root = document.getElementById('modalRoot');
-  // Pre-fill with the most recent existing anticipated date among the selection
   const existing = transfers.map(t => t.anticipatedShipDate).filter(Boolean).sort().pop() || '';
   const patientCount = transfers.length;
   const patientList = transfers.slice(0, 5).map(t => t.patientName || '(bulk)').join(', ') + (transfers.length > 5 ? `, +${transfers.length-5} more` : '');
@@ -1411,36 +1413,34 @@ function askAntShipDateBeforePrint(transfers, onProceed) {
   document.getElementById('aspClose').onclick = close;
   document.getElementById('aspCancel').onclick = close;
   document.getElementById('aspOverlay').onclick = e => { if (e.target.id === 'aspOverlay') close(); };
-  document.getElementById('aspSkip').onclick = () => { close(); onProceed(); };
+  document.getElementById('aspSkip').onclick = () => { close(); onProceed(null); };
   document.getElementById('aspApply').onclick = () => {
-    const v = document.getElementById('aspDate').value;
-    if (v) {
-      transfers.forEach(t => {
-        t.anticipatedShipDate = v;
-        apiUpdateTransfer(t);
-      });
-    }
+    const v = document.getElementById('aspDate').value || null;
     close();
-    onProceed();
+    onProceed(v);
   };
-  // Focus + select for quick entry
   const inp = document.getElementById('aspDate');
-  if (inp) { inp.focus(); }
+  if (inp) inp.focus();
 }
 
 // Batch-print PK transfer sheets + hard copies for selected transfers.
 // After the print window opens, auto-advance any 'New' transfers to 'In Progress'.
+// All mutations (anticipated ship date + status auto-advance) are combined
+// into a single PUT per transfer to avoid the race where two back-to-back
+// fire-and-forget PUTs can arrive out of order and revert the status.
 function batchPrintTransfers(ids) {
   if (!ids.length) return;
   const transfers = ids.map(id => TRANSFERS.find(t => t.id === id)).filter(Boolean);
-  askAntShipDateBeforePrint(transfers, () => {
-    const docs = transfers.flatMap(getPrintableDocsForTransfer);
-    printDocs(docs);
-    // Auto-advance status
+  askAntShipDateBeforePrint(transfers, (newDate) => {
+    // Mutate locally first, then fire ONE PUT per transfer.
     let advanced = 0;
     transfers.forEach(t => {
-      if (t.status === 'New') { t.status = 'In Progress'; advanced++; apiUpdateTransfer(t); }
+      if (newDate) t.anticipatedShipDate = newDate;
+      if (t.status === 'New') { t.status = 'In Progress'; advanced++; }
+      apiUpdateTransfer(t);
     });
+    const docs = transfers.flatMap(getPrintableDocsForTransfer);
+    printDocs(docs);
     state.printSelection.clear();
     if (advanced) {
       setTimeout(() => {
@@ -3392,7 +3392,8 @@ function renderModal() {
   if (viewBulkBtn) viewBulkBtn.addEventListener('click', () => openPageViewer({ sourceFile: t.patientName + ' — attached pages', pageImages: t.pageImages || [] }));
   const printAttachBtn = document.getElementById('printAttachmentsBtn');
   if (printAttachBtn) printAttachBtn.addEventListener('click', () => {
-    askAntShipDateBeforePrint([t], () => {
+    askAntShipDateBeforePrint([t], (newDate) => {
+      if (newDate) { t.anticipatedShipDate = newDate; apiUpdateTransfer(t); }
       printDocs(getPrintableDocsForTransfer(t));
     });
   });
