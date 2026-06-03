@@ -1382,27 +1382,75 @@ function getPrintableDocsForTransfer(t) {
   return docs;
 }
 
+// Pre-print prompt: ask the user for the anticipated ship date and apply it to
+// every transfer about to be printed. Allows Skip (proceed without setting).
+// Called by batchPrintTransfers and the per-transfer Print all attached button.
+function askAntShipDateBeforePrint(transfers, onProceed) {
+  if (!transfers || transfers.length === 0) { onProceed(); return; }
+  const root = document.getElementById('modalRoot');
+  // Pre-fill with the most recent existing anticipated date among the selection
+  const existing = transfers.map(t => t.anticipatedShipDate).filter(Boolean).sort().pop() || '';
+  const patientCount = transfers.length;
+  const patientList = transfers.slice(0, 5).map(t => t.patientName || '(bulk)').join(', ') + (transfers.length > 5 ? `, +${transfers.length-5} more` : '');
+  root.innerHTML = `<div class="modal-overlay" id="aspOverlay"><div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <div><div class="modal-title">Anticipated Ship Date</div><div class="item-sub">${patientCount} transfer${patientCount===1?'':'s'} · ${escapeHtml(patientList)}</div></div>
+      <button class="modal-close" id="aspClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;margin:0 0 10px">Set the anticipated ship date for these transfers before printing. Leave blank and click <strong>Skip</strong> if you're not sure yet.</p>
+      <div class="form-group"><label>Anticipated Ship Date</label><input type="date" id="aspDate" value="${escapeHtml(existing)}" autofocus /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="aspCancel">Cancel</button>
+      <button class="btn btn-secondary" id="aspSkip">Skip — print without setting</button>
+      <button class="btn btn-primary" id="aspApply">Apply &amp; Print</button>
+    </div>
+  </div></div>`;
+  const close = () => { root.innerHTML = ''; if (state.openTransferId) renderModal(); };
+  document.getElementById('aspClose').onclick = close;
+  document.getElementById('aspCancel').onclick = close;
+  document.getElementById('aspOverlay').onclick = e => { if (e.target.id === 'aspOverlay') close(); };
+  document.getElementById('aspSkip').onclick = () => { close(); onProceed(); };
+  document.getElementById('aspApply').onclick = () => {
+    const v = document.getElementById('aspDate').value;
+    if (v) {
+      transfers.forEach(t => {
+        t.anticipatedShipDate = v;
+        apiUpdateTransfer(t);
+      });
+    }
+    close();
+    onProceed();
+  };
+  // Focus + select for quick entry
+  const inp = document.getElementById('aspDate');
+  if (inp) { inp.focus(); }
+}
+
 // Batch-print PK transfer sheets + hard copies for selected transfers.
 // After the print window opens, auto-advance any 'New' transfers to 'In Progress'.
 function batchPrintTransfers(ids) {
   if (!ids.length) return;
   const transfers = ids.map(id => TRANSFERS.find(t => t.id === id)).filter(Boolean);
-  const docs = transfers.flatMap(getPrintableDocsForTransfer);
-  printDocs(docs);
-  // Auto-advance status
-  let advanced = 0;
-  transfers.forEach(t => {
-    if (t.status === 'New') { t.status = 'In Progress'; advanced++; }
-  });
-  state.printSelection.clear();
-  if (advanced) {
-    setTimeout(() => {
-      alert(`Print queue opened. ${advanced} transfer(s) auto-advanced to "In Progress".`);
+  askAntShipDateBeforePrint(transfers, () => {
+    const docs = transfers.flatMap(getPrintableDocsForTransfer);
+    printDocs(docs);
+    // Auto-advance status
+    let advanced = 0;
+    transfers.forEach(t => {
+      if (t.status === 'New') { t.status = 'In Progress'; advanced++; apiUpdateTransfer(t); }
+    });
+    state.printSelection.clear();
+    if (advanced) {
+      setTimeout(() => {
+        alert(`Print queue opened. ${advanced} transfer(s) auto-advanced to "In Progress".`);
+        render();
+      }, 300);
+    } else {
       render();
-    }, 300);
-  } else {
-    render();
-  }
+    }
+  });
 }
 
 function renderStats() {
@@ -2725,6 +2773,15 @@ function bindDraftInputs() {
     const d = state.draft;
     const apptISO = d.appointmentDate || '';
     const apptDate = apptISO ? new Date(apptISO + 'T12:00:00') : null;
+    const noteEl = document.getElementById('f-antShipNote');
+    if (noteEl) noteEl.textContent = '';
+    // Auto-calc the anticipated ship date ONLY when the user has explicitly set a
+    // future-appointment date — that's still useful because we work backward from
+    // the appointment to figure out when the box needs to leave.
+    // Without an appointment, the team prefers to leave the field blank at
+    // creation and enter the date later at print time (see batchPrintTransfers /
+    // the per-transfer print path).
+    if (!apptDate) return;
     let target = null;
     const TWO_DAYS = 2 * 86400000;
     const usePickup = !!(d.pickupAtPharmacy && d.pickupLocation);
@@ -2732,22 +2789,13 @@ function bindDraftInputs() {
       const destLoc = usePickup ? d.pickupLocation : d.originLocation;
       const addr = PHARMACY_ADDRESSES[destLoc] || {};
       const days = getShippingDays(addr);
-      const noteEl = document.getElementById('f-antShipNote');
-      if (days.length === 0) { if (noteEl) noteEl.textContent = `(no receiving day set for ${destLoc || 'destination'} — set it in Admin → Pharmacy Mailing Addresses)`; return; }
-      if (noteEl) noteEl.textContent = '';
-      // Future appointment: walk backward from (appt - 2 days) to find the most recent
-      //   matching receiving day so the box arrives in time.
-      // No appointment: walk forward from today to find the next receiving day.
-      if (apptDate) target = latestShippingDayAtOrBefore(addr, new Date(apptDate.getTime() - TWO_DAYS));
-      else target = nextShippingDayFrom(addr, new Date());
-    } else if (d.shipTo === 'Patient') {
-      const noteEl = document.getElementById('f-antShipNote');
-      if (noteEl) noteEl.textContent = '';
-      if (apptDate) target = new Date(apptDate.getTime() - TWO_DAYS);
-      else {
-        const tdy = new Date();
-        target = new Date(tdy.getFullYear(), tdy.getMonth(), tdy.getDate() + 1); // tomorrow local
+      if (days.length === 0) {
+        if (noteEl) noteEl.textContent = `(no receiving day set for ${destLoc || 'destination'} — set it in Admin → Pharmacy Mailing Addresses)`;
+        return;
       }
+      target = latestShippingDayAtOrBefore(addr, new Date(apptDate.getTime() - TWO_DAYS));
+    } else if (d.shipTo === 'Patient') {
+      target = new Date(apptDate.getTime() - TWO_DAYS);
     }
     if (!target) return;
     const iso = toDateISO(target);
@@ -3343,7 +3391,11 @@ function renderModal() {
   const viewBulkBtn = document.getElementById('viewBulkPages');
   if (viewBulkBtn) viewBulkBtn.addEventListener('click', () => openPageViewer({ sourceFile: t.patientName + ' — attached pages', pageImages: t.pageImages || [] }));
   const printAttachBtn = document.getElementById('printAttachmentsBtn');
-  if (printAttachBtn) printAttachBtn.addEventListener('click', () => printDocs(getPrintableDocsForTransfer(t)));
+  if (printAttachBtn) printAttachBtn.addEventListener('click', () => {
+    askAntShipDateBeforePrint([t], () => {
+      printDocs(getPrintableDocsForTransfer(t));
+    });
+  });
   const printSummaryBtn = document.getElementById('printSummaryBtn');
   if (printSummaryBtn) printSummaryBtn.addEventListener('click', () => printDocs([{
     summaryHtml: buildSummarySheetHtml(t),
