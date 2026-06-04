@@ -466,7 +466,7 @@ const nextId = () => ++_nextId;
 // =====================================================================
 // State + routing
 // =====================================================================
-const state = { tab: 'transfers', filterStatuses: [], filterStatus: '', filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
+const state = { tab: 'transfers', filterStatus: '', showCompleted: false, filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
 
 // Default-view persistence: stores a snapshot of the transfer-list filters in
 // localStorage so a user's preferred view survives reloads + sessions on the
@@ -479,7 +479,8 @@ function _defaultViewKey() {
 function saveDefaultView() {
   try {
     const snap = {
-      filterStatuses: state.filterStatuses.slice(),
+      filterStatus: state.filterStatus,
+      showCompleted: !!state.showCompleted,
       filterOrigin: state.filterOrigin,
       filterFill: state.filterFill,
       filterType: state.filterType,
@@ -503,7 +504,6 @@ function loadDefaultView() {
     if (!raw) return;
     const snap = JSON.parse(raw);
     Object.assign(state, snap);
-    if (!Array.isArray(state.filterStatuses)) state.filterStatuses = [];
   } catch {}
 }
 function clearDefaultView() {
@@ -1053,9 +1053,10 @@ function renderTransfers() {
   const focusedCaret = (wasFocused && document.activeElement.selectionStart != null) ? document.activeElement.selectionStart : null;
   if (!state.sortBy) state.sortBy = 'dateDesc';
   const filtered = visibleTransfers().filter(t => {
-    if (state.filterStatuses && state.filterStatuses.length && !state.filterStatuses.includes(t.status)) return false;
-    // Legacy single-status filter (kept for any URL that still passes it; merges into the array)
     if (state.filterStatus && t.status !== state.filterStatus) return false;
+    // Hide completed (Received) by default — they're done and clutter the active worklist.
+    // The Show completed orders checkbox flips this on.
+    if (!state.showCompleted && t.status === 'Received' && state.filterStatus !== 'Received') return false;
     if (state.filterOrigin && t.originLocation !== state.filterOrigin) return false;
     if (state.filterFill && t.fillLocation !== state.filterFill) return false;
     if (state.filterType && (t.transferType || 'New') !== state.filterType) return false;
@@ -1107,14 +1108,11 @@ function renderTransfers() {
         <option value="patientDesc" ${state.sortBy==='patientDesc'?'selected':''}>Patient name (Z→A)</option>
       </select>
       <span style="width:1px;height:24px;background:var(--gray-300);margin:0 4px"></span>
-      <div id="f-statusChips" style="display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;border:1px solid var(--gray-300);border-radius:6px;padding:3px 6px">
-        <span style="font-size:11px;color:var(--gray-600);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-right:2px">Status:</span>
-        ${STATUSES.map(s => {
-          const active = state.filterStatuses.includes(s);
-          return `<button type="button" class="status-chip" data-status-chip="${escapeHtml(s)}" style="border:0;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'var(--gray-100)'};color:${active?'white':'var(--gray-700)'}">${escapeHtml(s)}</button>`;
-        }).join('')}
-        ${state.filterStatuses.length ? '<button type="button" id="f-statusClear" style="border:0;background:transparent;color:var(--gray-500);font-size:11px;cursor:pointer;text-decoration:underline;padding:2px 4px">clear</button>' : ''}
-      </div>
+      <select id="f-status"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===state.filterStatus?'selected':''}>${s}</option>`).join('')}</select>
+      <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-700);cursor:pointer" title="When unchecked, transfers in Received status are hidden from the list">
+        <input type="checkbox" id="f-showCompleted" ${state.showCompleted?'checked':''} />
+        Show completed
+      </label>
       <select id="f-type"><option value="">All types</option><option value="New" ${state.filterType==='New'?'selected':''}>New only</option><option value="Refill" ${state.filterType==='Refill'?'selected':''}>Refills only</option></select>
       <select id="f-paid"><option value="">Paid: all</option><option value="Paid" ${state.filterPaid==='Paid'?'selected':''}>✓ Paid only</option><option value="NotPaid" ${state.filterPaid==='NotPaid'?'selected':''}>Not paid only</option></select>
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
@@ -1187,15 +1185,8 @@ function renderTransfers() {
     </table>`}
   `;
   document.getElementById('f-search').addEventListener('input', e => { state.search = e.target.value; renderTransfers(); });
-  // Status chips: toggle individual statuses in/out of the filter array
-  root.querySelectorAll('[data-status-chip]').forEach(b => b.addEventListener('click', () => {
-    const s = b.dataset.statusChip;
-    const idx = state.filterStatuses.indexOf(s);
-    if (idx === -1) state.filterStatuses.push(s); else state.filterStatuses.splice(idx, 1);
-    renderTransfers();
-  }));
-  const clearStatusBtn = document.getElementById('f-statusClear');
-  if (clearStatusBtn) clearStatusBtn.onclick = () => { state.filterStatuses = []; renderTransfers(); };
+  document.getElementById('f-status').addEventListener('change', e => { state.filterStatus = e.target.value; renderTransfers(); });
+  document.getElementById('f-showCompleted').addEventListener('change', e => { state.showCompleted = e.target.checked; renderTransfers(); });
   // Save current filters as the default view (this browser, this user)
   const saveBtn = document.getElementById('f-saveDefault');
   if (saveBtn) saveBtn.onclick = () => {
@@ -1208,8 +1199,8 @@ function renderTransfers() {
   // localStorage manually OR saving a fresh empty default by clicking Save while empty)
   const resetBtn = document.getElementById('f-resetAll');
   if (resetBtn) resetBtn.onclick = () => {
-    state.filterStatuses = [];
     state.filterStatus = '';
+    state.showCompleted = false;
     state.filterType = '';
     state.filterPaid = '';
     state.filterOrigin = '';
