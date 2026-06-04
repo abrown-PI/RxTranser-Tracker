@@ -1080,8 +1080,8 @@ function renderTransfers() {
         <input type="date" id="f-antShipFrom" value="${escapeHtml(state.filterAntShipFrom||'')}" title="Anticipated ship from" />
         <input type="date" id="f-antShipTo" value="${escapeHtml(state.filterAntShipTo||'')}" title="Anticipated ship to" /></span>
       <span style="display:inline-flex;align-items:center;gap:4px"><label style="font-size:12px;color:var(--gray-600)">Shipped</label>
-        <input type="date" id="f-shipFrom" value="${escapeHtml(state.filterShipFrom||'')}" title="Ship date from" />
-        <input type="date" id="f-shipTo" value="${escapeHtml(state.filterShipTo||'')}" title="Ship date to" /></span>
+        <input type="date" id="f-shippedFrom" value="${escapeHtml(state.filterShipFrom||'')}" title="Ship date from" />
+        <input type="date" id="f-shippedTo" value="${escapeHtml(state.filterShipTo||'')}" title="Ship date to" /></span>
       ${(state.dateFrom||state.dateTo||state.filterAntShipFrom||state.filterAntShipTo||state.filterShipFrom||state.filterShipTo)?'<button class="btn btn-secondary btn-sm" id="clearDateRange">Clear dates</button>':''}
     </div>
     ${filtered.length === 0 ? `<div class="empty"><h3>No transfers match</h3><p>Try clearing filters.</p></div>` : `
@@ -1141,8 +1141,8 @@ function renderTransfers() {
   document.getElementById('f-med').addEventListener('input', e => { state.filterMed = e.target.value; renderTransfers(); });
   document.getElementById('f-antShipFrom').addEventListener('change', e => { state.filterAntShipFrom = e.target.value; renderTransfers(); });
   document.getElementById('f-antShipTo').addEventListener('change', e => { state.filterAntShipTo = e.target.value; renderTransfers(); });
-  document.getElementById('f-shipFrom').addEventListener('change', e => { state.filterShipFrom = e.target.value; renderTransfers(); });
-  document.getElementById('f-shipTo').addEventListener('change', e => { state.filterShipTo = e.target.value; renderTransfers(); });
+  document.getElementById('f-shippedFrom').addEventListener('change', e => { state.filterShipFrom = e.target.value; renderTransfers(); });
+  document.getElementById('f-shippedTo').addEventListener('change', e => { state.filterShipTo = e.target.value; renderTransfers(); });
   document.getElementById('f-dateFrom').addEventListener('change', e => { state.dateFrom = e.target.value; renderTransfers(); });
   document.getElementById('f-dateTo').addEventListener('change', e => { state.dateTo = e.target.value; renderTransfers(); });
   document.getElementById('f-sortBy').addEventListener('change', e => { state.sortBy = e.target.value; renderTransfers(); });
@@ -5313,10 +5313,23 @@ async function apiLoadTransfers() {
     // reload _nextId resets to 20000 and new transfers (incl. refills) collide
     // with already-stored IDs, producing EntityAlreadyExists from Azure Table Storage.
     list.forEach(t => { const n = Number(t.id); if (Number.isFinite(n) && n > _nextId) _nextId = n; });
+    const VALID_SHIPTO = ['Pharmacy', 'Delivery-Lancaster', 'Patient'];
     list.forEach(t => {
       let needsSave = false;
       // Migrate legacy 'Ready to Ship' status → 'In Progress'.
       if (t.status === 'Ready to Ship') { t.status = 'In Progress'; needsSave = true; }
+      // Heal corrupted shipTo values from the prior id-collision bug where the
+      // form's f-shipTo select shared an id with the All-Transfers date filter,
+      // so state.draft.shipTo got the date input's value (empty string or a date
+      // string) and was saved into the transfer. Anything that isn't one of the
+      // valid options indicates the bug bit this record. We can't know what the
+      // user intended, so revert to the default 'Pharmacy'; the team can edit
+      // any affected transfer to the right value.
+      if (t.shipTo && !VALID_SHIPTO.includes(t.shipTo)) {
+        console.warn('Healing corrupted shipTo on transfer', t.id, 'was:', JSON.stringify(t.shipTo));
+        t.shipTo = 'Pharmacy';
+        needsSave = true;
+      }
       // Clean up bad FedEx auto-match data: when the tracking number equals the transfer
       // ID, that's the symptom of the prior FedEx Track API echo bug — FedEx returned the
       // reference back as if it were a tracking number, and we wrote it as the tracking
