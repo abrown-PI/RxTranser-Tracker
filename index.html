@@ -2819,10 +2819,41 @@ function draftFromRefill(source) {
 }
 function freshItem() { return { id: nextId(), drug: '', qty: '', rxNumber: '', receivingRxNumber: '', receiptAttached: false, doctorName: '', doctorAddr: '', doctorPhone: '', doctorDEA: '', txFormVerified: false, notes: '' }; }
 
+// Canonical drug names that should always appear in the dropdown — even when
+// no transfer using them exists yet. Lets staff pick the official name for
+// our compounded MDV/SDV products on the very first transfer, so the saved
+// data is consistent from day one instead of accumulating typo variants.
+// Source spelling preserved verbatim from the master spreadsheet (note the
+// SDV/MDV strength formatting inconsistency is intentional — matches labels).
+const PRELOADED_DRUGS = [
+  'TIRZEPATIDE/B12 SDV (MONTH #1) INJECTABLE 5.6/0.5MG/ML',
+  'TIRZEPATIDE/B12 SDV (MONTH #2) INJECTABLE 11.2MG/0.5MG/ML',
+  'TIRZEPATIDE/B12 SDV (MONTH #3) INJECTABLE 11.2MG/0.5MG/ML',
+  'TIRZEPATIDE/B12 SDV (MONTH #4) INJECTABLE 11.2MG/0.5MG/ML',
+  'TIRZEPATIDE/B12 SDV (MONTH #5) INJECTABLE 27.6MG/0.5MG/ML',
+  'TIRZEPATIDE/B12 MDV (MONTH #1) INJECTABLE 11.2/0.5MG/ML',
+  'TIRZEPATIDE/B12 MDV (MONTH #2) INJECTABLE 11.2/0.5MG/ML',
+  'TIRZEPATIDE/B12 MDV (MONTH #4) INJECTABLE 11.2/0.5MG/ML',
+  'TIRZEPATIDE/B12 MDV (MONTH #5) INJECTABLE 27.6/0.5MG/ML',
+  'TIRZEPATIDE/B12 MDV (MONTH #6) INJECTABLE 27.6/0.5MG/ML',
+  'SEMAGLUTIDE/B12 MDV (MONTH #1) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 MDV (MONTH #2) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 MDV (MONTH #3) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 MDV (MONTH #4) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 MDV (MONTH #5) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 SDV (MONTH #1) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 SDV (MONTH #2) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 SDV (MONTH #3) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 SDV (MONTH #4) INJECTABLE 2.8MG/0.5MG/ML',
+  'SEMAGLUTIDE/B12 SDV (MONTH #5) INJECTABLE 2.8MG/0.5MG/ML'
+];
+
 // Unique drug names seen across every transfer in the system, alphabetized.
 // Powers the autocomplete on the Rx drug input so users don't have to retype
 // drugs the system already knows about — especially useful for manual refills
 // of legacy transfers, where there's no original transfer record to inherit from.
+// Always includes the canonical PRELOADED_DRUGS list above so common compounds
+// are pickable even before they show up in a transfer.
 //
 // Cleaning rules — same drug should show up once regardless of how it was
 // originally captured:
@@ -2836,6 +2867,12 @@ function freshItem() { return { id: nextId(), drug: '', qty: '', rxNumber: '', r
 //     for display so we don't ALL-CAP everything.
 function getKnownDrugs() {
   const seen = new Map(); // normalized key -> cleaned display value
+  // Seed with canonical names first so they always appear, and so a matching
+  // transfer-derived entry won't add a near-duplicate with different casing.
+  PRELOADED_DRUGS.forEach(d => {
+    const key = d.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (key && !seen.has(key)) seen.set(key, d);
+  });
   TRANSFERS.forEach(t => (t.items || []).forEach(i => {
     const raw = (i.drug || '').trim();
     if (!raw) return;
