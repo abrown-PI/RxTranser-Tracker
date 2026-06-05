@@ -2831,8 +2831,10 @@ const PRELOADED_DRUGS = [
   'TIRZEPATIDE/B12 SDV (MONTH #3) INJECTABLE 11.2MG/0.5MG/ML',
   'TIRZEPATIDE/B12 SDV (MONTH #4) INJECTABLE 11.2MG/0.5MG/ML',
   'TIRZEPATIDE/B12 SDV (MONTH #5) INJECTABLE 27.6MG/0.5MG/ML',
+  'TIRZEPATIDE/B12 SDV (MONTH #6) INJECTABLE 27.6MG/0.5MG/ML',
   'TIRZEPATIDE/B12 MDV (MONTH #1) INJECTABLE 11.2/0.5MG/ML',
   'TIRZEPATIDE/B12 MDV (MONTH #2) INJECTABLE 11.2/0.5MG/ML',
+  'TIRZEPATIDE/B12 MDV (MONTH #3) INJECTABLE 11.2/0.5MG/ML',
   'TIRZEPATIDE/B12 MDV (MONTH #4) INJECTABLE 11.2/0.5MG/ML',
   'TIRZEPATIDE/B12 MDV (MONTH #5) INJECTABLE 27.6/0.5MG/ML',
   'TIRZEPATIDE/B12 MDV (MONTH #6) INJECTABLE 27.6/0.5MG/ML',
@@ -2845,8 +2847,44 @@ const PRELOADED_DRUGS = [
   'SEMAGLUTIDE/B12 SDV (MONTH #2) INJECTABLE 2.8MG/0.5MG/ML',
   'SEMAGLUTIDE/B12 SDV (MONTH #3) INJECTABLE 2.8MG/0.5MG/ML',
   'SEMAGLUTIDE/B12 SDV (MONTH #4) INJECTABLE 2.8MG/0.5MG/ML',
-  'SEMAGLUTIDE/B12 SDV (MONTH #5) INJECTABLE 2.8MG/0.5MG/ML'
+  'SEMAGLUTIDE/B12 SDV (MONTH #5) INJECTABLE 2.8MG/0.5MG/ML',
+  'Injection Kit - Tirzepatide',
+  'Injection Kit - Semaglutide'
 ];
+
+// Convert pharmacy-specific drug names to the canonical form. Currently handles
+// Florida's "N. METHYLCOBALAMIN/(TIRZEPATIDE|SEMAGLUTIDE) ... (MDV|SDV)" pattern,
+// where the leading list number N is the patient's titration month and the
+// MDV/SDV designation picks the family. Maps to the matching entry in
+// PRELOADED_DRUGS by month + vial type; vial-size detail ("1.5ML VIAL", "2ML
+// VIAL") is intentionally dropped — the canonical name doesn't include it.
+//
+// Conservative: only converts when the pattern matches AND a canonical entry
+// exists. Anything that doesn't match (other drugs, oral meds, hand-typed
+// freeform names) passes through untouched.
+function canonicalizeDrugName(raw) {
+  if (!raw) return raw;
+  const s = String(raw);
+  // Florida-style "N. METHYLCOBALAMIN/(TIRZEPATIDE|SEMAGLUTIDE) ... (MDV|SDV)"
+  // → matching canonical entry by month + vial type.
+  const m = s.match(/^\s*(\d+)\s*[\.\)\:\-]\s*METHYLCOBALAMIN\s*\/\s*(TIRZEPATIDE|SEMAGLUTIDE)\b.*?\b(MDV|SDV)\b/i);
+  if (m) {
+    const month = parseInt(m[1], 10);
+    const drug = m[2].toUpperCase();
+    const vial = m[3].toUpperCase();
+    const prefix = `${drug}/B12 ${vial} (MONTH #${month})`;
+    const canonical = PRELOADED_DRUGS.find(d => d.toUpperCase().startsWith(prefix.toUpperCase()));
+    if (canonical) return canonical;
+  }
+  // Injection-kit shorthand — "inj kit - tirz", "Injection kit - sema", etc.
+  // Only converts when the drug family is identifiable; bare "Injection kit"
+  // with no drug suffix is left alone for a human to clarify.
+  const k = s.match(/^\s*inj(?:ection)?\s*kit\b.*?\b(tirz|sema)/i);
+  if (k) {
+    return /^tirz/i.test(k[1]) ? 'Injection Kit - Tirzepatide' : 'Injection Kit - Semaglutide';
+  }
+  return raw;
+}
 
 // Unique drug names seen across every transfer in the system, alphabetized.
 // Powers the autocomplete on the Rx drug input so users don't have to retype
@@ -3221,6 +3259,10 @@ function submitDraft() {
   }
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "Credit card on file")');
   if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
+
+  // Canonicalize drug names — turns Florida's "N. METHYLCOBALAMIN/..." and
+  // injection-kit shorthand into the canonical PRELOADED_DRUGS form before save.
+  (d.items || []).forEach(it => { it.drug = canonicalizeDrugName(it.drug); });
 
   // Edit mode: update the existing transfer in place
   if (state.editingTransferId) {
@@ -5539,6 +5581,13 @@ async function apiLoadTransfers() {
         delete t.fedexAutoMatchedAt;
         needsSave = true;
       }
+      // Canonicalize legacy drug names to the agreed PRELOADED_DRUGS form.
+      // Idempotent: already-canonical names pass through unchanged, so a
+      // re-poll won't trigger another save.
+      (t.items || []).forEach(it => {
+        const canonical = canonicalizeDrugName(it.drug);
+        if (canonical !== it.drug) { it.drug = canonical; needsSave = true; }
+      });
       if (needsSave) apiUpdateTransfer(t);
     });
     return list;
