@@ -2823,13 +2823,30 @@ function freshItem() { return { id: nextId(), drug: '', qty: '', rxNumber: '', r
 // Powers the autocomplete on the Rx drug input so users don't have to retype
 // drugs the system already knows about — especially useful for manual refills
 // of legacy transfers, where there's no original transfer record to inherit from.
+//
+// Cleaning rules — same drug should show up once regardless of how it was
+// originally captured:
+//   • Strip leading numbered-list prefixes like "1.", "2)", "3:" — OCR'd
+//     transfer sheets number each Rx, but those numbers aren't part of the
+//     drug name and would otherwise multiply every drug across the dropdown.
+//   • Drop zero-width / BOM characters — invisible chars from copy-paste
+//     would otherwise look like duplicates of an existing entry.
+//   • Collapse internal whitespace + trim — so "Drug  X" and "Drug X" merge.
+//   • Lower-cased key for dedupe, but the first-seen cleaned casing is kept
+//     for display so we don't ALL-CAP everything.
 function getKnownDrugs() {
-  const seen = new Map(); // lowercased key -> first-seen original casing
+  const seen = new Map(); // normalized key -> cleaned display value
   TRANSFERS.forEach(t => (t.items || []).forEach(i => {
-    const d = (i.drug || '').trim();
-    if (!d) return;
-    const k = d.toLowerCase();
-    if (!seen.has(k)) seen.set(k, d);
+    const raw = (i.drug || '').trim();
+    if (!raw) return;
+    const cleaned = raw
+      .replace(/[​-‍﻿]/g, '')
+      .replace(/^\s*\d+\s*[\.\)\:\-]\s*/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleaned) return;
+    const key = cleaned.toLowerCase();
+    if (!seen.has(key)) seen.set(key, cleaned);
   }));
   return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
