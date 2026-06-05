@@ -2819,12 +2819,32 @@ function draftFromRefill(source) {
 }
 function freshItem() { return { id: nextId(), drug: '', qty: '', rxNumber: '', receivingRxNumber: '', receiptAttached: false, doctorName: '', doctorAddr: '', doctorPhone: '', doctorDEA: '', txFormVerified: false, notes: '' }; }
 
+// Unique drug names seen across every transfer in the system, alphabetized.
+// Powers the autocomplete on the Rx drug input so users don't have to retype
+// drugs the system already knows about — especially useful for manual refills
+// of legacy transfers, where there's no original transfer record to inherit from.
+function getKnownDrugs() {
+  const seen = new Map(); // lowercased key -> first-seen original casing
+  TRANSFERS.forEach(t => (t.items || []).forEach(i => {
+    const d = (i.drug || '').trim();
+    if (!d) return;
+    const k = d.toLowerCase();
+    if (!seen.has(k)) seen.set(k, d);
+  }));
+  return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
 function renderDraftItems() {
   const wrap = document.getElementById('itemsEditor');
   const count = state.draft.items.length;
   const totalBox = document.getElementById('itemsTotalCount');
   if (totalBox) totalBox.textContent = count;
-  wrap.innerHTML = state.draft.items.map((it, idx) => `
+  // Datalist of drugs already in the system. Native <datalist> gives us free-text
+  // input plus dropdown suggestions with zero JS — the browser auto-filters as the
+  // user types and accepts anything not in the list.
+  const knownDrugs = getKnownDrugs();
+  const drugDatalist = `<datalist id="known-drugs">${knownDrugs.map(d => `<option value="${escapeHtml(d)}"></option>`).join('')}</datalist>`;
+  wrap.innerHTML = drugDatalist + state.draft.items.map((it, idx) => `
     <div class="item-row">
       <div class="item-head">
         <div class="item-title">Rx ${idx+1}</div>
@@ -2833,7 +2853,7 @@ function renderDraftItems() {
       <div class="form-grid">
         <div class="form-group"><label>Origin Rx #</label><input data-k="rxNumber" data-idx="${idx}" value="${escapeHtml(it.rxNumber)}" placeholder="From sending pharmacy" /></div>
         <div class="form-group"><label>Receiving Rx # <span class="hint" style="text-transform:none;font-weight:400">(fill location)</span></label><input data-k="receivingRxNumber" data-idx="${idx}" value="${escapeHtml(it.receivingRxNumber||'')}" placeholder="Assigned at Erie" /></div>
-        <div class="form-group"><label>Drug / Strength</label><input data-k="drug" data-idx="${idx}" value="${escapeHtml(it.drug)}" placeholder="Auto-filled from transfer sheet if PDF" /></div>
+        <div class="form-group"><label>Drug / Strength</label><input data-k="drug" data-idx="${idx}" list="known-drugs" value="${escapeHtml(it.drug)}" placeholder="${knownDrugs.length ? 'Start typing or pick from list' : 'Auto-filled from transfer sheet if PDF'}" autocomplete="off" /></div>
         <div class="form-group"><label>Qty / Days Supply</label><input data-k="qty" data-idx="${idx}" value="${escapeHtml(it.qty)}" /></div>
       </div>
     </div>
@@ -3054,6 +3074,44 @@ function bindDraftInputs() {
           else lbl.innerHTML += ' <span style="color:var(--gray-500)">· Could not auto-fill (image PDF or unrecognized layout — enter manually)</span>';
         }
       }
+      // If this transfer was originally created via bulk OCR, the "View N attached pages"
+      // viewer reads from draft.pageImages (per-page PNGs) instead of pkSheets. Replacing
+      // a PK sheet must also rebuild the transfer-kind page images, or that viewer keeps
+      // showing the old content. Hard-copy page images are preserved.
+      if (key === 'pkSheets'
+          && Array.isArray(state.draft.pageImages)
+          && state.draft.pageImages.some(p => p.kind === 'transfer')) {
+        const pdfFile = rawFiles.find(f => /\.pdf$/i.test(f.name));
+        if (pdfFile) {
+          if (lbl) lbl.innerHTML += ' <span style="color:var(--primary)">· Rebuilding page images…</span>';
+          try {
+            const buf = await pdfFile.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+            const newTransferPages = [];
+            for (let p = 1; p <= pdf.numPages; p++) {
+              const base64 = await rasterizePdfPageToBase64(pdf, p);
+              const blobName = await uploadBlob(base64, 'image/png', 'pages');
+              if (blobName) newTransferPages.push({ pageNum: p, blobName, kind: 'transfer' });
+            }
+            const hardcopyPages = state.draft.pageImages.filter(p => p.kind === 'hardcopy');
+            // Transfer pages first (1..N), then hardcopy pages renumbered to continue.
+            state.draft.pageImages = [
+              ...newTransferPages,
+              ...hardcopyPages.map((p, i) => ({ ...p, pageNum: newTransferPages.length + i + 1 }))
+            ];
+            if (lbl) lbl.innerHTML += ` <span style="color:var(--success)">· ✓ ${newTransferPages.length} page image${newTransferPages.length>1?'s':''} rebuilt</span>`;
+          } catch (e) {
+            console.warn('Failed to rebuild page images for replaced PK sheet', e);
+            if (lbl) lbl.innerHTML += ' <span style="color:var(--danger)">· ⚠ Could not rebuild page images — viewer may show old content</span>';
+          }
+        } else {
+          // Non-PDF replacement (e.g. a JPG) — we can't rasterize pages, but we still
+          // need to drop the stale transfer-kind entries so the viewer doesn't show old data.
+          state.draft.pageImages = state.draft.pageImages
+            .filter(p => p.kind !== 'transfer')
+            .map((p, i) => ({ ...p, pageNum: i + 1 }));
+        }
+      }
     });
   });
 
@@ -3133,6 +3191,7 @@ function submitDraft() {
       pickupAtPharmacy: !!d.pickupAtPharmacy, pickupLocation: d.pickupLocation || '',
       isBulkPickup: !!d.isBulkPickup, bulkScriptCount: d.bulkScriptCount || '', bulkDescription: d.bulkDescription || '',
       pkSheets: d.pkSheets, formula: d.formula, hardCopies: d.hardCopies,
+      pageImages: d.pageImages,
       items: d.items, transferNotes: d.transferNotes,
       lastEditedBy: CURRENT_USER.name, lastEditedAt: new Date().toISOString()
     });
@@ -5455,6 +5514,58 @@ async function apiDeleteTransfer(id) {
   } catch (e) { console.error('apiDeleteTransfer failed', e); }
 }
 
+// Background sync — re-fetch transfers from the server every 30s so a change
+// made by one user (new transfer, status update, document upload, etc.) shows
+// up for everyone else without requiring a browser refresh. Pauses while the
+// tab is hidden and fires immediately when it becomes visible again.
+const TRANSFER_POLL_INTERVAL_MS = 30 * 1000;
+let _transferPollTimer = null;
+function startTransferAutoRefresh() {
+  if (_transferPollTimer) return;
+  _transferPollTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') pollRefreshTransfers();
+  }, TRANSFER_POLL_INTERVAL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pollRefreshTransfers();
+  });
+}
+async function pollRefreshTransfers() {
+  // Skip while the user is actively typing or editing — re-rendering would
+  // wipe out in-progress input. They'll pick up changes on the next tick.
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+  if (state.tab === 'new') return;
+  if (state.editingTransferId) return;
+
+  let loaded;
+  try { loaded = await apiLoadTransfers(); } catch { return; }
+  if (!loaded) return;
+  // Defensive: an empty response while we have local data is almost certainly
+  // a server blip, not a real "all transfers deleted". Skip rather than wipe.
+  if (loaded.length === 0 && TRANSFERS.length > 0) return;
+
+  const before = JSON.stringify(TRANSFERS);
+  const byId = new Map(TRANSFERS.map(t => [t.id, t]));
+  const seen = new Set();
+  loaded.forEach(serverT => {
+    seen.add(serverT.id);
+    const localT = byId.get(serverT.id);
+    if (!localT) { TRANSFERS.unshift(serverT); return; }
+    // Update in place so any references held elsewhere stay valid.
+    Object.keys(localT).forEach(k => { if (!(k in serverT)) delete localT[k]; });
+    Object.assign(localT, serverT);
+  });
+  for (let i = TRANSFERS.length - 1; i >= 0; i--) {
+    if (!seen.has(TRANSFERS[i].id)) TRANSFERS.splice(i, 1);
+  }
+  if (JSON.stringify(TRANSFERS) === before) return;
+
+  render();
+  if (state.openTransferId && TRANSFERS.some(t => t.id === state.openTransferId)) {
+    renderModal();
+  }
+}
+
 // =====================================================================
 // Microsoft 365 / Entra ID sign-in via MSAL.js
 // =====================================================================
@@ -5817,6 +5928,7 @@ bindGlobalSearch();
 applyRoleVisibility();
 render();
 startFedexAutoRefresh();
+startTransferAutoRefresh();
 initAuth();
 
 // Load persisted transfers from Table Storage and merge into the in-memory array, then re-render.
