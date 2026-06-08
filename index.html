@@ -3948,7 +3948,16 @@ function openCreateShipment() {
       if (t.status !== 'In Progress') return false;
       if (t.canceledAt && !t.cancelAcknowledged) return false;
       if (antShipBefore && (!t.anticipatedShipDate || t.anticipatedShipDate > antShipBefore)) return false;
-      if (destType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === toLoc;
+      if (destType === 'Pharmacy') {
+        if (t.shipTo !== 'Pharmacy') return false;
+        // Regular transfer: shipment heads back to the origin pharmacy.
+        if (t.originLocation === toLoc) return true;
+        // Pickup-mode order (originating pharmacy = filling pharmacy, patient
+        // picks up at a different pharmacy). The box still goes to the pickup
+        // pharmacy, so it belongs on that pharmacy's outbound shipment.
+        if (t.pickupAtPharmacy && t.pickupLocation === toLoc) return true;
+        return false;
+      }
       return t.shipTo === 'Patient';
     });
     const sortBy = openCreateShipment._sort;
@@ -4100,7 +4109,12 @@ function openAddTransfersToShipment(shipmentId) {
     if (SHIPMENTS.some(other => other.transferIds.includes(t.id) && other.status !== 'Canceled')) return false;
     if (t.status !== 'In Progress') return false;
     if (t.canceledAt && !t.cancelAcknowledged) return false;
-    if (s.destinationType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === s.toLocation;
+    if (s.destinationType === 'Pharmacy') {
+      if (t.shipTo !== 'Pharmacy') return false;
+      if (t.originLocation === s.toLocation) return true;
+      if (t.pickupAtPharmacy && t.pickupLocation === s.toLocation) return true;
+      return false;
+    }
     return t.shipTo === 'Patient';
   }).sort((a, b) => (a.patientName || '').localeCompare(b.patientName || ''));
 
