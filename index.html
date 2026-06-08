@@ -705,7 +705,6 @@ function printPackingSlip(shipment, opts) {
 
 <div class="meta">
   <div><strong>Carrier:</strong> ${escapeHtml(shipment.carrier||'—')}</div>
-  <div><strong>Tracking:</strong> ${escapeHtml(shipment.trackingNumber||'(label not yet generated)')}</div>
   <div><strong>Ship Date:</strong> ${escapeHtml(shipment.shipDate||'—')}</div>
   <div><strong>Total Rx in box:</strong> ${manifest.reduce((n,t) => n + t.items.length, 0)}</div>
 </div>
@@ -3524,8 +3523,7 @@ function renderModal() {
             <div><strong>Anticipated ship:</strong> ${fmtDate(t.anticipatedShipDate)}</div>
             <div><strong>Shipped:</strong> ${fmtDate(t.dateShipped)}</div>
             <div style="display:flex;align-items:center;gap:8px"><strong>Tracking:</strong>
-              <input id="inline-tracking" value="${escapeHtml(t.trackingNumber||'')}" placeholder="Type tracking # then press Enter" style="flex:1;max-width:240px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:13px" />
-              <span class="item-sub" id="inline-tracking-msg" style="font-size:11px"></span>
+              <span style="font-family:monospace;font-size:13px">${t.trackingNumber ? escapeHtml(t.trackingNumber) : '<span class="item-sub" style="font-style:italic">auto-pulled from FedEx once shipped</span>'}</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <strong>Paid:</strong>
@@ -3598,25 +3596,6 @@ function renderModal() {
     renderModal(); render();
   });
   document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
-  // Inline tracking input — save on blur or Enter, auto-flip status to Shipped
-  const inlineTrack = document.getElementById('inline-tracking');
-  if (inlineTrack) {
-    const saveTracking = () => {
-      const v = inlineTrack.value.trim();
-      if (v === (t.trackingNumber || '')) return;
-      t.trackingNumber = v;
-      if (v && !['Shipped','Delivered','Canceled'].includes(t.status)) {
-        t.status = 'Shipped';
-        if (!t.dateShipped) t.dateShipped = todayLocal();
-      }
-      apiUpdateTransfer(t);
-      const msg = document.getElementById('inline-tracking-msg');
-      if (msg) { msg.textContent = '✓ saved'; msg.style.color = 'var(--success)'; setTimeout(() => { msg.textContent = ''; }, 1500); }
-      renderModal();
-    };
-    inlineTrack.addEventListener('blur', saveTracking);
-    inlineTrack.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveTracking(); inlineTrack.blur(); } });
-  }
   // Mark Paid / Undo Paid buttons
   const paidBtnEl = document.getElementById('paidBtn');
   if (paidBtnEl) paidBtnEl.addEventListener('click', () => {
@@ -3785,7 +3764,7 @@ function editShip(t) {
         <div class="form-group"><label>Tx Emailed Date</label><input type="date" id="e-tx" value="${escapeHtml(t.txEmailedDate||'')}" /></div>
         <div class="form-group"><label>Date Received at Fill Location</label><input type="date" id="e-rcvErie" value="${escapeHtml(t.dateReceivedAtErie||'')}" /></div>
         <div class="form-group"><label>Date Shipped</label><input type="date" id="e-dateShipped" value="${escapeHtml(t.dateShipped||'')}" /></div>
-        <div class="form-group"><label>Tracking Number</label><input id="e-tracking" value="${escapeHtml(t.trackingNumber)}" /></div>
+        <div class="form-group"><label>Tracking Number</label><div style="padding:8px 10px;background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:4px;font-family:monospace;font-size:13px">${t.trackingNumber ? escapeHtml(t.trackingNumber) : '<span style="color:var(--gray-500);font-style:italic">auto-pulled from FedEx once shipped</span>'}</div></div>
         <div class="form-group"><label>Date Received by Patient</label><input type="date" id="e-rcvPt" value="${escapeHtml(t.dateReceivedByPatient||'')}" /></div>
         <div class="form-group"><label>Paid</label><select id="e-paid">${['Pending','HealNow','Paid','Pay in Store'].map(o=>`<option ${o===t.paid?'selected':''}>${o}</option>`).join('')}</select></div>
       </div>
@@ -3799,18 +3778,11 @@ function editShip(t) {
   overlay.querySelector('#editClose').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#editCancel').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#editSave').addEventListener('click', () => {
-    const prevTracking = t.trackingNumber;
     t.txEmailedDate = overlay.querySelector('#e-tx').value || null;
     t.dateReceivedAtErie = overlay.querySelector('#e-rcvErie').value || null;
     t.dateShipped = overlay.querySelector('#e-dateShipped').value || null;
-    t.trackingNumber = overlay.querySelector('#e-tracking').value.trim();
     t.dateReceivedByPatient = overlay.querySelector('#e-rcvPt').value || null;
     t.paid = overlay.querySelector('#e-paid').value;
-    // Auto-advance to Shipped when a tracking number is first entered
-    if (t.trackingNumber && !prevTracking && !['Shipped','Delivered','Canceled'].includes(t.status)) {
-      t.status = 'Shipped';
-      if (!t.dateShipped) t.dateShipped = todayLocal();
-    }
     apiUpdateTransfer(t);
     overlay.remove();
     renderModal();
@@ -4029,8 +4001,7 @@ function openCreateShipment() {
         <div class="form-group"><label>From</label><select id="cm-from">${LOCATIONS.map(l=>`<option ${l===CURRENT_USER.location?'selected':''}>${l}</option>`).join('')}</select></div>
         <div class="form-group"><label>Destination Type</label><select id="cm-destType"><option>Pharmacy</option><option>Patient</option></select></div>
         <div class="form-group full" id="cm-toWrap"><label>To Pharmacy</label><select id="cm-to">${LOCATIONS.map(l=>`<option>${l}</option>`).join('')}</select><div class="hint">Picking a pharmacy will auto-list that location's open transfers below.</div></div>
-        <div class="form-group"><label>Carrier</label><select id="cm-carrier"><option>FedEx</option><option>UPS</option><option>USPS</option><option>Courier</option></select></div>
-        <div class="form-group"><label>Tracking Number</label><input id="cm-tracking" placeholder="Paste tracking # from WorldShip after creating label" /></div>
+        <div class="form-group full"><label>Carrier</label><select id="cm-carrier"><option>FedEx</option><option>UPS</option><option>USPS</option><option>Courier</option></select><div class="hint">Tracking is pulled from FedEx automatically via the Customer Reference field on the WorldShip label — don't type it here.</div></div>
       </div>
       <div class="section">
         <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:8px">
@@ -4067,10 +4038,10 @@ function openCreateShipment() {
   document.getElementById('cm-antClear').onclick = () => { document.getElementById('cm-antBefore').value = ''; renderUI(); };
   document.getElementById('cmSave').onclick = () => {
     const picks = [...document.querySelectorAll('.cm-t:checked')].map(c => +c.value);
-    const tracking = document.getElementById('cm-tracking').value.trim();
     if (!picks.length) { alert('Select at least one transfer.'); return; }
-    // Tracking is now optional at creation time — staff creates shipment first, gets BULK ID,
-    // takes that to WorldShip as the Customer Reference, then comes back to add tracking later.
+    // No tracking entry here — the box always starts Pending. Worker enters the
+    // BULK ID into WorldShip's Customer Reference, and the FedEx auto-match cron
+    // populates the tracking number + flips the linked transfers to Shipped later.
     const destType = document.getElementById('cm-destType').value;
     const toLoc = document.getElementById('cm-to').value;
     const shipDate = todayLocal();
@@ -4080,11 +4051,9 @@ function openCreateShipment() {
       toLocation: toLoc,
       destinationType: destType,
       carrier: document.getElementById('cm-carrier').value,
-      trackingNumber: tracking, labelGenerated: false,
-      // Only call it In Transit if we already have a real FedEx tracking number.
-      // Otherwise it's just Pending (waiting for the WorldShip label + auto-match cron).
-      status: tracking ? 'In Transit' : 'Pending',
-      shipDate: tracking ? shipDate : null,
+      trackingNumber: '', labelGenerated: false,
+      status: 'Pending',
+      shipDate: null,
       deliveredDate: null, receivedDate: null, receivedBy: null,
       transferIds: picks,
       // Bulk shipments to a pharmacy get a printable BULK-* ID + packing slip
@@ -4095,31 +4064,21 @@ function openCreateShipment() {
     };
     SHIPMENTS.unshift(s);
     apiSaveShipment(s);
-    const shippedTransfers = picks.map(id => TRANSFERS.find(x => x.id === id)).filter(Boolean);
-    // Only flip the linked transfers to Shipped if we actually have tracking data.
-    // Without tracking, the box isn't really out the door yet — leave them in their
-    // current status. The auto-match cron will flip them once it finds the FedEx record.
-    shippedTransfers.forEach(t => {
-      if (tracking) {
-        t.status = 'Shipped';
-        t.dateShipped = s.shipDate;
-        t.trackingNumber = s.trackingNumber;
-        apiUpdateTransfer(t);
-      }
-    });
     // Fire email notification to the receiving location (or fill location for patient ships)
+    const shippedTransfers = picks.map(id => TRANSFERS.find(x => x.id === id)).filter(Boolean);
     fetch('/api/send-shipment-notification', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shipment: s, transfers: shippedTransfers })
     }).catch(e => console.warn('notification failed', e));
     close();
     if (s.isBulk) {
-      const msg = `Bulk shipment ${s.bulkShipmentId} created with ${picks.length} transfer(s).\n\n` +
-                  `📋 IMPORTANT: When creating the FedEx label in WorldShip, enter\n\n` +
-                  `        ${s.bulkShipmentId}\n\n` +
-                  `into the Customer Reference field. The app will then auto-pull the tracking number.\n\n` +
-                  `Print packing slip now?`;
-      if (confirm(msg)) printPackingSlip(s);
+      alert(
+        `Bulk shipment ${s.bulkShipmentId} created with ${picks.length} transfer(s).\n\n` +
+        `📋 When you're ready to ship, open the shipment and click "Print Packing Slip".\n\n` +
+        `When creating the FedEx label in WorldShip, enter\n\n` +
+        `        ${s.bulkShipmentId}\n\n` +
+        `into the Customer Reference field. The app will auto-pull the tracking number once FedEx scans the package.`
+      );
     } else {
       alert('Shipment created.\n\nNotification email sent.');
     }
@@ -4258,6 +4217,8 @@ function openShipment(id) {
       </div>`:''}
     </div>
     <div class="modal-footer">
+      ${canEditPending ? '<button class="btn btn-secondary" id="sm-cancel" style="color:var(--danger);border-color:var(--danger)">🗑 Cancel Shipment</button>' : ''}
+      <div style="flex:1"></div>
       <button class="btn btn-secondary" id="smCloseBtn">Close</button>
       ${isReceiver && s.status === 'Delivered'?`<button class="btn ${allUnpacked?'btn-primary':'btn-secondary'}" id="sm-receive" ${!allUnpacked?'disabled style="opacity:.5;cursor:not-allowed"':''}>Mark Package Received (all Rx checked)</button>`:''}
     </div>
@@ -4266,6 +4227,15 @@ function openShipment(id) {
   const close = () => root.innerHTML = '';
   document.getElementById('smClose').onclick = close;
   document.getElementById('smCloseBtn').onclick = close;
+  const cancelBtn = document.getElementById('sm-cancel');
+  if (cancelBtn) cancelBtn.onclick = () => {
+    if (!confirm(`Cancel shipment ${s.bulkShipmentId || s.id}?\n\nThe ${s.transferIds.length} transfer(s) in this box will be released and become available to add to a new shipment. This can't be undone.`)) return;
+    apiDeleteShipment(s.id);
+    const idx = SHIPMENTS.indexOf(s);
+    if (idx !== -1) SHIPMENTS.splice(idx, 1);
+    close();
+    render();
+  };
   const reprintBtn = document.getElementById('reprintSlip');
   if (reprintBtn) reprintBtn.onclick = () => printPackingSlip(s);
   document.getElementById('smOverlay').onclick = e => { if (e.target.id === 'smOverlay') close(); };
