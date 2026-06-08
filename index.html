@@ -3610,7 +3610,7 @@ function renderModal() {
           </div>
         </div>
         <div class="modal-footer">
-          ${CURRENT_USER.role === 'admin' ? `<button class="btn btn-danger btn-sm" id="deleteTransferBtn" title="Permanently delete this transfer">🗑 Delete</button>` : ''}
+          ${(CURRENT_USER.role === 'admin' || CURRENT_USER.location === t.originLocation) ? `<button class="btn btn-danger btn-sm" id="deleteTransferBtn" title="Permanently delete this transfer">🗑 Delete</button>` : ''}
           <div style="flex:1"></div>
           <button class="btn btn-secondary" id="modalCloseBtn">Close</button>
         </div>
@@ -3700,6 +3700,15 @@ function renderModal() {
   });
   const deleteBtn = document.getElementById('deleteTransferBtn');
   if (deleteBtn) deleteBtn.addEventListener('click', async () => {
+    // Safety guard: a transfer that's in an active (non-canceled) shipment is
+    // part of a packed box. Deleting it would orphan a manifest line. Force the
+    // user to remove it from the shipment first, where the consequences are
+    // explicit (the shipment manifest visibly shrinks).
+    const inShipment = SHIPMENTS.find(s => s.transferIds.includes(t.id) && s.status !== 'Canceled');
+    if (inShipment) {
+      alert(`This transfer is in shipment ${inShipment.bulkShipmentId || ('#' + inShipment.id)} (${inShipment.status}).\n\nOpen that shipment and click × Remove on this row first, then try deleting again.`);
+      return;
+    }
     const confirmed = confirm(`Delete this transfer permanently?\n\nPatient: ${t.patientName}\nRx: ${t.items.map(i => i.drug || i.rxNumber || 'item').filter(Boolean).join(', ')}\n\nThis cannot be undone.`);
     if (!confirmed) return;
     // Remove from in-memory + delete from backend
