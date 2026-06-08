@@ -4094,6 +4094,7 @@ function openCreateShipment() {
       unpacked: {}, damagePhotos: []
     };
     SHIPMENTS.unshift(s);
+    apiSaveShipment(s);
     const shippedTransfers = picks.map(id => TRANSFERS.find(x => x.id === id)).filter(Boolean);
     // Only flip the linked transfers to Shipped if we actually have tracking data.
     // Without tracking, the box isn't really out the door yet — leave them in their
@@ -4127,6 +4128,63 @@ function openCreateShipment() {
   renderUI();
 }
 
+// EOD shipping flow: append more transfers to a Pending bulk shipment.
+// Eligible transfers are the same set the create-shipment picker uses, minus
+// ones already in any non-Canceled shipment (including this one). Pharmacy
+// destinations are restricted to the matching origin pharmacy of the shipment.
+function openAddTransfersToShipment(shipmentId) {
+  const s = SHIPMENTS.find(x => x.id === shipmentId);
+  if (!s) return;
+  const alreadyInThis = new Set(s.transferIds);
+  const eligible = visibleTransfers().filter(t => {
+    if (alreadyInThis.has(t.id)) return false;
+    if (SHIPMENTS.some(other => other.transferIds.includes(t.id) && other.status !== 'Canceled')) return false;
+    if (t.status !== 'In Progress') return false;
+    if (t.canceledAt && !t.cancelAcknowledged) return false;
+    if (s.destinationType === 'Pharmacy') return t.shipTo === 'Pharmacy' && t.originLocation === s.toLocation;
+    return t.shipTo === 'Patient';
+  }).sort((a, b) => (a.patientName || '').localeCompare(b.patientName || ''));
+
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `<div class="modal-overlay" id="addOverlay"><div class="modal" style="max-width:620px">
+    <div class="modal-header"><div><div class="modal-title">Add Transfers to ${escapeHtml(s.bulkShipmentId || ('Shipment ' + s.id))}</div><div class="item-sub">${escapeHtml(s.fromLocation)} → ${escapeHtml(s.toLocation)}</div></div><button class="modal-close" id="addClose">&times;</button></div>
+    <div class="modal-body">
+      ${eligible.length === 0 ? `<div class="empty"><h3>No eligible transfers</h3><p>No open ${s.destinationType === 'Pharmacy' ? 'transfers headed to ' + escapeHtml(s.toLocation) : 'patient ship transfers'} are available to add right now.</p></div>` : `
+      <div class="item-sub" style="margin-bottom:8px">Check the transfers to add. Each transfer can only be in one Pending shipment at a time.</div>
+      <div style="max-height:380px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:6px">
+        ${eligible.map(t => `<div class="checkbox-row" style="padding:10px;border-bottom:1px solid var(--gray-100)">
+          <input type="checkbox" class="add-t" value="${t.id}" />
+          <div style="flex:1">
+            <strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}
+            <div class="item-sub">${t.items.length} Rx · ${escapeHtml(t.items.map(i=>i.drug).join(', ').slice(0,80))}</div>
+            <div class="item-sub">Transfer date: ${fmtDate(t.createdAt)}</div>
+          </div>
+        </div>`).join('')}
+      </div>
+      <div style="margin-top:6px"><a href="#" id="add-selectAll" style="font-size:12px;color:var(--primary)">Select all</a></div>`}
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="addCancel">Cancel</button>
+      ${eligible.length > 0 ? '<button class="btn btn-primary" id="addSave">Add to Shipment</button>' : ''}
+    </div>
+  </div></div>`;
+
+  const back = () => openShipment(shipmentId);
+  document.getElementById('addClose').onclick = back;
+  document.getElementById('addCancel').onclick = back;
+  document.getElementById('addOverlay').onclick = e => { if (e.target.id === 'addOverlay') back(); };
+  const sa = document.getElementById('add-selectAll');
+  if (sa) sa.onclick = e => { e.preventDefault(); document.querySelectorAll('.add-t').forEach(c => c.checked = true); };
+  const saveBtn = document.getElementById('addSave');
+  if (saveBtn) saveBtn.onclick = () => {
+    const picks = [...document.querySelectorAll('.add-t:checked')].map(c => +c.value);
+    if (!picks.length) { alert('Pick at least one transfer to add.'); return; }
+    s.transferIds = [...s.transferIds, ...picks];
+    apiUpdateShipment(s);
+    openShipment(shipmentId);
+  };
+}
+
 function openShipment(id) {
   const s = SHIPMENTS.find(x => x.id === id);
   if (!s) return;
@@ -4136,11 +4194,16 @@ function openShipment(id) {
   const manifest = s.transferIds.map(tid => TRANSFERS.find(t => t.id === tid)).filter(Boolean);
   const allItems = manifest.flatMap(t => t.items.map(i => ({t, i})));
   const isReceiver = (s.toLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin') && s.status !== 'Received';
+  // EOD shipping workflow: when the box is still Pending (no tracking yet), the originating
+  // pharmacy can add/remove transfers throughout the day and print the packing slip at EOD.
+  const isPendingBulk = s.isBulk && s.status === 'Pending';
+  const canEditPending = isPendingBulk && (s.fromLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin');
   const unpackedCount = allItems.filter(({i}) => s.unpacked[i.id]).length;
   const allUnpacked = allItems.length > 0 && unpackedCount === allItems.length;
+  const printBtnLabel = isPendingBulk ? '🖨 Print Packing Slip' : '🖨 Reprint Packing Slip';
 
   root.innerHTML = `<div class="modal-overlay" id="smOverlay"><div class="modal">
-    <div class="modal-header"><div><div class="modal-title">${s.bulkShipmentId?escapeHtml(s.bulkShipmentId):'Shipment ' + escapeHtml(s.trackingNumber)}</div><div class="item-sub">${escapeHtml(s.fromLocation)} → ${escapeHtml(s.toLocation)} · ${escapeHtml(s.carrier)}${s.bulkShipmentId?` · Tracking ${escapeHtml(s.trackingNumber||'(pending)')}`:''}</div></div><div style="display:flex;gap:8px;align-items:center">${s.isBulk?'<button class="btn btn-secondary btn-sm" id="reprintSlip">🖨 Reprint Packing Slip</button>':''}<button class="modal-close" id="smClose">&times;</button></div></div>
+    <div class="modal-header"><div><div class="modal-title">${s.bulkShipmentId?escapeHtml(s.bulkShipmentId):'Shipment ' + escapeHtml(s.trackingNumber)}</div><div class="item-sub">${escapeHtml(s.fromLocation)} → ${escapeHtml(s.toLocation)} · ${escapeHtml(s.carrier)}${s.bulkShipmentId?` · Tracking ${escapeHtml(s.trackingNumber||'(pending)')}`:''}</div></div><div style="display:flex;gap:8px;align-items:center">${s.isBulk?`<button class="btn btn-secondary btn-sm" id="reprintSlip">${printBtnLabel}</button>`:''}<button class="modal-close" id="smClose">&times;</button></div></div>
     <div class="modal-body">
       <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
         <span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>
@@ -4150,7 +4213,15 @@ function openShipment(id) {
         ${isReceiver?`<div style="flex:1"></div><span class="pill-warn">📦 Headed to your location — unpack below</span>`:''}
       </div>
 
-      <div class="section-title">Manifest (${manifest.length} transfer${manifest.length!==1?'s':''}, ${allItems.length} Rx)${isReceiver?` — ${unpackedCount}/${allItems.length} unpacked`:''}</div>
+      ${canEditPending ? `
+      <div style="background:var(--primary-bg);border:1px solid var(--primary-light);padding:10px 14px;border-radius:var(--radius);margin-bottom:14px;font-size:13px">
+        <strong>Pending box — keep adding orders throughout the day.</strong> Click <em>Print Packing Slip</em> at end of day. Tracking will auto-pull from FedEx once you scan in WorldShip.
+      </div>` : ''}
+
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="section-title" style="margin:0">Manifest (${manifest.length} transfer${manifest.length!==1?'s':''}, ${allItems.length} Rx)${isReceiver?` — ${unpackedCount}/${allItems.length} unpacked`:''}</div>
+        ${canEditPending ? `<button class="btn btn-primary btn-sm" id="sm-addTransfers">+ Add transfers</button>` : ''}
+      </div>
       ${isReceiver && s.status === 'In Transit' ? `
       <div style="background:var(--warning-bg);border:1px solid var(--warning);padding:12px 14px;border-radius:var(--radius);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
         <div><strong>Package in transit.</strong> Once the box arrives at your pharmacy, click <em>"Arrived at my pharmacy"</em> to start unpacking.</div>
@@ -4160,7 +4231,10 @@ function openShipment(id) {
       ${manifest.map(t => `<div class="item-row">
         <div class="item-head">
           <div><strong>${escapeHtml(t.patientName)}</strong> <span class="item-sub">· DOB ${fmtDate(t.patientDOB)}</span></div>
-          <button class="btn btn-secondary btn-sm" data-open-t="${t.id}">Open transfer</button>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm" data-open-t="${t.id}">Open transfer</button>
+            ${canEditPending ? `<button class="btn btn-secondary btn-sm" data-rm-t="${t.id}" title="Remove from this shipment" style="color:var(--danger)">× Remove</button>` : ''}
+          </div>
         </div>
         ${t.items.map(i => isReceiver && s.status === 'Delivered'
           ? `<div class="checkbox-row" style="padding:6px 4px;border-bottom:1px solid var(--gray-100)">
@@ -4196,15 +4270,26 @@ function openShipment(id) {
   if (reprintBtn) reprintBtn.onclick = () => printPackingSlip(s);
   document.getElementById('smOverlay').onclick = e => { if (e.target.id === 'smOverlay') close(); };
   root.querySelectorAll('[data-open-t]').forEach(b => b.onclick = () => { close(); openTransfer(+b.dataset['openT']); });
-  root.querySelectorAll('[data-unpack]').forEach(cb => cb.onchange = e => { s.unpacked[+cb.dataset.unpack] = e.target.checked; openShipment(s.id); });
+  root.querySelectorAll('[data-rm-t]').forEach(b => b.onclick = () => {
+    const tid = +b.dataset['rmT'];
+    if (!confirm('Remove this transfer from the shipment? It can be added back later.')) return;
+    s.transferIds = s.transferIds.filter(id => id !== tid);
+    apiUpdateShipment(s);
+    openShipment(s.id);
+  });
+  const addBtn = document.getElementById('sm-addTransfers');
+  if (addBtn) addBtn.onclick = () => openAddTransfersToShipment(s.id);
+  root.querySelectorAll('[data-unpack]').forEach(cb => cb.onchange = e => { s.unpacked[+cb.dataset.unpack] = e.target.checked; apiUpdateShipment(s); openShipment(s.id); });
   const arrived = document.getElementById('sm-arrived');
   if (arrived) arrived.onclick = () => {
     s.status = 'Delivered'; s.deliveredDate = todayLocal();
+    apiUpdateShipment(s);
     openShipment(s.id);
   };
   const rec = document.getElementById('sm-receive');
   if (rec) rec.onclick = () => {
     s.status = 'Received'; s.receivedDate = todayLocal(); s.receivedBy = CURRENT_USER.name;
+    apiUpdateShipment(s);
     // Cascade Received status + receipt info to every transfer in the package
     s.transferIds.forEach(id => {
       const t = TRANSFERS.find(x => x.id === id);
@@ -4224,11 +4309,11 @@ function openShipment(id) {
   if (photoEl) photoEl.onchange = () => {
     [...photoEl.files].forEach(file => {
       const rd = new FileReader();
-      rd.onload = ev => { s.damagePhotos.push({ name: file.name, dataUrl: ev.target.result, uploadedBy: CURRENT_USER.name, ts: new Date().toISOString() }); openShipment(s.id); };
+      rd.onload = ev => { s.damagePhotos.push({ name: file.name, dataUrl: ev.target.result, uploadedBy: CURRENT_USER.name, ts: new Date().toISOString() }); apiUpdateShipment(s); openShipment(s.id); };
       rd.readAsDataURL(file);
     });
   };
-  root.querySelectorAll('[data-rmphoto]').forEach(b => b.onclick = () => { s.damagePhotos.splice(+b.dataset.rmphoto, 1); openShipment(s.id); });
+  root.querySelectorAll('[data-rmphoto]').forEach(b => b.onclick = () => { s.damagePhotos.splice(+b.dataset.rmphoto, 1); apiUpdateShipment(s); openShipment(s.id); });
   const scanInput = document.getElementById('sm-scan');
   if (scanInput) {
     scanInput.focus();
@@ -5451,7 +5536,7 @@ function openFedexPullModal() {
         if (!['Shipped','Delivered','Canceled'].includes(t.status)) t.status = 'Shipped';
         await apiUpdateTransfer(t);
         if (!SHIPMENTS.some(sh => sh.trackingNumber === s.trackingNumber)) {
-          SHIPMENTS.unshift({
+          const newShip = {
             id: nextId(),
             fromLocation: t.fillLocation,
             toLocation: t.shipTo === 'Pharmacy' ? t.originLocation : 'Patient',
@@ -5465,7 +5550,9 @@ function openFedexPullModal() {
             transferIds: [t.id],
             createdAt: new Date().toISOString(), createdBy: 'FedEx auto-match',
             unpacked: {}
-          });
+          };
+          SHIPMENTS.unshift(newShip);
+          apiSaveShipment(newShip);
         }
         state.applied.push(s);
       }
@@ -5617,6 +5704,45 @@ async function apiDeleteTransfer(id) {
   } catch (e) { console.error('apiDeleteTransfer failed', e); }
 }
 
+// =====================================================================
+// Shipment persistence — mirrors the transfer helpers above. Used by
+// openCreateShipment, the Pending-shipment add/remove flow, the receive
+// flow, and the FedEx auto-match creation path. Historical shipments
+// derived from TRANSFERS still come from the IIFE; backend wins when
+// a tracking number matches (see apiLoadShipments).
+// =====================================================================
+async function apiLoadShipments() {
+  try {
+    const r = await fetch('/api/shipments');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    return data.shipments || [];
+  } catch (e) { console.error('Failed to load shipments from API', e); return null; }
+}
+async function apiSaveShipment(s) {
+  try {
+    const r = await fetch('/api/shipments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(s)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + await r.text());
+  } catch (e) { console.error('apiSaveShipment failed', e); alert('Could not save shipment: ' + e.message); }
+}
+async function apiUpdateShipment(s) {
+  try {
+    const r = await fetch('/api/shipments/' + encodeURIComponent(s.id), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(s)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + await r.text());
+  } catch (e) { console.error('apiUpdateShipment failed', e); }
+}
+async function apiDeleteShipment(id) {
+  try {
+    await fetch('/api/shipments/' + encodeURIComponent(id), { method: 'DELETE' });
+  } catch (e) { console.error('apiDeleteShipment failed', e); }
+}
+
 // Background sync — re-fetch transfers from the server every 30s so a change
 // made by one user (new transfer, status update, document upload, etc.) shows
 // up for everyone else without requiring a browser refresh. Pauses while the
@@ -5626,11 +5752,42 @@ let _transferPollTimer = null;
 function startTransferAutoRefresh() {
   if (_transferPollTimer) return;
   _transferPollTimer = setInterval(() => {
-    if (document.visibilityState === 'visible') pollRefreshTransfers();
+    if (document.visibilityState === 'visible') { pollRefreshTransfers(); pollRefreshShipments(); }
   }, TRANSFER_POLL_INTERVAL_MS);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') pollRefreshTransfers();
+    if (document.visibilityState === 'visible') { pollRefreshTransfers(); pollRefreshShipments(); }
   });
+}
+
+// Mirror of pollRefreshTransfers for the shipments table. Pending shipments
+// the shipping team builds throughout the day will appear in other tabs
+// (or after a refresh) without anyone having to reload.
+async function pollRefreshShipments() {
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+
+  let loaded;
+  try { loaded = await apiLoadShipments(); } catch { return; }
+  if (!loaded) return;
+
+  // Backend-derived shipments live alongside IIFE-derived ones. Only sync the
+  // subset that's backend-owned; leave the historical seed rows alone.
+  const backendIds = new Set(loaded.map(s => s.id));
+  const before = JSON.stringify(SHIPMENTS.filter(s => backendIds.has(s.id)));
+  const byId = new Map(SHIPMENTS.map(s => [s.id, s]));
+  loaded.forEach(serverS => {
+    const localS = byId.get(serverS.id);
+    if (!localS) { SHIPMENTS.unshift(serverS); return; }
+    Object.keys(localS).forEach(k => { if (!(k in serverS)) delete localS[k]; });
+    Object.assign(localS, serverS);
+  });
+  // Skip auto-removal on poll: we can't reliably tell an IIFE-seeded row apart
+  // from a backend row that was just deleted by another user. Stale rows will
+  // clear on the next full page load. Trade-off accepted to keep this simple.
+  const after = JSON.stringify(SHIPMENTS.filter(s => backendIds.has(s.id)));
+  if (before === after) return;
+
+  if (state.tab === 'shipments') renderShipments();
 }
 async function pollRefreshTransfers() {
   // Skip while the user is actively typing or editing — re-rendering would
@@ -6048,6 +6205,27 @@ initAuth();
   if (tid) {
     const t = TRANSFERS.find(x => String(x.id) === String(tid));
     if (t) openTransfer(t.id);
+  }
+})();
+
+// Load persisted shipments from Table Storage and merge with the historical
+// IIFE-derived ones. Backend wins for matching ids; we also dedupe by tracking
+// number so a backend shipment that later picks up the same tracking as an
+// IIFE shipment doesn't double-show in the Shipments tab.
+(async () => {
+  const loaded = await apiLoadShipments();
+  if (loaded && loaded.length) {
+    const existingIds = new Set(SHIPMENTS.map(s => s.id));
+    const backendTracking = new Set(loaded.map(s => (s.trackingNumber || '').trim()).filter(Boolean));
+    // Drop IIFE-derived rows that the backend now owns (matched by tracking number).
+    for (let i = SHIPMENTS.length - 1; i >= 0; i--) {
+      const tn = (SHIPMENTS[i].trackingNumber || '').trim();
+      if (tn && backendTracking.has(tn) && !existingIds.has(SHIPMENTS[i].id)) {
+        SHIPMENTS.splice(i, 1);
+      }
+    }
+    loaded.forEach(s => { if (!existingIds.has(s.id)) SHIPMENTS.unshift(s); });
+    render();
   }
 })();
 
