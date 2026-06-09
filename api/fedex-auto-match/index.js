@@ -107,10 +107,14 @@ async function searchByReferences(refs, context) {
   const found = {};
 
   async function lookupOne(reference) {
+    // FedEx's "Customer reference" field in WorldShip is indexed under enum SHIPPER_REFERENCE
+    // in the Track-by-Reference API (confirmed by inspecting /trackingnumbers response on a real
+    // shipment — packageIdentifiers[*].type = "SHIPPER_REFERENCE" for the BULK-* value).
+    // The catalog page's human-readable list ("customer reference") is misleading — the API uses different enum names.
     const body = {
       includeDetailedScans: false,
       referencesInformation: {
-        type: 'CUSTOMER_REFERENCE',
+        type: 'SHIPPER_REFERENCE',
         value: String(reference),
         accountNumber,
         carrierCode: 'FDXE',
