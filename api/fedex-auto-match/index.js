@@ -103,12 +103,16 @@ async function searchByReferences(refs, context) {
   const found = {};
   for (let i = 0; i < refs.length; i += 30) {
     const chunk = refs.slice(i, i + 30);
+    // Search by Customer Reference. WorldShip's "Customer reference" field is the one
+    // staff put the BULK-* / transfer-id into; on the public FedEx page it shows up as
+    // "Shipper Reference". In FedEx Track API terms that's referenceType CUSTOMER_REFERENCE,
+    // scoped to our shipper account number with a ship-date window.
     const body = {
       includeDetailedScans: false,
       trackingInfo: chunk.map(r => ({
         trackingNumberInfo: {
           trackingNumber: String(r),
-          trackingNumberType: 'FEDEX_REFERENCE_NUMBER',
+          referenceType: 'CUSTOMER_REFERENCE',
           carrierCode: 'FDXE'
         },
         shipmentAccountNumber: { value: accountNumber },
