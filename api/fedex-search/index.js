@@ -56,23 +56,22 @@ module.exports = async function (context, req) {
     // FedEx Track-by-Reference endpoint /track/v1/referencenumbers takes ONE reference per call,
     // body shape: { referencesInformation: { type, value, accountNumber, carrierCode, shipDateBegin, shipDateEnd } }.
     // We run with limited concurrency to avoid hammering the API.
-    async function lookupOne(reference, opts) {
-      opts = opts || {};
+    async function lookupOne(reference) {
       // FedEx's "Customer reference" field in WorldShip is indexed under enum SHIPPER_REFERENCE
       // in the Track-by-Reference API (confirmed by inspecting /trackingnumbers response on a real
       // shipment — packageIdentifiers[*].type = "SHIPPER_REFERENCE" for the BULK-* value).
       // The catalog page's human-readable list ("customer reference") is misleading — the API uses different enum names.
-      const refInfo = {
-        type: opts.type || 'SHIPPER_REFERENCE',
-        value: String(reference),
-        accountNumber,
-        carrierCode: 'FDXE',
-        shipDateBegin: fmtDate(ninetyDaysAgo),
-        shipDateEnd: fmtDate(today)
+      const body = {
+        includeDetailedScans: false,
+        referencesInformation: {
+          type: 'SHIPPER_REFERENCE',
+          value: String(reference),
+          accountNumber,
+          carrierCode: 'FDXE',
+          shipDateBegin: fmtDate(ninetyDaysAgo),
+          shipDateEnd: fmtDate(today)
+        }
       };
-      if (opts.destinationCountryCode) refInfo.destinationCountryCode = opts.destinationCountryCode;
-      if (opts.destinationPostalCode) refInfo.destinationPostalCode = opts.destinationPostalCode;
-      const body = { includeDetailedScans: false, referencesInformation: refInfo };
       const resp = await fetch(base + '/track/v1/referencenumbers', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
@@ -120,10 +119,9 @@ module.exports = async function (context, req) {
       shipments.push({ reference, found: false, reason: 'results returned but no valid tracking number', fedexBody: txt.slice(0, 800) });
     }
 
-    const optsFromBody = (req.body && req.body.opts) || {};
     const CONCURRENCY = 5;
     for (let i = 0; i < refs.length; i += CONCURRENCY) {
-      await Promise.all(refs.slice(i, i + CONCURRENCY).map(r => lookupOne(r, optsFromBody)));
+      await Promise.all(refs.slice(i, i + CONCURRENCY).map(lookupOne));
     }
 
     context.res = {
