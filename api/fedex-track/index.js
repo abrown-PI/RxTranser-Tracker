@@ -101,10 +101,12 @@ module.exports = async function (context, req) {
         });
       }
     }
+    const responseBody = { results };
+    if (req.body && req.body.debug) responseBody.raw = (data && data.output) || data;
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: { results }
+      body: responseBody
     };
   } catch (err) {
     context.log.error(err);
