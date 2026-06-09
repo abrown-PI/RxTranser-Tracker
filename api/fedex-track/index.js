@@ -52,6 +52,7 @@ module.exports = async function (context, req) {
     const cleaned = list.map(t => String(t).replace(/\s+/g, '').trim()).filter(Boolean);
     const unique = Array.from(new Set(cleaned));
     const results = [];
+    let lastRaw = null;
     for (let i = 0; i < unique.length; i += 30) {
       const chunk = unique.slice(i, i + 30);
       const body = {
@@ -72,6 +73,7 @@ module.exports = async function (context, req) {
       const txt = await resp.text();
       let data;
       try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+      lastRaw = data;
       if (!resp.ok) {
         const err = new Error('FedEx Track API ' + resp.status);
         err.statusCode = resp.status >= 500 ? 502 : resp.status;
@@ -102,7 +104,7 @@ module.exports = async function (context, req) {
       }
     }
     const responseBody = { results };
-    if (req.body && req.body.debug) responseBody.raw = (data && data.output) || data;
+    if (req.body && req.body.debug) responseBody.raw = lastRaw;
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
