@@ -76,8 +76,8 @@ module.exports = async function (context, req) {
       let data;
       try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
       if (!resp.ok) {
-        context.log.error('FedEx track-by-reference error', resp.status, txt.slice(0, 300));
-        shipments.push({ reference, error: 'FedEx ' + resp.status, found: false });
+        context.log.error('FedEx track-by-reference error', resp.status, txt.slice(0, 600));
+        shipments.push({ reference, error: 'FedEx ' + resp.status, found: false, fedexBody: txt.slice(0, 800) });
         return;
       }
       const out = data && data.output;
