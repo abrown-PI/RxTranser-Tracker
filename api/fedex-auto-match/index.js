@@ -99,8 +99,10 @@ async function searchByReferences(refs, context) {
   const base = process.env.FEDEX_API_BASE || 'https://apis-sandbox.fedex.com';
   const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER || '';
   const token = await getAccessToken();
+  // FedEx /track/v1/referencenumbers caps shipDate range at ~30 days
+  // (longer fails with TRACKING.SHIPDATERANGE.TOOLONG).
   const today = new Date();
-  const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000);
+  const ninetyDaysAgo = new Date(Date.now() - 30 * 86400000);
   const fmtDate = d => d.toISOString().slice(0, 10);
   const found = {};
 

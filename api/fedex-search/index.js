@@ -44,10 +44,11 @@ module.exports = async function (context, req) {
     const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER || '';
     const token = await getAccessToken();
 
-    // Date window: search the last 90 days for these references. FedEx requires a date range
-    // for reference-based lookup (you can't say "any time").
+    // Date window: search the last 30 days. FedEx's /track/v1/referencenumbers caps the
+    // shipDate range at ~30 days (longer fails with TRACKING.SHIPDATERANGE.TOOLONG). Anything
+    // older than that needs to be tracked by the actual FedEx tracking number, not reference.
     const today = new Date();
-    const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000);
+    const ninetyDaysAgo = new Date(Date.now() - 30 * 86400000);
     const fmtDate = d => d.toISOString().slice(0, 10);
 
     const shipments = [];
