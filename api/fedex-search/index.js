@@ -51,27 +51,23 @@ module.exports = async function (context, req) {
     const fmtDate = d => d.toISOString().slice(0, 10);
 
     const shipments = [];
-    // FedEx Track API allows up to 30 tracking info items per request. Batch in chunks.
-    for (let i = 0; i < refs.length; i += 30) {
-      const chunk = refs.slice(i, i + 30);
-      // Search by Customer Reference. WorldShip's "Customer reference" field is the one
-      // staff put the BULK-* / transfer-id into; on the public FedEx page it shows up as
-      // "Shipper Reference". In FedEx Track API terms that's referenceType CUSTOMER_REFERENCE,
-      // scoped to our shipper account number with a ship-date window.
+
+    // FedEx Track-by-Reference endpoint /track/v1/referencenumbers takes ONE reference per call,
+    // body shape: { referencesInformation: { type, value, accountNumber, carrierCode, shipDateBegin, shipDateEnd } }.
+    // We run with limited concurrency to avoid hammering the API.
+    async function lookupOne(reference) {
       const body = {
         includeDetailedScans: false,
-        trackingInfo: chunk.map(r => ({
-          trackingNumberInfo: {
-            trackingNumber: String(r),
-            referenceType: 'CUSTOMER_REFERENCE',
-            carrierCode: 'FDXE'
-          },
-          shipmentAccountNumber: { value: accountNumber },
+        referencesInformation: {
+          type: 'CUSTOMER_REFERENCE',
+          value: String(reference),
+          accountNumber,
+          carrierCode: 'FDXE',
           shipDateBegin: fmtDate(ninetyDaysAgo),
           shipDateEnd: fmtDate(today)
-        }))
+        }
       };
-      const resp = await fetch(base + '/track/v1/trackingnumbers', {
+      const resp = await fetch(base + '/track/v1/referencenumbers', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
         body: JSON.stringify(body)
@@ -81,31 +77,19 @@ module.exports = async function (context, req) {
       try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
       if (!resp.ok) {
         context.log.error('FedEx track-by-reference error', resp.status, txt.slice(0, 300));
-        // Don't fail the whole batch — record the error and keep going so partial results are usable
-        chunk.forEach(r => shipments.push({ reference: r, error: 'FedEx ' + resp.status, found: false }));
-        continue;
+        shipments.push({ reference, error: 'FedEx ' + resp.status, found: false });
+        return;
       }
       const out = data && data.output;
-      if (!out || !Array.isArray(out.completeTrackResults)) continue;
-      out.completeTrackResults.forEach((r, idx) => {
-        const reference = chunk[idx]; // FedEx returns results in the order we sent them
+      const results = (out && Array.isArray(out.completeTrackResults)) ? out.completeTrackResults : [];
+      if (!results.length) {
+        shipments.push({ reference, found: false, reason: 'no matching FedEx shipment' });
+        return;
+      }
+      for (const r of results) {
         const first = (r.trackResults || [])[0] || {};
         const trackingNumber = (r.trackingNumber || (first.trackingNumberInfo && first.trackingNumberInfo.trackingNumber) || '').replace(/\s+/g, '');
-        if (!trackingNumber) {
-          shipments.push({ reference, found: false });
-          return;
-        }
-        // FedEx Track API echoes the reference as `trackingNumber` when nothing
-        // is found — guard against treating that as a match.
-        if (String(trackingNumber).trim() === String(reference).trim()) {
-          shipments.push({ reference, found: false, reason: 'no matching FedEx shipment' });
-          return;
-        }
-        // Real FedEx tracking numbers are all-digit, 10-22 long.
-        if (!/^\d{10,22}$/.test(trackingNumber)) {
-          shipments.push({ reference, found: false, reason: 'returned value is not a valid FedEx tracking number' });
-          return;
-        }
+        if (!trackingNumber || !/^\d{10,22}$/.test(trackingNumber)) continue;
         const latest = first.latestStatusDetail || {};
         const dates = first.dateAndTimes || [];
         const shipDate = (dates.find(d => d.type === 'ACTUAL_PICKUP') || dates.find(d => d.type === 'SHIP') || {}).dateTime || null;
@@ -125,7 +109,14 @@ module.exports = async function (context, req) {
             zip: recipientAddress.postalCode || ''
           }
         });
-      });
+        return;
+      }
+      shipments.push({ reference, found: false, reason: 'no matching FedEx shipment' });
+    }
+
+    const CONCURRENCY = 5;
+    for (let i = 0; i < refs.length; i += CONCURRENCY) {
+      await Promise.all(refs.slice(i, i + CONCURRENCY).map(lookupOne));
     }
 
     context.res = {

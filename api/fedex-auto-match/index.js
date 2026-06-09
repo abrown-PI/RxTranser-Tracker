@@ -92,7 +92,9 @@ async function updateTransfer(t) {
   }, 'Replace');
 }
 
-// Query FedEx Track API for a batch of references. Returns map: reference -> { trackingNumber, shipDate }
+// Query FedEx Track-by-Reference API for a list of references. Returns map: reference -> { trackingNumber, shipDate }.
+// FedEx exposes reference search at /track/v1/referencenumbers — a different endpoint from /track/v1/trackingnumbers
+// with a different (un-batched) body shape: one POST per reference, body wraps a single referencesInformation object.
 async function searchByReferences(refs, context) {
   const base = process.env.FEDEX_API_BASE || 'https://apis-sandbox.fedex.com';
   const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER || '';
@@ -101,59 +103,52 @@ async function searchByReferences(refs, context) {
   const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000);
   const fmtDate = d => d.toISOString().slice(0, 10);
   const found = {};
-  for (let i = 0; i < refs.length; i += 30) {
-    const chunk = refs.slice(i, i + 30);
-    // Search by Customer Reference. WorldShip's "Customer reference" field is the one
-    // staff put the BULK-* / transfer-id into; on the public FedEx page it shows up as
-    // "Shipper Reference". In FedEx Track API terms that's referenceType CUSTOMER_REFERENCE,
-    // scoped to our shipper account number with a ship-date window.
+
+  async function lookupOne(reference) {
     const body = {
       includeDetailedScans: false,
-      trackingInfo: chunk.map(r => ({
-        trackingNumberInfo: {
-          trackingNumber: String(r),
-          referenceType: 'CUSTOMER_REFERENCE',
-          carrierCode: 'FDXE'
-        },
-        shipmentAccountNumber: { value: accountNumber },
+      referencesInformation: {
+        type: 'CUSTOMER_REFERENCE',
+        value: String(reference),
+        accountNumber,
+        carrierCode: 'FDXE',
         shipDateBegin: fmtDate(ninetyDaysAgo),
         shipDateEnd: fmtDate(today)
-      }))
+      }
     };
-    const resp = await fetch(base + '/track/v1/trackingnumbers', {
+    const resp = await fetch(base + '/track/v1/referencenumbers', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
       body: JSON.stringify(body)
     });
     if (!resp.ok) {
       const txt = await resp.text();
-      context.log.warn(`FedEx track-by-ref chunk failed: ${resp.status} ${txt.slice(0, 200)}`);
-      continue;
+      context.log.warn(`FedEx track-by-ref failed for ${reference}: ${resp.status} ${txt.slice(0, 200)}`);
+      return;
     }
     const data = await resp.json();
     const out = data && data.output;
-    if (!out || !Array.isArray(out.completeTrackResults)) continue;
-    out.completeTrackResults.forEach((r, idx) => {
-      const reference = chunk[idx];
+    if (!out || !Array.isArray(out.completeTrackResults)) return;
+    for (const r of out.completeTrackResults) {
       const first = (r.trackResults || [])[0] || {};
       const trackingNumber = (r.trackingNumber || (first.trackingNumberInfo && first.trackingNumberInfo.trackingNumber) || '').replace(/\s+/g, '');
-      if (!trackingNumber) return;
-      // FedEx Track API echoes the input reference as `trackingNumber` when it
-      // can't find a real shipment. Filter those echoes out — a real FedEx
-      // tracking number is 12-22 digits and won't match our short refs.
-      if (String(trackingNumber).trim() === String(reference).trim()) return;
-      // Additional guards: real FedEx tracking numbers are all-digit, 10-22 long.
-      // Our BULK-* and short transfer IDs would never match this pattern.
-      if (!/^\d{10,22}$/.test(trackingNumber)) return;
-      // Skip results that came back with an explicit error or notFound flag
-      if (first.error || (first.latestStatusDetail && first.latestStatusDetail.code === 'CA')) return;
+      if (!trackingNumber) continue;
+      if (!/^\d{10,22}$/.test(trackingNumber)) continue;
+      if (first.error || (first.latestStatusDetail && first.latestStatusDetail.code === 'CA')) continue;
       const dates = first.dateAndTimes || [];
       const shipDate = (dates.find(d => d.type === 'ACTUAL_PICKUP') || dates.find(d => d.type === 'SHIP') || {}).dateTime || null;
       found[reference] = {
         trackingNumber,
         shipDate: shipDate ? String(shipDate).slice(0, 10) : null
       };
-    });
+      return;
+    }
+  }
+
+  // Run with limited concurrency to avoid hammering FedEx; the endpoint accepts one ref per call.
+  const CONCURRENCY = 5;
+  for (let i = 0; i < refs.length; i += CONCURRENCY) {
+    await Promise.all(refs.slice(i, i + CONCURRENCY).map(lookupOne));
   }
   return found;
 }
