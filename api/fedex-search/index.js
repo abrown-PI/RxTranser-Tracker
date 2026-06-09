@@ -84,7 +84,7 @@ module.exports = async function (context, req) {
       const out = data && data.output;
       const results = (out && Array.isArray(out.completeTrackResults)) ? out.completeTrackResults : [];
       if (!results.length) {
-        shipments.push({ reference, found: false, reason: 'no matching FedEx shipment' });
+        shipments.push({ reference, found: false, reason: 'no matching FedEx shipment', fedexBody: txt.slice(0, 800) });
         return;
       }
       for (const r of results) {
