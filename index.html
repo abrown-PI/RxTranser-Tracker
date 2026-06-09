@@ -4245,9 +4245,9 @@ function openShipment(id) {
         <div class="section-title" style="margin:0">Manifest (${manifest.length} transfer${manifest.length!==1?'s':''}, ${allItems.length} Rx)${isReceiver?` — ${unpackedCount}/${allItems.length} unpacked`:''}</div>
         ${canEditPending ? `<button class="btn btn-primary btn-sm" id="sm-addTransfers">+ Add transfers</button>` : ''}
       </div>
-      ${isReceiver && s.status === 'In Transit' ? `
+      ${isReceiver && (s.status === 'In Transit' || s.status === 'Pending') ? `
       <div style="background:var(--warning-bg);border:1px solid var(--warning);padding:12px 14px;border-radius:var(--radius);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <div><strong>Package in transit.</strong> Once the box arrives at your pharmacy, click <em>"Arrived at my pharmacy"</em> to start unpacking.</div>
+        <div><strong>${s.status === 'Pending' ? 'Package not yet matched to FedEx tracking.' : 'Package in transit.'}</strong> Once the box arrives at your pharmacy, click <em>"Arrived at my pharmacy"</em> to start unpacking.</div>
         <button class="btn btn-primary btn-sm" id="sm-arrived">📦 Arrived at my pharmacy</button>
       </div>` : ''}
 
