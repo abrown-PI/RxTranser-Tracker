@@ -112,7 +112,7 @@ module.exports = async function (context, req) {
         });
         return;
       }
-      shipments.push({ reference, found: false, reason: 'no matching FedEx shipment' });
+      shipments.push({ reference, found: false, reason: 'results returned but no valid tracking number', fedexBody: txt.slice(0, 800) });
     }
 
     const CONCURRENCY = 5;
