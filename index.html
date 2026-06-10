@@ -4364,8 +4364,7 @@ function openShipment(id) {
     s.trackingNumber = tn;
     if (!s.shipDate) s.shipDate = todayLocal();
     if (s.status === 'Pending') s.status = 'In Transit';
-    await apiUpdateShipment(s);
-    // Immediately pull live status from FedEx so we capture Delivered if it's already there.
+    // Pull live status from FedEx in case the package has already been picked up / delivered.
     try {
       const r = await fetch('/api/fedex-track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackingNumbers: [tn] }) });
       if (r.ok) {
@@ -4381,19 +4380,24 @@ function openShipment(id) {
           }
           s.fedexLastStatus = res.status;
           s.fedexLastChecked = new Date().toISOString();
-          // Cascade tracking onto every transfer in the bulk so individual rows show the number
-          s.transferIds.forEach(tid => {
-            const t = TRANSFERS.find(x => x.id === tid);
-            if (!t) return;
-            t.trackingNumber = tn;
-            if (s.deliveredDate && !t.dateReceivedByPatient) t.dateReceivedByPatient = s.deliveredDate;
-            if (!['Shipped','Delivered','Received','Canceled'].includes(t.status)) t.status = 'Shipped';
-            apiUpdateTransfer(t);
-          });
-          await apiUpdateShipment(s);
         }
       }
     } catch (e) { console.warn('FedEx live-status pull failed', e); }
+    // ALWAYS cascade tracking + dates to every transfer in the bulk, regardless of whether the
+    // FedEx live-status pull returned anything. This is what makes the tracking and ship date
+    // show up on individual transfer rows in the Transfers list.
+    s.transferIds.forEach(tid => {
+      const t = TRANSFERS.find(x => x.id === tid);
+      if (!t) return;
+      t.trackingNumber = tn;
+      if (s.shipDate && !t.dateShipped) t.dateShipped = s.shipDate;
+      if (s.deliveredDate && !t.dateReceivedByPatient) t.dateReceivedByPatient = s.deliveredDate;
+      if (!['Shipped','Delivered','Received','Canceled'].includes(t.status)) t.status = 'Shipped';
+      apiUpdateTransfer(t);
+    });
+    await apiUpdateShipment(s);
+    // Re-render the shipments list so the tracking/ship date columns refresh on the table behind the modal.
+    if (typeof renderShipments === 'function' && state.tab === 'shipments') renderShipments();
     openShipment(s.id);
   };
   const rec = document.getElementById('sm-receive');
