@@ -4502,11 +4502,22 @@ function blobUrl(name) { return location.origin + '/api/blobs/' + String(name).s
 
 // Save / load / delete bulk drafts via the backend. Drafts are scoped by location;
 // users at the same pharmacy see each other's queue.
+// Strip in-memory-only dataUrl bytes from any pageImages before persisting — they're
+// 100-300KB each and Azure Table Storage caps property strings at 64KB. The blobName
+// is what survives across reloads; dataUrl was only meant for instant first-render.
+function _stripBulkDraftForPersist(b) {
+  if (!b) return b;
+  const out = { ...b };
+  if (Array.isArray(b.pageImages)) {
+    out.pageImages = b.pageImages.map(p => ({ pageNum: p.pageNum, blobName: p.blobName, kind: p.kind }));
+  }
+  return out;
+}
 async function apiSaveBulkDraft(b) {
   try {
     const r = await fetch('/api/bulk-drafts', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': (CURRENT_USER && CURRENT_USER.email) || '' },
-      body: JSON.stringify(b)
+      body: JSON.stringify(_stripBulkDraftForPersist(b))
     });
     if (!r.ok) throw new Error('Save failed: ' + r.status);
   } catch (e) { console.warn('apiSaveBulkDraft failed', e); }
@@ -4515,7 +4526,7 @@ async function apiUpdateBulkDraft(b) {
   try {
     await fetch('/api/bulk-drafts/' + encodeURIComponent(b.id), {
       method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-user-email': (CURRENT_USER && CURRENT_USER.email) || '' },
-      body: JSON.stringify(b)
+      body: JSON.stringify(_stripBulkDraftForPersist(b))
     });
   } catch (e) { console.warn('apiUpdateBulkDraft failed', e); }
 }
@@ -4884,14 +4895,14 @@ async function processBulkFiles(rawFiles) {
             if (f.rxNumber) first.rxNumber = f.rxNumber;
             if (f.drug) first.drug = f.drug;
             if (f.qty) first.qty = f.qty;
-            // Page images: store BOTH the blob name (permanent, viewable by anyone) AND the
-            // in-memory dataUrl (used for instant render before the blob is fetched).
+            // Persist only the blob name — dataUrls are too large for Azure Table Storage's
+            // 64KB property limit and cause silent draft-save failures. blobUrl(blobName)
+            // fetches the image on demand in the page viewer.
             const pagePngs = [g.transferPage, ...g.hardCopyPages]
-              .filter(p => p._pngDataUrl || p.blobName)
+              .filter(p => p.blobName)
               .map(p => ({
                 pageNum: p.pageNum,
-                blobName: p.blobName || null,
-                dataUrl: p._pngDataUrl || null,
+                blobName: p.blobName,
                 kind: p === g.transferPage ? 'transfer' : 'hardcopy'
               }));
             newDrafts.push({
@@ -4980,12 +4991,14 @@ async function processBulkFiles(rawFiles) {
         if (parsed.drug) first.drug = parsed.drug;
         if (parsed.qty) first.qty = parsed.qty;
       }
+      // Only persist blobName — dataUrls are huge (100-300KB each), Azure Table Storage caps
+      // property strings at 64KB so saving them on the draft body causes silent backend failures.
+      // The page viewer falls back to blobUrl(p.blobName) so visuals still render fine.
       const pagePngs = [g.transferPage, ...g.hardCopyPages]
-        .filter(p => pageBlobsByNum[p.pageNum])
+        .filter(p => pageBlobsByNum[p.pageNum] && pageBlobsByNum[p.pageNum].blobName)
         .map(p => ({
           pageNum: p.pageNum,
           blobName: pageBlobsByNum[p.pageNum].blobName,
-          dataUrl: pageBlobsByNum[p.pageNum].dataUrl,
           kind: p === g.transferPage ? 'transfer' : 'hardcopy'
         }));
       newDrafts.push({
