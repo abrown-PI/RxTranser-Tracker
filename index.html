@@ -3934,7 +3934,11 @@ function renderShipments() {
         <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>${s.receivedBy?`<div class="item-sub">by ${escapeHtml(s.receivedBy)}</div>`:''}</td>
         <td>${fmtDate(s.shipDate)}</td>
         <td>${fmtDate(s.deliveredDate)}</td>
-        <td>${canReceive?`<button class="btn btn-primary btn-sm" data-receive-btn="${s.id}">📦 Receive</button>`:'<span class="item-sub">—</span>'}</td>
+        <td>${
+          canReceive ? `<button class="btn btn-primary btn-sm" data-receive-btn="${s.id}">📦 Receive</button>`
+          : (isIncoming && (s.status === 'Pending' || s.status === 'In Transit')) ? `<button class="btn btn-secondary btn-sm" data-arrived-btn="${s.id}">📦 Arrived</button>`
+          : '<span class="item-sub">—</span>'
+        }</td>
       </tr>`;
       }).join('')}
     </tbody></table>`}
@@ -3951,10 +3955,20 @@ function renderShipments() {
   const clrDates = document.getElementById('shipDateClear');
   if (clrDates) clrDates.onclick = () => { state.shipFilter.dateFrom = ''; state.shipFilter.dateTo = ''; renderShipments(); };
   root.querySelectorAll('tr[data-ship]').forEach(tr => tr.addEventListener('click', e => {
-    if (e.target.closest('[data-receive-btn]')) return;
+    if (e.target.closest('[data-receive-btn]') || e.target.closest('[data-arrived-btn]')) return;
     openShipment(+tr.dataset.ship);
   }));
   root.querySelectorAll('[data-receive-btn]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openShipment(+b.dataset['receiveBtn']); }));
+  root.querySelectorAll('[data-arrived-btn]').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    const sid = +b.dataset['arrivedBtn'];
+    const s = SHIPMENTS.find(x => x.id === sid);
+    if (!s) return;
+    s.status = 'Delivered';
+    s.deliveredDate = todayLocal();
+    apiUpdateShipment(s);
+    openShipment(sid);
+  }));
 
   const scan = document.getElementById('shipScan');
   // Restore whichever input had focus before the re-render. If the user was
@@ -4221,6 +4235,10 @@ function openShipment(id) {
   // pharmacy can add/remove transfers throughout the day and print the packing slip at EOD.
   const isPendingBulk = s.isBulk && s.status === 'Pending';
   const canEditPending = isPendingBulk && (s.fromLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin');
+  // Manual tracking override: visible to originator/admin on a bulk that doesn't yet have tracking.
+  // Used when FedEx auto-match misses (e.g., reference indexing delay) and someone has the actual
+  // FedEx tracking number from WorldShip — entering it triggers an immediate FedEx status pull.
+  const canEditTracking = s.isBulk && (s.fromLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin');
   const unpackedCount = allItems.filter(({i}) => s.unpacked[i.id]).length;
   const allUnpacked = allItems.length > 0 && unpackedCount === allItems.length;
   const printBtnLabel = isPendingBulk ? '🖨 Print Packing Slip' : '🖨 Reprint Packing Slip';
@@ -4235,6 +4253,12 @@ function openShipment(id) {
         <div><strong>Received:</strong> ${fmtDate(s.receivedDate)}${s.receivedBy?` by ${escapeHtml(s.receivedBy)}`:''}</div>
         ${isReceiver?`<div style="flex:1"></div><span class="pill-warn">📦 Headed to your location — unpack below</span>`:''}
       </div>
+      ${s.isBulk ? `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;padding:8px 12px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;font-size:13px">
+        <strong>FedEx Tracking:</strong>
+        <span style="font-family:monospace">${s.trackingNumber ? escapeHtml(s.trackingNumber) : '<span class="item-sub">(none — auto-match pending)</span>'}</span>
+        ${canEditTracking ? `<button class="btn btn-secondary btn-sm" id="sm-editTracking" style="margin-left:auto">${s.trackingNumber ? '✏️ Edit' : '+ Add tracking manually'}</button>` : ''}
+      </div>` : ''}
 
       ${canEditPending ? `
       <div style="background:var(--primary-bg);border:1px solid var(--primary-light);padding:10px 14px;border-radius:var(--radius);margin-bottom:14px;font-size:13px">
@@ -4318,6 +4342,58 @@ function openShipment(id) {
   if (arrived) arrived.onclick = () => {
     s.status = 'Delivered'; s.deliveredDate = todayLocal();
     apiUpdateShipment(s);
+    openShipment(s.id);
+  };
+  const editTrack = document.getElementById('sm-editTracking');
+  if (editTrack) editTrack.onclick = async () => {
+    const existing = s.trackingNumber || '';
+    const raw = prompt(`FedEx tracking number for ${s.bulkShipmentId || ('shipment ' + s.id)}:\n\n(Use this if auto-match hasn't picked it up yet. We'll immediately query FedEx for live status.)`, existing);
+    if (raw === null) return;
+    const tn = String(raw).replace(/\s+/g, '').trim();
+    if (!tn) {
+      if (!confirm('Clear the tracking number?')) return;
+      s.trackingNumber = '';
+      apiUpdateShipment(s);
+      openShipment(s.id);
+      return;
+    }
+    if (!/^\d{10,22}$/.test(tn)) {
+      alert('That doesn\'t look like a FedEx tracking number (should be 10–22 digits).');
+      return;
+    }
+    s.trackingNumber = tn;
+    if (!s.shipDate) s.shipDate = todayLocal();
+    if (s.status === 'Pending') s.status = 'In Transit';
+    await apiUpdateShipment(s);
+    // Immediately pull live status from FedEx so we capture Delivered if it's already there.
+    try {
+      const r = await fetch('/api/fedex-track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackingNumbers: [tn] }) });
+      if (r.ok) {
+        const data = await r.json();
+        const res = (data.results || [])[0];
+        if (res) {
+          const code = (res.statusCode || '').toUpperCase();
+          if (code === 'DL' || /DELIVER/i.test(res.status || '')) {
+            s.status = 'Delivered';
+            if (res.deliveryDate) s.deliveredDate = res.deliveryDate.slice(0,10);
+          } else if (code) {
+            s.status = 'In Transit';
+          }
+          s.fedexLastStatus = res.status;
+          s.fedexLastChecked = new Date().toISOString();
+          // Cascade tracking onto every transfer in the bulk so individual rows show the number
+          s.transferIds.forEach(tid => {
+            const t = TRANSFERS.find(x => x.id === tid);
+            if (!t) return;
+            t.trackingNumber = tn;
+            if (s.deliveredDate && !t.dateReceivedByPatient) t.dateReceivedByPatient = s.deliveredDate;
+            if (!['Shipped','Delivered','Received','Canceled'].includes(t.status)) t.status = 'Shipped';
+            apiUpdateTransfer(t);
+          });
+          await apiUpdateShipment(s);
+        }
+      }
+    } catch (e) { console.warn('FedEx live-status pull failed', e); }
     openShipment(s.id);
   };
   const rec = document.getElementById('sm-receive');
@@ -5507,22 +5583,25 @@ function openFedexTestModal() {
 
 function openFedexPullModal() {
   const root = document.getElementById('modalRoot');
-  // Reference-based pull: query FedEx for the reference number of every open transfer w/o tracking
+  // Reference-based pull: query FedEx for the reference number of every open transfer + every Pending bulk shipment without tracking
   const state = { loading: false, results: null, error: null, applied: [] };
 
   const openTransfers = TRANSFERS.filter(t => !['Delivered','Canceled'].includes(t.status) && !t.trackingNumber);
+  // Bulk shipments still waiting on FedEx auto-match: same idea, but the reference is the BULK-* ID
+  const openBulks = SHIPMENTS.filter(s => s.isBulk && s.bulkShipmentId && !s.trackingNumber && !['Received','Canceled'].includes(s.status));
+  const totalRefs = openTransfers.length + openBulks.length;
 
   const render = () => {
     root.innerHTML = `<div class="modal-overlay" id="fxOverlay"><div class="modal" style="max-width:760px">
-      <div class="modal-header"><div><div class="modal-title">Pull Shipments from FedEx</div><div class="item-sub">Looks up the FedEx Customer Reference (transfer ID) for each open transfer to find its tracking number</div></div><button class="modal-close" id="fxClose">&times;</button></div>
+      <div class="modal-header"><div><div class="modal-title">Pull Shipments from FedEx</div><div class="item-sub">Looks up each open reference (transfer ID + BULK shipment ID) to find its FedEx tracking number</div></div><button class="modal-close" id="fxClose">&times;</button></div>
       <div class="modal-body">
         <div style="background:var(--primary-bg);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;line-height:1.5">
-          <strong>How this works:</strong> when staff prints a label in WorldShip, they must enter the <strong>transfer ID</strong> into WorldShip's <strong>Customer Reference</strong> field. This button then asks FedEx "what's the tracking # for reference X?" for every open transfer.
+          <strong>How this works:</strong> staff enters the transfer ID or BULK shipment ID into WorldShip's <strong>Customer Reference</strong> field when printing the label. This button asks FedEx "what's the tracking # for reference X?" for every open reference. FedEx's reference index can lag the actual label by up to a day, so a same-day pull may miss; the daily cron re-tries the next morning.
         </div>
         <div style="font-size:13px;color:var(--gray-700);margin-bottom:12px">
-          <strong>${openTransfers.length}</strong> open transfer${openTransfers.length===1?'':'s'} without tracking numbers will be queried.
+          <strong>${totalRefs}</strong> reference${totalRefs===1?'':'s'} will be queried (${openTransfers.length} transfer${openTransfers.length===1?'':'s'} + ${openBulks.length} bulk shipment${openBulks.length===1?'':'s'}).
         </div>
-        <button class="btn btn-primary" id="fx-go" ${state.loading||openTransfers.length===0?'disabled style="opacity:.5"':''}>${state.loading?'Querying FedEx…':'Query FedEx now'}</button>
+        <button class="btn btn-primary" id="fx-go" ${state.loading||totalRefs===0?'disabled style="opacity:.5"':''}>${state.loading?'Querying FedEx…':'Query FedEx now'}</button>
         ${state.error?`<div style="margin-top:14px;background:var(--danger-bg);border:1px solid var(--danger);padding:10px 14px;border-radius:6px;font-size:13px"><strong style="color:var(--danger)">Error:</strong> ${escapeHtml(state.error)}</div>`:''}
         ${state.results ? renderResults() : ''}
       </div>
@@ -5564,7 +5643,10 @@ function openFedexPullModal() {
   const pull = async () => {
     state.loading = true; state.error = null; state.results = null; render();
     try {
-      const references = openTransfers.map(t => String(t.id));
+      const references = [
+        ...openTransfers.map(t => String(t.id)),
+        ...openBulks.map(b => String(b.bulkShipmentId))
+      ];
       const r = await fetch('/api/fedex-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5576,6 +5658,26 @@ function openFedexPullModal() {
       // Apply found matches immediately (reference-by-reference lookup is unambiguous — no need to confirm)
       for (const s of state.results) {
         if (!s.found) continue;
+        // Is this reference a BULK shipment ID? If yes, update the bulk + cascade tracking to every transfer in it.
+        const bulk = SHIPMENTS.find(b => b.bulkShipmentId && String(b.bulkShipmentId) === String(s.reference));
+        if (bulk) {
+          bulk.trackingNumber = s.trackingNumber;
+          if (s.shipDate) bulk.shipDate = s.shipDate;
+          if (s.deliveryDate) bulk.deliveredDate = String(s.deliveryDate).slice(0,10);
+          if (bulk.status === 'Pending') bulk.status = s.deliveryDate ? 'Delivered' : 'In Transit';
+          await apiUpdateShipment(bulk);
+          for (const tid of (bulk.transferIds || [])) {
+            const t = TRANSFERS.find(x => x.id === tid);
+            if (!t) continue;
+            t.trackingNumber = s.trackingNumber;
+            if (s.shipDate) t.dateShipped = s.shipDate;
+            if (!['Shipped','Delivered','Received','Canceled'].includes(t.status)) t.status = 'Shipped';
+            await apiUpdateTransfer(t);
+          }
+          state.applied.push(s);
+          continue;
+        }
+        // Otherwise it's an individual transfer reference
         const t = TRANSFERS.find(x => String(x.id) === String(s.reference));
         if (!t) continue;
         t.trackingNumber = s.trackingNumber;
