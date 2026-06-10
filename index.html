@@ -3931,7 +3931,7 @@ function renderShipments() {
         <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<span style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</span>`:'<span class="item-sub">—</span>'}</td>
         <td style="font-family:monospace;font-size:12px">${escapeHtml(s.trackingNumber||'—')}</td>
         <td><span style="font-weight:600">${txCount}</span> <span class="item-sub" style="font-size:11px">${txCount===1?'transfer':'transfers'}</span></td>
-        <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>${s.receivedBy?`<div class="item-sub">by ${escapeHtml(s.receivedBy)}</div>`:''}</td>
+        <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span></td>
         <td>${fmtDate(s.shipDate)}</td>
         <td>${fmtDate(s.deliveredDate)}</td>
         <td>${
