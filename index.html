@@ -1816,7 +1816,14 @@ function renderSLA() {
   const root = document.getElementById('view-sla');
   const issues = visibleTransfers().map(t => ({ t, sla: slaStatus(t) })).filter(x => x.sla.state === 'breach' || x.sla.state === 'warn').sort((a,b) => (a.sla.state==='breach'?0:1) - (b.sla.state==='breach'?0:1));
   const { mine, asked } = openQuestionsForUser();
-  const totalAlerts = issues.length + mine.length;
+  const todayISO = todayLocal();
+  // Past anticipated ship date — moved here from Action Items so Alerts owns all SLA-style notifications.
+  const lateShipping = visibleTransfers().filter(t =>
+    t.anticipatedShipDate
+    && t.anticipatedShipDate.slice(0,10) < todayISO
+    && !['Shipped','Delivered','Received','Canceled'].includes(t.status)
+  ).sort((a,b) => (a.anticipatedShipDate||'').localeCompare(b.anticipatedShipDate||''));
+  const totalAlerts = issues.length + mine.length + lateShipping.length;
   root.innerHTML = `
     <div class="page-header"><div class="page-title">Alerts <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${totalAlerts})</span></div></div>
 
@@ -1854,6 +1861,25 @@ function renderSLA() {
       </tbody></table>
     </div></div>` : ''}
 
+    ${lateShipping.length ? `<div class="card"><div class="card-header">⏰ Past Anticipated Ship Date (${lateShipping.length})</div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:8px">Transfers whose anticipated ship date has passed but haven't shipped yet. Either get them out the door, push the date, or change status to Pending Clarification / Needs Formula if there's a holdup.</p>
+      <table style="box-shadow:none;font-size:13px"><thead><tr>
+        <th>Patient</th><th>Origin → Fill</th><th>Status</th><th>Anticipated Ship</th><th>Days late</th><th></th>
+      </tr></thead><tbody>
+        ${lateShipping.map(t => {
+          const daysLate = Math.floor((Date.parse(todayISO) - Date.parse(t.anticipatedShipDate.slice(0,10))) / 86400000);
+          return `<tr style="background:var(--danger-bg)">
+            <td><strong>${escapeHtml(t.patientName||'(bulk pickup)')}</strong></td>
+            <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+            <td><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
+            <td>${fmtDate(t.anticipatedShipDate)}</td>
+            <td><strong style="color:var(--danger)">${daysLate}d</strong></td>
+            <td><button class="btn btn-primary btn-sm" data-open-late="${t.id}">Open</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody></table>
+    </div></div>` : ''}
+
     <div class="card"><div class="card-header">Transfers Past Status Time Limit ${issues.length?`<span class="badge badge-canceled">${issues.length}</span>`:''}</div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">Transfers that have sat in their current status longer than allowed. Adjust limits in Admin.</p>
       ${issues.length === 0 ? `<div class="empty" style="padding:20px"><h3>🎉 All transfers within their time limits</h3></div>` : `
@@ -1873,6 +1899,7 @@ function renderSLA() {
     </div></div>
   `;
   root.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openTransfer(+tr.dataset.id));
+  root.querySelectorAll('[data-open-late]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openLate));
   root.querySelectorAll('[data-open-q]').forEach(tr => tr.onclick = e => {
     if (e.target.closest('[data-answer]')) return;
     openTransfer(+tr.dataset.openQ);
@@ -5303,42 +5330,19 @@ function renderActionItems() {
     return d && (Date.now() - d.getTime()) > TWENTY_FOUR_H;
   });
 
-  // Transfers past their anticipated ship date and not yet Shipped/Delivered/Canceled
-  const lateShipping = visibleTransfers().filter(t =>
-    t.anticipatedShipDate
-    && t.anticipatedShipDate.slice(0,10) < todayISO
-    && !['Shipped','Delivered','Canceled'].includes(t.status)
-  ).sort((a,b) => (a.anticipatedShipDate||'').localeCompare(b.anticipatedShipDate||''));
-
   // Transfers in Pending Clarification or Needs Formula — held up, need attention
   const held = visibleTransfers().filter(t =>
     DELAY_STATUSES.includes(t.status)
   ).sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
 
-  const totalPending = canceled.length + deliveredToReceive.length + lateShipping.length + held.length;
+  // Note: "Past Anticipated Ship Date" moved to the Alerts tab (it's an SLA-style notification,
+  // not a one-click action item).
+
+  const totalPending = canceled.length + deliveredToReceive.length + held.length;
 
   root.innerHTML = `
     <div class="page-header"><div class="page-title">Action Items <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${totalPending} pending)</span></div></div>
     <p style="color:var(--gray-600);margin-bottom:14px">Items that need attention before they fall through the cracks. Each card below is a different kind of action. Click an item to open it for the next step.</p>
-
-    ${lateShipping.length ? `<div class="card"><div class="card-header">⏰ Past Anticipated Ship Date (${lateShipping.length})</div><div class="card-body">
-      <p class="item-sub" style="margin-bottom:8px">Transfers whose anticipated ship date has passed but haven't shipped yet. Either get them out the door, push the date, or change status to Pending Clarification / Needs Formula if there's a holdup.</p>
-      <table style="box-shadow:none"><thead><tr>
-        <th>Patient</th><th>Origin → Fill</th><th>Status</th><th>Anticipated Ship</th><th>Days late</th><th></th>
-      </tr></thead><tbody>
-        ${lateShipping.map(t => {
-          const daysLate = Math.floor((Date.parse(todayISO) - Date.parse(t.anticipatedShipDate.slice(0,10))) / 86400000);
-          return `<tr style="background:var(--danger-bg)">
-            <td><strong>${escapeHtml(t.patientName||'(bulk pickup)')}</strong></td>
-            <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
-            <td><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
-            <td>${fmtDate(t.anticipatedShipDate)}</td>
-            <td><strong style="color:var(--danger)">${daysLate}d</strong></td>
-            <td><button class="btn btn-primary btn-sm" data-open-late="${t.id}">Open</button></td>
-          </tr>`;
-        }).join('')}
-      </tbody></table>
-    </div></div>` : ''}
 
     ${held.length ? `<div class="card"><div class="card-header">⚠ Held — Needs Action (${held.length})</div><div class="card-body">
       <p class="item-sub" style="margin-bottom:8px">Transfers in <strong>Pending Clarification</strong> or <strong>Needs Formula</strong> status. The origin pharmacy has been notified via Teams; respond by editing the transfer and changing status back to In Progress once resolved.</p>
@@ -5415,7 +5419,6 @@ function renderActionItems() {
   root.querySelectorAll('[data-open-ack]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openAck));
   root.querySelectorAll('[data-open-ship]').forEach(b => b.onclick = () => openShipment(+b.dataset.openShip));
   root.querySelectorAll('[data-checkin]').forEach(b => b.onclick = () => openShipment(+b.dataset.checkin));
-  root.querySelectorAll('[data-open-late]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openLate));
   root.querySelectorAll('[data-open-held]').forEach(b => b.onclick = () => openTransfer(+b.dataset.openHeld));
   root.querySelectorAll('[data-open]').forEach(tr => tr.onclick = () => openTransfer(+tr.dataset.open));
   root.querySelectorAll('[data-ack]').forEach(b => b.onclick = () => {
