@@ -4923,6 +4923,35 @@ async function processBulkFiles(rawFiles) {
       continue;
     }
 
+    // Even though we successfully read text from the PDF (no OCR needed), we still need to
+    // rasterize each page and upload to blob storage so the receiving team can view the
+    // original document later. Without this, pkSheets/hardCopies on the transfer end up
+    // metadata-only and display as "(no data)".
+    if (hint) hint.textContent = `Saving page images for ${groups.length} transfer(s)…`;
+    let pdf = null;
+    try {
+      const buf = await file.arrayBuffer();
+      pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    } catch (e) { console.warn('Could not open PDF for rasterization', e); }
+    const pageBlobsByNum = {};
+    if (pdf) {
+      for (const g of groups) {
+        for (const p of [g.transferPage, ...g.hardCopyPages]) {
+          if (pageBlobsByNum[p.pageNum]) continue;
+          try {
+            const base64 = await rasterizePdfPageToBase64(pdf, p.pageNum);
+            const blobName = await uploadBlob(base64, 'image/png', 'pages');
+            pageBlobsByNum[p.pageNum] = {
+              blobName,
+              dataUrl: 'data:image/png;base64,' + base64
+            };
+          } catch (e) {
+            console.warn('Page rasterize/upload failed for page ' + p.pageNum + ':', e.message || e);
+          }
+        }
+      }
+    }
+
     // Create one draft per detected transfer
     groups.forEach((g, idx) => {
       const draft = freshDraft();
@@ -4951,12 +4980,21 @@ async function processBulkFiles(rawFiles) {
         if (parsed.drug) first.drug = parsed.drug;
         if (parsed.qty) first.qty = parsed.qty;
       }
+      const pagePngs = [g.transferPage, ...g.hardCopyPages]
+        .filter(p => pageBlobsByNum[p.pageNum])
+        .map(p => ({
+          pageNum: p.pageNum,
+          blobName: pageBlobsByNum[p.pageNum].blobName,
+          dataUrl: pageBlobsByNum[p.pageNum].dataUrl,
+          kind: p === g.transferPage ? 'transfer' : 'hardcopy'
+        }));
       newDrafts.push({
         id: ++_bulkId,
         draft,
         sourceFile: `${file.name} (${idx+1}/${groups.length})`,
         parseError: parsed ? null : 'Transfer page found but fields could not be parsed.',
-        parsed
+        parsed,
+        pageImages: pagePngs
       });
     });
   }
