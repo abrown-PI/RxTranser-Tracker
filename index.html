@@ -6146,14 +6146,20 @@ function updateNextShipmentBanner() {
   const scheduleText = days.length > 1
     ? ` <span style="opacity:.75;font-size:12px">(receives ${days.map(d => dayLabels[d]).join(', ')})</span>`
     : '';
+  // Anticipated ship date = the day BEFORE the receive day (overnight FedEx is the typical service).
+  // We surface the receive day in the banner (that's what staff cares about) but the
+  // "See what's anticipated to be in this order" filter looks for transfers shipping the day before.
+  const shipTarget = new Date(target.getTime() - 86400000);
+  const shipIso = toDateISO(shipTarget);
   banner.innerHTML = `📦 Your next pharmacy shipment to <strong>${escapeHtml(CURRENT_USER.location)}</strong> is expected on <strong>${dayName} ${dateStr}</strong>${scheduleText}
-    <button id="seeNextOrderBtn" data-date="${isoDate}" style="margin-left:14px;padding:4px 12px;background:var(--primary);color:white;border:0;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer">👀 See what's in this order</button>`;
+    <button id="seeNextOrderBtn" data-date="${shipIso}" style="margin-left:14px;padding:4px 12px;background:var(--primary);color:white;border:0;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer">👀 See what's anticipated to be in this order</button>`;
   banner.style.display = 'block';
   const btn = document.getElementById('seeNextOrderBtn');
   if (btn) btn.onclick = () => {
     const iso = btn.dataset.date;
-    // Drop into All Transfers and filter to transfers anticipated to ship on this exact day,
-    // headed to my location (either as origin or pickup destination).
+    // Drop into All Transfers and filter to transfers anticipated to ship on the day BEFORE the
+    // receive day, headed to my location (their origin is my location — meaning I requested them
+    // and they're being filled & shipped back to me).
     state.filterAntShipFrom = iso;
     state.filterAntShipTo = iso;
     state.filterOrigin = CURRENT_USER.location;
