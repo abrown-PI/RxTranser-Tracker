@@ -1593,6 +1593,24 @@ function renderStats() {
     if (t.shipTo === 'Delivery-Lancaster') return CHK_LANCASTER;
     return null;
   }
+  // localStorage helpers — per-day "packed" state for the checklist. Keyed by today's date
+  // so each new day starts fresh.
+  function packedKey() { return 'packing_' + todayLocal(); }
+  function loadPackedSet() {
+    try { return new Set(JSON.parse(localStorage.getItem(packedKey()) || '[]')); }
+    catch { return new Set(); }
+  }
+  function isPackedToday(tid) { return loadPackedSet().has(String(tid)); }
+  function setPackedToday(tid, val) {
+    const s = loadPackedSet();
+    if (val) s.add(String(tid)); else s.delete(String(tid));
+    localStorage.setItem(packedKey(), JSON.stringify([...s]));
+  }
+  function clearPackedToday(tids) {
+    const s = loadPackedSet();
+    tids.forEach(t => s.delete(String(t)));
+    localStorage.setItem(packedKey(), JSON.stringify([...s]));
+  }
   // What kind of ship-to is this row? Used for the per-row indicator in the checklist.
   function shipToLabelFor(t) {
     if (t.pickupAtPharmacy) return '📍 Pickup';
@@ -1760,9 +1778,15 @@ function renderStats() {
     const sortedDests = Object.keys(groups).sort();
     const renderGroup = (dest) => {
       const items = groups[dest];
-      return `<div class="chk-group">
+      const packedSet = loadPackedSet();
+      const packedItems = items.filter(t => packedSet.has(String(t.id)));
+      // Pharmacy destinations can produce a BULK shipment; Patient and Lancaster groups can't.
+      const isPharmacyDest = dest !== CHK_PATIENT && dest !== CHK_LANCASTER && LOCATIONS.includes(dest);
+      const canCreate = isPharmacyDest && packedItems.length > 0;
+      return `<div class="chk-group" data-group-dest="${escapeHtml(dest)}">
         <div class="chk-group-header">
-          📦 ${escapeHtml(dest)} <span class="chk-group-count">${items.length} order${items.length===1?'':'s'}</span>
+          <span>📦 ${escapeHtml(dest)} <span class="chk-group-count">${packedItems.length} of ${items.length} packed</span></span>
+          ${canCreate?`<button class="btn btn-primary btn-sm chk-create-btn" data-group-dest="${escapeHtml(dest)}" style="background:white;color:var(--primary-dark);font-weight:600;padding:4px 12px;font-size:12px">📦 Create Shipment & Print Slip (${packedItems.length})</button>`:''}
         </div>
         <table class="chk-table">
           <thead><tr>
@@ -1771,23 +1795,28 @@ function renderStats() {
             <th class="chk-col-drug">Drug(s) — Qty</th>
             <th class="chk-col-type">Type</th>
             <th class="chk-col-date">Ant Ship</th>
+            <th class="chk-col-ref">FedEx Reference (scan into WorldShip)</th>
             <th class="chk-col-notes">Notes</th>
           </tr></thead>
           <tbody>
             ${items.map(t => {
               const itemsHtml = (t.items || []).map(i => `${escapeHtml(i.drug || '—')}${i.qty ? ' — ' + escapeHtml(i.qty) : ''}`).join('<br>');
-              // Pickup info goes in notes since the group header already conveys destination.
               const notes = [
                 t.coldItem ? '❄ Cold' : '',
                 t.pickupAtPharmacy ? '📍 Pickup' : '',
                 (t.transferNotes || '').slice(0, 80)
               ].filter(Boolean).join(' · ');
-              return `<tr>
-                <td class="chk-col-check"><span class="chk-box">☐</span></td>
+              const isPacked = isPackedToday(t.id);
+              return `<tr class="chk-row${isPacked?' chk-row-packed':''}">
+                <td class="chk-col-check"><input type="checkbox" class="chk-input" data-tid="${t.id}" ${isPacked?'checked':''} /></td>
                 <td class="chk-col-patient"><strong>${escapeHtml(t.patientName)}</strong></td>
                 <td class="chk-col-drug">${itemsHtml || '—'}</td>
                 <td class="chk-col-type">${(t.transferType==='Refill') ? '<span class="chk-pill">Refill</span>' : '<span class="chk-pill">New</span>'}</td>
                 <td class="chk-col-date">${fmtDate(t.anticipatedShipDate)||'—'}</td>
+                <td class="chk-col-ref">
+                  <div class="chk-ref-id">${escapeHtml(String(t.id))}</div>
+                  <svg class="chk-barcode" data-ref="${escapeHtml(String(t.id))}"></svg>
+                </td>
                 <td class="chk-col-notes">${escapeHtml(notes)}</td>
               </tr>`;
             }).join('')}
@@ -1862,19 +1891,25 @@ function renderStats() {
     .chk-print .chk-title { color: var(--primary-dark); margin: 0 0 6px; font-size: 16px }
     .chk-print .chk-sub { color: var(--gray-600); font-size: 11px; margin-bottom: 12px }
     .chk-print .chk-group { margin-bottom: 14px; page-break-inside: avoid; border: 1px solid var(--gray-300); border-radius: 6px; overflow: hidden }
-    .chk-print .chk-group-header { background: var(--primary); color: white; padding: 10px 14px; font-size: 14px; font-weight: 700 }
+    .chk-print .chk-group-header { background: var(--primary); color: white; padding: 10px 14px; font-size: 14px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap }
     .chk-print .chk-group-count { font-weight: 400; font-size: 12px; margin-left: 8px; opacity: .9 }
+    .chk-print .chk-row-packed { background: var(--success-bg) }
+    .chk-print .chk-row-packed td { color: var(--gray-600) }
+    .chk-print .chk-input { width: 20px; height: 20px; cursor: pointer; margin: 0 }
     .chk-print .chk-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed }
     .chk-print .chk-table thead tr { background: var(--gray-100) }
     .chk-print .chk-table th { padding: 8px 6px; text-align: left; font-weight: 700; font-size: 11px; border-bottom: 1px solid var(--gray-300) }
     .chk-print .chk-table td { padding: 8px 6px; vertical-align: top; border-top: 1px solid var(--gray-200); line-height: 1.35; word-wrap: break-word }
     .chk-print .chk-col-check { width: 32px; text-align: center }
-    .chk-print .chk-col-patient { width: 16% }
-    .chk-print .chk-col-drug { width: 38% }
-    .chk-print .chk-col-type { width: 9% }
-    .chk-print .chk-col-date { width: 11%; white-space: nowrap }
-    .chk-print .chk-col-notes { width: 22%; font-size: 11px; color: var(--gray-700) }
+    .chk-print .chk-col-patient { width: 14% }
+    .chk-print .chk-col-drug { width: 30% }
+    .chk-print .chk-col-type { width: 7% }
+    .chk-print .chk-col-date { width: 10%; white-space: nowrap }
+    .chk-print .chk-col-ref { width: 16% }
+    .chk-print .chk-col-notes { width: 16%; font-size: 11px; color: var(--gray-700) }
     .chk-print .chk-box { display: inline-block; width: 20px; height: 20px; font-size: 22px; line-height: 18px; text-align: center; color: #000; font-family: 'Segoe UI Symbol', 'Apple Symbols', 'DejaVu Sans', sans-serif }
+    .chk-print .chk-ref-id { font-family: monospace; font-size: 11px; font-weight: 700; letter-spacing: .03em }
+    .chk-print .chk-barcode { display: block; width: 100%; height: 40px; margin-top: 2px }
     .chk-print .chk-pill { display: inline-block; padding: 1px 7px; font-size: 10px; font-weight: 600; border-radius: 8px; background: var(--primary-bg); color: var(--primary-dark); border: 1px solid var(--primary-light) }
     .chk-print .chk-sub { color: var(--gray-500); font-size: 10px; font-style: italic; margin-top: 2px }
     /* PRINT — pure B&W so the photocopier behaves and nothing relies on CSS vars */
@@ -1891,6 +1926,9 @@ function renderStats() {
       .chk-print .chk-box { border: 2px solid #000 !important; width: 16px; height: 16px }
       .chk-print .chk-pill { background: #fff !important; color: #000 !important; border: 1px solid #000 !important }
       .chk-print .chk-col-notes { color: #333 !important }
+      .chk-print .chk-create-btn { display: none !important }
+      .chk-print .chk-row-packed { background: #f5f5f5 !important }
+      .chk-print .chk-row-packed td { color: #555 !important }
     }
   </style>`;
   root.innerHTML = `
@@ -1961,6 +1999,73 @@ function renderStats() {
       state.reportFilter.antShipTo = '';
       renderStats();
     };
+    // Render barcodes for every Transfer ID in the checklist. Code128 plays well with
+    // FedEx WorldShip's barcode scanner — focus the Customer Reference field, scan, done.
+    if (window.JsBarcode) {
+      root.querySelectorAll('.chk-barcode[data-ref]').forEach(svg => {
+        try {
+          JsBarcode(svg, svg.getAttribute('data-ref'), {
+            format: 'CODE128', width: 1.4, height: 36, displayValue: false, margin: 0
+          });
+        } catch (e) { console.warn('barcode render failed', e); }
+      });
+    }
+    // Interactive checkbox: toggle "packed today" state and update row styling + the
+    // per-group "Create Shipment" button visibility.
+    root.querySelectorAll('.chk-input[data-tid]').forEach(cb => {
+      cb.onchange = () => {
+        setPackedToday(cb.dataset.tid, cb.checked);
+        renderStats();
+      };
+    });
+    // "Create Shipment & Print Slip" button per pharmacy group — takes the packed transfers
+    // headed to that destination, creates a BULK shipment, prints the packing slip, and
+    // clears those checks so the row visually settles to "done".
+    root.querySelectorAll('.chk-create-btn').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const dest = btn.dataset.groupDest;
+        const packedSet = loadPackedSet();
+        const inGroup = scope.filter(t => destinationLocationFor(t) === dest && packedSet.has(String(t.id)));
+        if (!inGroup.length) { alert('No packed items in this group.'); return; }
+        if (!confirm(`Create a BULK shipment to ${dest} with ${inGroup.length} packed transfer${inGroup.length===1?'':'s'} and print the packing slip?`)) return;
+        // Use Erie as the from-location if user is at Erie, otherwise current location.
+        const fromLoc = CURRENT_USER.location;
+        const bulkId = generateBulkShipmentId(dest, todayLocal());
+        const shipment = {
+          id: nextId(),
+          isBulk: true,
+          bulkShipmentId: bulkId,
+          fromLocation: fromLoc,
+          toLocation: dest,
+          destinationType: 'Pharmacy',
+          carrier: 'FedEx',
+          trackingNumber: '',
+          labelGenerated: false,
+          status: 'Pending',
+          shipDate: null,
+          deliveredDate: null,
+          receivedDate: null,
+          receivedBy: null,
+          transferIds: inGroup.map(t => t.id),
+          createdAt: new Date().toISOString(),
+          createdBy: CURRENT_USER.name,
+          unpacked: {},
+          damagePhotos: []
+        };
+        SHIPMENTS.unshift(shipment);
+        await apiSaveShipment(shipment);
+        // Clear the packed state for these transfers — they're "done" for the day.
+        clearPackedToday(inGroup.map(t => t.id));
+        // Open the shipment modal so the team can add more transfers via the existing
+        // "+ Add transfers" button (for orders that came in early after they checked these off),
+        // and print the slip from the modal. Also fire the print immediately so they get the
+        // slip without an extra click in the typical case.
+        printPackingSlip(shipment);
+        openShipment(shipment.id);
+        renderStats();
+      };
+    });
   }
 
   // Print/PDF — works for both summary and detail modes. Opens a new window with the
@@ -1988,12 +2093,15 @@ function renderStats() {
       .chk-print .chk-table th { padding: 6px 5px; text-align: left; font-weight: 700; font-size: 10px; border-bottom: 1.5px solid #000; color: #000 }
       .chk-print .chk-table td { padding: 8px 5px; vertical-align: top; border-top: 1px solid #999; line-height: 1.35; word-wrap: break-word; overflow-wrap: break-word; color: #000 }
       .chk-print .chk-col-check { width: 30px; text-align: center }
-      .chk-print .chk-col-patient { width: 16% }
-      .chk-print .chk-col-drug { width: 38% }
-      .chk-print .chk-col-type { width: 9% }
-      .chk-print .chk-col-date { width: 11%; white-space: nowrap }
-      .chk-print .chk-col-notes { width: 22%; font-size: 10px; color: #333 }
+      .chk-print .chk-col-patient { width: 14% }
+      .chk-print .chk-col-drug { width: 30% }
+      .chk-print .chk-col-type { width: 7% }
+      .chk-print .chk-col-date { width: 10%; white-space: nowrap }
+      .chk-print .chk-col-ref { width: 16% }
+      .chk-print .chk-col-notes { width: 16%; font-size: 10px; color: #333 }
       .chk-print .chk-box { display: inline-block; width: 20px; height: 20px; font-size: 22px; line-height: 18px; text-align: center; color: #000; font-family: 'Segoe UI Symbol', 'Apple Symbols', 'DejaVu Sans', sans-serif }
+      .chk-print .chk-ref-id { font-family: monospace; font-size: 11px; font-weight: 700; letter-spacing: .03em; color: #000 }
+      .chk-print .chk-barcode { display: block; width: 100%; height: 38px; margin-top: 2px }
       .chk-print .chk-pill { display: inline-block; padding: 1px 6px; font-size: 10px; font-weight: 600; border-radius: 8px; background: #fff; color: #000; border: 1px solid #000 }
       .chk-print .chk-sub { color: #555; font-size: 10px; font-style: italic; margin-top: 2px }
     ` : '';
@@ -4167,6 +4275,7 @@ function renderShipments() {
       <div class="page-title">Shipments <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${filtered.length})</span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span class="item-sub" id="fedexStatusPill" style="font-size:12px"></span>
+        <button class="btn btn-secondary" id="packingChkBtn" title="Today's Packing Checklist — check off orders as you pack, then create shipments straight from the list">📋 Packing Checklist</button>
         <button class="btn btn-secondary" id="pullFedexBtn" title="Pull recent shipments from FedEx and auto-match by ship-to address">📦 Pull from FedEx</button>
         <button class="btn btn-primary" id="newShipBtn">+ Create Shipment</button>
       </div>
@@ -4234,6 +4343,15 @@ function renderShipments() {
     </tbody></table>`}
   `;
   document.getElementById('newShipBtn').addEventListener('click', openCreateShipment);
+  document.getElementById('packingChkBtn').addEventListener('click', () => {
+    // Default to today's anticipated ship date, all destinations selected, then jump to Reports → Checklist.
+    if (!state.reportFilter) state.reportFilter = {};
+    state.reportFilter.mode = 'checklist';
+    state.reportFilter.antShipFrom = todayLocal();
+    state.reportFilter.antShipTo = todayLocal();
+    state.reportFilter.checklistLocations = [...LOCATIONS, CHK_PATIENT, CHK_LANCASTER];
+    document.querySelector('.tab[data-tab=stats]').click();
+  });
   document.getElementById('pullFedexBtn').addEventListener('click', openFedexPullModal);
   updateFedexStatusPill();
   document.getElementById('shipDirAll').onclick = () => { state.shipFilter.direction = ''; renderShipments(); };
