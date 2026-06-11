@@ -4359,13 +4359,29 @@ function renderShipments() {
   `;
   document.getElementById('newShipBtn').addEventListener('click', openCreateShipment);
   document.getElementById('packingChkBtn').addEventListener('click', () => {
-    // Default to today's anticipated ship date, all destinations selected, then jump to Reports → Checklist.
-    if (!state.reportFilter) state.reportFilter = {};
-    state.reportFilter.mode = 'checklist';
-    state.reportFilter.antShipFrom = todayLocal();
-    state.reportFilter.antShipTo = todayLocal();
-    state.reportFilter.checklistLocations = [...LOCATIONS, CHK_PATIENT];
-    document.querySelector('.tab[data-tab=stats]').click();
+    try {
+      if (!state.reportFilter) {
+        state.reportFilter = { mode: 'summary', origin:'', fill:'', status:'', type:'', shipTo:'', createdFrom:'', createdTo:'', antShipFrom:'', antShipTo:'', checklistLocations: [] };
+      }
+      state.reportFilter.mode = 'checklist';
+      state.reportFilter.antShipFrom = todayLocal();
+      state.reportFilter.antShipTo = todayLocal();
+      state.reportFilter.checklistLocations = [...LOCATIONS, CHK_PATIENT];
+      const repTab = document.querySelector('.tab[data-tab="stats"]');
+      if (repTab) {
+        repTab.click();
+      } else {
+        // Fallback: switch tab state and re-render directly
+        state.tab = 'stats';
+        document.querySelectorAll('[id^=view-]').forEach(v => v.style.display = 'none');
+        const v = document.getElementById('view-stats');
+        if (v) v.style.display = '';
+        render();
+      }
+    } catch (e) {
+      console.error('Packing Checklist button error:', e);
+      alert('Packing Checklist failed to open: ' + (e.message || e));
+    }
   });
   document.getElementById('pullFedexBtn').addEventListener('click', openFedexPullModal);
   updateFedexStatusPill();
