@@ -1721,7 +1721,18 @@ function renderStats() {
     const selectedSet = new Set(f.checklistLocations);
     const locsRow = `
       <div class="card" style="margin-bottom:14px"><div class="card-body" style="padding:10px 14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+          <div style="font-weight:600;font-size:12px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.04em">Ship date</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" id="chk-today" style="padding:3px 12px;font-size:12px">📅 Today</button>
+            <button class="btn btn-secondary btn-sm" id="chk-tomorrow" style="padding:3px 12px;font-size:12px">Tomorrow</button>
+            <button class="btn btn-secondary btn-sm" id="chk-week" style="padding:3px 12px;font-size:12px">Next 7 days</button>
+            <button class="btn btn-secondary btn-sm" id="chk-cleardate" style="padding:3px 12px;font-size:12px">All dates</button>
+          </div>
+          <div class="item-sub" style="font-size:11px;color:var(--gray-600);flex-basis:100%;text-align:right;margin-top:-2px">${f.antShipFrom||f.antShipTo?`Currently: ${f.antShipFrom||'(any)'} → ${f.antShipTo||'(any)'}`:'No date filter set'}</div>
+        </div>
+        <div style="border-top:1px solid var(--gray-200);margin:4px -14px 8px"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:8px">
           <div style="font-weight:600;font-size:12px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.04em">Destinations to pack (${selectedSet.size} selected)</div>
           <div style="display:flex;gap:6px">
             <button class="btn btn-secondary btn-sm" id="chk-all" style="padding:2px 8px;font-size:11px">Select all</button>
@@ -1734,7 +1745,7 @@ function renderStats() {
             ${escapeHtml(l)}
           </label>`).join('')}
         </div>
-        <div class="item-sub" style="margin-top:6px;font-size:11px">Pharmacy ship-tos group under the origin pharmacy. Pickup orders group under the pickup location. Patient ship-tos go to <em>Patient (Direct Ship)</em>. Combine with the "Ant ship from/to" date filter above to scope to one day.</div>
+        <div class="item-sub" style="margin-top:6px;font-size:11px">Pharmacy ship-tos group under the origin pharmacy. Pickup orders group under the pickup location. Patient ship-tos go to <em>Patient (Direct Ship)</em>. Lancaster delivery is its own group.</div>
       </div></div>
     `;
     const inScopeChk = scope.filter(t => {
@@ -1915,9 +1926,41 @@ function renderStats() {
       renderStats();
     });
     const allBtn = document.getElementById('chk-all');
-    if (allBtn) allBtn.onclick = () => { state.reportFilter.checklistLocations = [...LOCATIONS]; renderStats(); };
+    // "Select all" must include the Patient and Lancaster pseudo-destinations, not just pharmacy locations.
+    if (allBtn) allBtn.onclick = () => { state.reportFilter.checklistLocations = [...LOCATIONS, CHK_PATIENT, CHK_LANCASTER]; renderStats(); };
     const noneBtn = document.getElementById('chk-none');
     if (noneBtn) noneBtn.onclick = () => { state.reportFilter.checklistLocations = []; renderStats(); };
+    // Quick date shortcut buttons — Today / Tomorrow / This week
+    const todayBtn = document.getElementById('chk-today');
+    if (todayBtn) todayBtn.onclick = () => {
+      const today = todayLocal();
+      state.reportFilter.antShipFrom = today;
+      state.reportFilter.antShipTo = today;
+      renderStats();
+    };
+    const tomorrowBtn = document.getElementById('chk-tomorrow');
+    if (tomorrowBtn) tomorrowBtn.onclick = () => {
+      const t = new Date(); t.setDate(t.getDate() + 1);
+      const iso = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+      state.reportFilter.antShipFrom = iso;
+      state.reportFilter.antShipTo = iso;
+      renderStats();
+    };
+    const weekBtn = document.getElementById('chk-week');
+    if (weekBtn) weekBtn.onclick = () => {
+      const today = todayLocal();
+      const t = new Date(); t.setDate(t.getDate() + 6);
+      const end = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+      state.reportFilter.antShipFrom = today;
+      state.reportFilter.antShipTo = end;
+      renderStats();
+    };
+    const clearDateBtn = document.getElementById('chk-cleardate');
+    if (clearDateBtn) clearDateBtn.onclick = () => {
+      state.reportFilter.antShipFrom = '';
+      state.reportFilter.antShipTo = '';
+      renderStats();
+    };
   }
 
   // Print/PDF — works for both summary and detail modes. Opens a new window with the
