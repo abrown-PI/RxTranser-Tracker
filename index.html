@@ -1758,7 +1758,6 @@ function renderStats() {
             <th class="chk-col-check">✓</th>
             <th class="chk-col-patient">Patient</th>
             <th class="chk-col-drug">Drug(s) — Qty</th>
-            <th class="chk-col-shipto">Ship To</th>
             <th class="chk-col-type">Type</th>
             <th class="chk-col-date">Ant Ship</th>
             <th class="chk-col-notes">Notes</th>
@@ -1766,15 +1765,16 @@ function renderStats() {
           <tbody>
             ${items.map(t => {
               const itemsHtml = (t.items || []).map(i => `${escapeHtml(i.drug || '—')}${i.qty ? ' — ' + escapeHtml(i.qty) : ''}`).join('<br>');
+              // Pickup info goes in notes since the group header already conveys destination.
               const notes = [
                 t.coldItem ? '❄ Cold' : '',
-                (t.transferNotes || '').slice(0, 60)
+                t.pickupAtPharmacy ? '📍 Pickup' : '',
+                (t.transferNotes || '').slice(0, 80)
               ].filter(Boolean).join(' · ');
               return `<tr>
-                <td class="chk-col-check"><span class="chk-box"></span></td>
+                <td class="chk-col-check"><span class="chk-box">☐</span></td>
                 <td class="chk-col-patient"><strong>${escapeHtml(t.patientName)}</strong></td>
                 <td class="chk-col-drug">${itemsHtml || '—'}</td>
-                <td class="chk-col-shipto">${shipToLabelFor(t)}${t.pickupAtPharmacy && t.pickupLocation ? `<div class="chk-sub">@ ${escapeHtml(t.pickupLocation)}</div>` : ''}</td>
                 <td class="chk-col-type">${(t.transferType==='Refill') ? '<span class="chk-pill">Refill</span>' : '<span class="chk-pill">New</span>'}</td>
                 <td class="chk-col-date">${fmtDate(t.anticipatedShipDate)||'—'}</td>
                 <td class="chk-col-notes">${escapeHtml(notes)}</td>
@@ -1857,14 +1857,13 @@ function renderStats() {
     .chk-print .chk-table thead tr { background: var(--gray-100) }
     .chk-print .chk-table th { padding: 8px 6px; text-align: left; font-weight: 700; font-size: 11px; border-bottom: 1px solid var(--gray-300) }
     .chk-print .chk-table td { padding: 8px 6px; vertical-align: top; border-top: 1px solid var(--gray-200); line-height: 1.35; word-wrap: break-word }
-    .chk-print .chk-col-check { width: 30px; text-align: center }
-    .chk-print .chk-col-patient { width: 13% }
-    .chk-print .chk-col-drug { width: 30% }
-    .chk-print .chk-col-shipto { width: 11% }
-    .chk-print .chk-col-type { width: 8% }
-    .chk-print .chk-col-date { width: 10%; white-space: nowrap }
-    .chk-print .chk-col-notes { width: 18%; font-size: 11px; color: var(--gray-700) }
-    .chk-print .chk-box { display: inline-block; width: 18px; height: 18px; border: 2px solid #333; border-radius: 3px; vertical-align: middle }
+    .chk-print .chk-col-check { width: 32px; text-align: center }
+    .chk-print .chk-col-patient { width: 16% }
+    .chk-print .chk-col-drug { width: 38% }
+    .chk-print .chk-col-type { width: 9% }
+    .chk-print .chk-col-date { width: 11%; white-space: nowrap }
+    .chk-print .chk-col-notes { width: 22%; font-size: 11px; color: var(--gray-700) }
+    .chk-print .chk-box { display: inline-block; width: 20px; height: 20px; font-size: 22px; line-height: 18px; text-align: center; color: #000; font-family: 'Segoe UI Symbol', 'Apple Symbols', 'DejaVu Sans', sans-serif }
     .chk-print .chk-pill { display: inline-block; padding: 1px 7px; font-size: 10px; font-weight: 600; border-radius: 8px; background: var(--primary-bg); color: var(--primary-dark); border: 1px solid var(--primary-light) }
     .chk-print .chk-sub { color: var(--gray-500); font-size: 10px; font-style: italic; margin-top: 2px }
     /* PRINT — pure B&W so the photocopier behaves and nothing relies on CSS vars */
@@ -1945,14 +1944,13 @@ function renderStats() {
       .chk-print .chk-table thead tr { background: #f0f0f0 }
       .chk-print .chk-table th { padding: 6px 5px; text-align: left; font-weight: 700; font-size: 10px; border-bottom: 1.5px solid #000; color: #000 }
       .chk-print .chk-table td { padding: 8px 5px; vertical-align: top; border-top: 1px solid #999; line-height: 1.35; word-wrap: break-word; overflow-wrap: break-word; color: #000 }
-      .chk-print .chk-col-check { width: 28px; text-align: center }
-      .chk-print .chk-col-patient { width: 13% }
-      .chk-print .chk-col-drug { width: 30% }
-      .chk-print .chk-col-shipto { width: 11% }
-      .chk-print .chk-col-type { width: 8% }
-      .chk-print .chk-col-date { width: 10%; white-space: nowrap }
-      .chk-print .chk-col-notes { width: 18%; font-size: 10px; color: #333 }
-      .chk-print .chk-box { display: inline-block; width: 16px; height: 16px; border: 2px solid #000; border-radius: 3px; vertical-align: middle }
+      .chk-print .chk-col-check { width: 30px; text-align: center }
+      .chk-print .chk-col-patient { width: 16% }
+      .chk-print .chk-col-drug { width: 38% }
+      .chk-print .chk-col-type { width: 9% }
+      .chk-print .chk-col-date { width: 11%; white-space: nowrap }
+      .chk-print .chk-col-notes { width: 22%; font-size: 10px; color: #333 }
+      .chk-print .chk-box { display: inline-block; width: 20px; height: 20px; font-size: 22px; line-height: 18px; text-align: center; color: #000; font-family: 'Segoe UI Symbol', 'Apple Symbols', 'DejaVu Sans', sans-serif }
       .chk-print .chk-pill { display: inline-block; padding: 1px 6px; font-size: 10px; font-weight: 600; border-radius: 8px; background: #fff; color: #000; border: 1px solid #000 }
       .chk-print .chk-sub { color: #555; font-size: 10px; font-style: italic; margin-top: 2px }
     ` : '';
