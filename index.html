@@ -469,7 +469,11 @@ const nextId = () => ++_nextId;
 // =====================================================================
 // State + routing
 // =====================================================================
-const state = { tab: 'transfers', filterStatus: '', showCompleted: false, filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
+// Persist the active tab across refreshes — staff hate being kicked back to Transfers when
+// they were halfway through the Shipments page. Falls back to 'transfers' if nothing saved.
+const _savedTab = (() => { try { return localStorage.getItem('lastTab') || 'transfers'; } catch { return 'transfers'; } })();
+const VALID_TABS = ['transfers','new','refill','actions','shipments','sla','stats','admin'];
+const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'transfers', filterStatus: '', showCompleted: false, filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
 
 // Default-view persistence: stores a snapshot of the transfer-list filters in
 // localStorage so a user's preferred view survives reloads + sessions on the
@@ -517,12 +521,19 @@ function bindTabs() {
   document.querySelectorAll('.tab').forEach(btn => {
     btn.onclick = () => {
       state.tab = btn.dataset.tab;
+      try { localStorage.setItem('lastTab', state.tab); } catch {}
       document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));
       document.querySelectorAll('[id^=view-]').forEach(v => v.style.display = 'none');
       document.getElementById('view-' + state.tab).style.display = '';
       render();
     };
   });
+  // On init, apply the saved tab's visual state (active class + view visibility) so the user
+  // lands on whatever tab they were on before the refresh. state.tab is already set above.
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
+  document.querySelectorAll('[id^=view-]').forEach(v => v.style.display = 'none');
+  const initView = document.getElementById('view-' + state.tab);
+  if (initView) initView.style.display = '';
 }
 bindTabs();
 
