@@ -66,10 +66,11 @@ section { page-break-inside: avoid; }
     <li><a href="#alerts">The Alerts Tab</a></li>
     <li><a href="#cc">Credit Card Workflow</a></li>
     <li><a href="#shipments">Shipments — Direction Filter, Create, Receive</a></li>
+    <li><a href="#packing">📦 Packing Checklist</a> <em>(shipping team's daily worksheet)</em></li>
     <li><a href="#print">Printing &amp; Batch Operations</a></li>
-    <li><a href="#fedex">Pulling Tracking from FedEx</a></li>
+    <li><a href="#fedex">FedEx Tracking — Auto, Manual, &amp; Click-through</a></li>
     <li><a href="#paid">Marking Transfers Paid / Charged</a></li>
-    <li><a href="#reports">Reports — Summary + Detail with Filters</a></li>
+    <li><a href="#reports">Reports — Summary, Detail, Packing Checklist</a></li>
     <li><a href="#admin">Admin Tasks</a> (incl. multi-day shipping schedule, audit log)</li>
     <li><a href="#emails">Email Notifications</a> (daily summary + shipment notices)</li>
     <li><a href="#statuses">Status Definitions</a> (incl. Pending Clarification, Needs Formula)</li>
@@ -349,6 +350,68 @@ section { page-break-inside: avoid; }
 </ol>
 </section>
 
+<section id="packing">
+<h2>📦 Packing Checklist (shipping team's daily worksheet)</h2>
+<p>The Packing Checklist replaces paper sheets the shipping team used to assemble manually. Pulls in every transfer scheduled to ship today, groups by destination pharmacy, and lets staff check items off as they pack. Each check is saved to the backend so other users (and managers) see live progress.</p>
+
+<h3>Opening the checklist</h3>
+<ol>
+  <li>Go to the <strong>Shipments</strong> tab.</li>
+  <li>Click <strong>📋 Packing Checklist</strong> (top-right, next to Pull from FedEx).</li>
+  <li>The Reports tab opens in Packing Checklist mode with <strong>Today's date</strong> applied and <strong>all destinations</strong> selected.</li>
+</ol>
+
+<h3>Filters</h3>
+<ul>
+  <li><strong>Ship date:</strong> shortcut buttons for 📅 Today (default), Tomorrow, Next 7 days, All dates. Manually edit the date filter fields below if you want a custom range.</li>
+  <li><strong>Destinations to pack:</strong> a chip row with each PI pharmacy + a <em>Patient (Direct Ship)</em> chip. Click to toggle. <strong>Select all</strong> / <strong>Clear</strong> buttons on the right. Lancaster Delivery items merge into the regular Lancaster bulk box automatically — flagged <strong>🚚 Delivery</strong> in the row notes.</li>
+</ul>
+
+<div class="tip"><strong>Already-shipped orders are hidden.</strong> The checklist only shows transfers that still need to physically leave the building. Anything already in Shipped / Delivered / Received / Canceled status is filtered out.</div>
+
+<h3>The row layout</h3>
+<table>
+<thead><tr><th>Column</th><th>What it shows</th></tr></thead>
+<tbody>
+<tr><td><strong>✓ Checkbox</strong></td><td>Click as you pack each item. Saves immediately to the backend; teammates see your checks within ~30 seconds. A small green <strong>"✓ [your name]"</strong> appears under the box so anyone can tell who packed which item.</td></tr>
+<tr><td><strong>Patient</strong></td><td>Last name, First name.</td></tr>
+<tr><td><strong>Drug(s) — Qty</strong></td><td>Each Rx item on its own line.</td></tr>
+<tr><td><strong>Type</strong></td><td>New or Refill.</td></tr>
+<tr><td><strong>Ant Ship</strong></td><td>The transfer's scheduled ship date (filtered to today by default).</td></tr>
+<tr><td><strong>FedEx Reference</strong></td><td>The Transfer ID plus a <strong>Code128 barcode</strong>. Focus WorldShip's Customer Reference field and scan the barcode — no typing.</td></tr>
+<tr><td><strong>Notes</strong></td><td>❄ Cold-chain, 📍 Pickup-at-pharmacy, 🚚 Delivery (Lancaster), plus any transfer notes.</td></tr>
+</tbody>
+</table>
+
+<h3>📥 Add Order to Today (when an order is ready early)</h3>
+<p>If an order is ready earlier than its scheduled ship date and you want to pack it today:</p>
+<ol>
+  <li>Click <strong>📥 Add Order to Today</strong> (green button in the date-filter row).</li>
+  <li>Search by patient, transfer ID, drug, Rx #, or pharmacy.</li>
+  <li>Click <strong>📅 Set to Today</strong> on the row.</li>
+  <li>The transfer's anticipated ship date is bumped to today, the modal closes, and the order appears under its destination group on the checklist.</li>
+</ol>
+<p>The change is persisted on the transfer like any other ant-ship-date update — so the Teams notification for date changes will fire and the origin pharmacy will know.</p>
+
+<h3>📦 Create Shipment &amp; Print Slip (end of packing)</h3>
+<p>Each pharmacy destination group has a header button that appears when at least one row in that group is checked. It says, e.g., <strong>📦 Create Shipment &amp; Print Slip (7)</strong>.</p>
+<ol>
+  <li>Pack the items, check the boxes throughout the day as you go.</li>
+  <li>When you're ready to close out a destination's box, click its <strong>📦 Create Shipment &amp; Print Slip</strong> button.</li>
+  <li>Confirm — a new BULK shipment is created with the checked transfers as the manifest.</li>
+  <li>The packing slip prints automatically (PI logo, BULK ID, Code128 barcode, full manifest with Cold / Pickup / Delivery badges).</li>
+  <li>The new shipment's detail modal opens behind the print window — useful if an extra order comes in late and you need to <strong>+ Add transfers</strong> to the box before generating the FedEx label.</li>
+  <li>The checks for those transfers are cleared so the row visually settles to "done."</li>
+</ol>
+
+<p><strong>Patient (Direct Ship)</strong> and any non-pharmacy destinations don't show the Create Shipment button — they're handled as individual FedEx packages. Use the Transfer ID barcode in the FedEx Reference column to scan into WorldShip when you label each one.</p>
+
+<h3>Printing / saving as PDF</h3>
+<p>Click <strong>📄 Print / Save as PDF</strong> at the top of the Reports tab. The printed sheet is <strong>black-and-white</strong> (so it's photocopier-friendly) and includes empty checkboxes ☐ ready to tick by hand. Color stays only on screen.</p>
+
+<div class="tip"><strong>Daily reset:</strong> "Packed today" checks automatically clear at midnight — any check made before midnight on day X only counts for that day. No cleanup needed.</div>
+</section>
+
 <section id="paid">
 <h2>Marking Transfers Paid / Charged</h2>
 <p>When the billing team has charged the patient (or HealNow has processed payment), mark the transfer paid so the team has a clear collected vs. outstanding view.</p>
@@ -364,20 +427,21 @@ section { page-break-inside: avoid; }
 </section>
 
 <section id="reports">
-<h2>Reports — Summary + Detail with Filters</h2>
+<h2>Reports — Summary, Detail, Packing Checklist</h2>
 <p>The Reports tab has a single filter bar at the top covering every common scope:</p>
 <ul>
   <li>Origin / Fill / Status / Type (New or Refill) / Ship to / Paid</li>
   <li>Created date range, Anticipated ship date range</li>
   <li>Clear all in one click</li>
 </ul>
-<p>Two tabs underneath:</p>
+<p>Three tabs underneath:</p>
 <ul>
   <li><strong>📊 Summary</strong> — KPIs (Total Transfers, In Flight, Avg Cycle Time, Avg Turnaround, On-Time Ship Rate, <strong>Past Anticipated Ship</strong>, Cold Chain Items) plus charts: Volume by Status, Volume by Origin Location, Avg Turnaround by Origin.</li>
   <li><strong>📋 Detail</strong> — full per-transfer table with ID, patient, drugs, route, ship-to, status, type, anticipated ship date, created date. Sorted by anticipated ship date. Rows past their anticipated date and not shipped highlight red.</li>
+  <li><strong>📦 Packing Checklist</strong> — the shipping team's daily worksheet. See the dedicated <a href="#packing">Packing Checklist</a> section above for full instructions.</li>
 </ul>
-<p><strong>🖨 Print this report</strong> button (Detail mode only) opens a landscape printable letter page with the filtered list + filter summary at the top — perfect for walking the pharmacy with paper in hand to verify status.</p>
-<p><strong>📥 Export CSV</strong> in either mode downloads the filtered transfers with timestamped filename.</p>
+<p><strong>📄 Print / Save as PDF</strong> button (top-right) works in any mode — opens the browser print dialog where you can choose "Save as PDF" as the destination to export. Summary mode prints portrait, Detail and Packing Checklist print landscape.</p>
+<p><strong>📥 Export CSV</strong> downloads the filtered transfers with timestamped filename.</p>
 <p>Admins see every location's data; techs/managers see only their location's data automatically.</p>
 </section>
 
@@ -414,22 +478,35 @@ section { page-break-inside: avoid; }
 </section>
 
 <section id="fedex">
-<h2>FedEx Tracking — Automatic Match by Reference</h2>
-<p>You typically don't have to do anything here — the app handles tracking automatically as long as the WorldShip Customer Reference is set correctly when you generate the label (see Shipments section above).</p>
+<h2>FedEx Tracking — Auto, Manual, &amp; Click-through</h2>
+<p>You typically don't have to do anything here — the app handles tracking automatically as long as the WorldShip Customer Reference is set correctly when you generate the label. There's also a manual fallback for when the auto-match misses, and every tracking number in the app is a clickable link to FedEx's tracker.</p>
 
-<h3>How it works</h3>
+<h3>How auto-match works</h3>
 <ul>
   <li>A scheduled job runs once a day (12:00 UTC, ~7-8 AM ET)</li>
   <li>For every open transfer without tracking, the job queries the FedEx Track API by reference using the Transfer ID</li>
   <li>For every open bulk shipment without tracking, the job queries by the BULK ID</li>
   <li>Any match found: tracking number + ship date are written to the transfer/bulk. Status flips to <em>Shipped</em>.</li>
   <li>Bulk matches cascade — when a BULK ID matches, the tracking is applied to every transfer in that bulk</li>
+  <li>Every 15 minutes while you're on the Shipments tab, the app re-polls FedEx for live status updates on every active shipment. <em>Delivered</em> only flips on FedEx's strict "DL" code — "Out for delivery" or "Delivery delayed" do not falsely mark a package delivered.</li>
 </ul>
 
-<h3>Manual pull (Shipments tab → Pull from FedEx)</h3>
-<p>If you don't want to wait for the daily cron, click <strong>📦 Pull from FedEx</strong> on the Shipments tab to trigger the same lookup on demand. Results show what was matched. Same reference-based logic.</p>
+<h3>Manual pull on demand (Shipments tab → Pull from FedEx)</h3>
+<p>If you don't want to wait for the daily cron, click <strong>📦 Pull from FedEx</strong> on the Shipments tab to trigger the same lookup right now. Queries every open transfer + every open BULK shipment. Results show what was matched. <strong>Note:</strong> FedEx's reference index can lag the actual label by up to a day, so a same-day pull may miss; the daily cron re-tries the next morning automatically.</p>
 
-<div class="tip"><strong>The key thing:</strong> typing the Transfer ID or BULK ID into WorldShip's Customer Reference field is what makes auto-match work. If you forget, you can always paste a tracking # manually via Edit ship / tracking on the transfer or bulk shipment detail.</div>
+<h3>Manual tracking entry (when auto-match misses or you need it now)</h3>
+<p>Every bulk shipment modal has a FedEx Tracking row with an <strong>✏️ Edit</strong> (or <strong>+ Add tracking manually</strong>) button:</p>
+<ol>
+  <li>Open the bulk shipment from the Shipments tab.</li>
+  <li>Click ✏️ Edit on the FedEx Tracking row.</li>
+  <li>Paste the FedEx tracking number from WorldShip (10–22 digits).</li>
+  <li>The app validates, saves, and immediately queries FedEx for live status. If FedEx says it's already in transit / delivered, the shipment's status updates and the tracking cascades to all transfers in the bulk.</li>
+</ol>
+
+<h3>Clickable tracking links</h3>
+<p>Every tracking number shown anywhere in the app (Shipments list, Transfers list, transfer detail modal, Action Items, FedEx Pull results) is a clickable link that opens FedEx's public tracker in a new tab. No more copy/paste to FedEx.com.</p>
+
+<div class="tip"><strong>The key thing:</strong> typing the Transfer ID or BULK ID into WorldShip's <em>Customer Reference</em> field is what makes auto-match work. The Packing Checklist's barcode column lets staff scan instead of type. If you forget, you can still paste a tracking # manually via the bulk shipment modal.</div>
 </section>
 
 <section id="admin">
@@ -542,6 +619,18 @@ A: No, leave it blank. Generate the FedEx label in WorldShip with the <strong>BU
 
 <p><strong>Q: I forgot to type the Transfer ID / BULK ID in WorldShip — what now?</strong><br>
 A: Open the transfer (or bulk shipment) → Edit ship / tracking → paste the FedEx tracking number manually. It'll set the status to Shipped just like the auto-match would have.</p>
+
+<p><strong>Q: I checked off some Packing Checklist items. Will my teammates see my checks?</strong><br>
+A: Yes — checks live on the transfer record in the backend, not in your browser. Your teammates' checklists update within ~30 seconds of you clicking. A small green <strong>"✓ [your name]"</strong> appears under each box so anyone can see who packed which item. Same goes for the reverse — your view will pick up their checks within ~30 seconds.</p>
+
+<p><strong>Q: My Packing Checklist checks disappear at midnight — is that a bug?</strong><br>
+A: No, that's intentional. Checks are date-stamped, and the checklist only counts today's stamps. Yesterday's checks are kept in the audit history but don't show as "packed today" anymore — so each morning everyone starts fresh.</p>
+
+<p><strong>Q: An order is ready earlier than its anticipated ship date and I want to pack it today. Do I have to edit the transfer?</strong><br>
+A: No — use the <strong>📥 Add Order to Today</strong> button on the Packing Checklist. Search by patient or transfer ID, click <em>Set to Today</em>, and it appears on the checklist immediately. The transfer's anticipated ship date is updated (and the origin pharmacy gets the standard Teams notification for the date change).</p>
+
+<p><strong>Q: The app keeps loading me back into the Transfers tab when I refresh — can I land on a different one?</strong><br>
+A: Yes, that's been fixed. Whatever tab you were on when you refresh, the app now restores. Click any tab once and it becomes your new default until you click another.</p>
 
 <p><strong>Q: Where do I see all refills for a patient/Rx?</strong><br>
 A: Open any transfer in the chain → the <strong>Rx History</strong> section shows the original and every refill in order. Click Open on any row to switch the modal to that entry.</p>
