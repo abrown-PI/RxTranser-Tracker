@@ -1581,12 +1581,25 @@ function renderStats() {
   const f = state.reportFilter;
   if (!Array.isArray(f.checklistLocations)) f.checklistLocations = [];
 
-  // For a transfer, "destination" is the pharmacy that will physically receive the package.
-  // For Patient ship-to, there's no destination pharmacy (skip from packing checklist).
+  // For a transfer, "destination" is where the package is headed: a pharmacy for pharmacy ship-to /
+  // pickup orders, a patient-direct group, or Lancaster delivery. None mean it doesn't belong
+  // in a packing checklist at all (no anticipated routing).
+  const CHK_PATIENT = 'Patient (Direct Ship)';
+  const CHK_LANCASTER = 'Lancaster Delivery';
   function destinationLocationFor(t) {
     if (t.pickupAtPharmacy && t.pickupLocation) return t.pickupLocation;
     if (t.shipTo === 'Pharmacy') return t.originLocation;
+    if (t.shipTo === 'Patient') return CHK_PATIENT;
+    if (t.shipTo === 'Delivery-Lancaster') return CHK_LANCASTER;
     return null;
+  }
+  // What kind of ship-to is this row? Used for the per-row indicator in the checklist.
+  function shipToLabelFor(t) {
+    if (t.pickupAtPharmacy) return '📍 Pickup';
+    if (t.shipTo === 'Pharmacy') return '🏪 Pharmacy';
+    if (t.shipTo === 'Patient') return '👤 Patient';
+    if (t.shipTo === 'Delivery-Lancaster') return '🚚 Lancaster';
+    return escapeHtml(t.shipTo || '—');
   }
 
   // Apply filters
@@ -1698,13 +1711,13 @@ function renderStats() {
       </div>
     `;
   } else if (f.mode === 'checklist') {
-    // Packing Checklist mode — shipping team picks which destination pharmacies they're packing
-    // for today, and the report groups every anticipated transfer by destination so each location's
-    // box has its own checklist. Checkboxes are physical print-and-tick — not stored.
+    // Packing Checklist mode — pick destinations to pack for; output groups by destination
+    // (including a Patient-Direct group and Lancaster Delivery). Print uses pure B&W styles so
+    // it's photocopier-friendly; screen keeps color.
     const dateLabel = (f.antShipFrom || f.antShipTo)
       ? `Anticipated ship ${f.antShipFrom||'(any)'} → ${f.antShipTo||'(any)'}`
       : 'All anticipated ship dates';
-    // Build the destination multi-select row. State lives in f.checklistLocations.
+    const allDestOptions = [...LOCATIONS, CHK_PATIENT, CHK_LANCASTER];
     const selectedSet = new Set(f.checklistLocations);
     const locsRow = `
       <div class="card" style="margin-bottom:14px"><div class="card-body" style="padding:10px 14px">
@@ -1716,72 +1729,66 @@ function renderStats() {
           </div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px 14px">
-          ${LOCATIONS.map(l => `<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:14px;background:${selectedSet.has(l)?'var(--primary-bg)':'white'};cursor:pointer">
+          ${allDestOptions.map(l => `<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:14px;background:${selectedSet.has(l)?'var(--primary-bg)':'white'};cursor:pointer">
             <input type="checkbox" class="chk-loc" value="${escapeHtml(l)}" ${selectedSet.has(l)?'checked':''} />
             ${escapeHtml(l)}
           </label>`).join('')}
         </div>
-        <div class="item-sub" style="margin-top:6px;font-size:11px">Destination = receiving pharmacy (Pharmacy ship-to uses origin location; pickup-mode orders use pickup location). Tip: combine with the "Ant ship from/to" date filter above to scope to a single day.</div>
+        <div class="item-sub" style="margin-top:6px;font-size:11px">Pharmacy ship-tos group under the origin pharmacy. Pickup orders group under the pickup location. Patient ship-tos go to <em>Patient (Direct Ship)</em>. Combine with the "Ant ship from/to" date filter above to scope to one day.</div>
       </div></div>
     `;
-    // Filter to transfers that have a real destination pharmacy and (if any chosen) match the selected destinations.
     const inScopeChk = scope.filter(t => {
       const dest = destinationLocationFor(t);
       if (!dest) return false;
       if (selectedSet.size > 0 && !selectedSet.has(dest)) return false;
       return true;
     });
-    // Group by destination, sorted alphabetically; sort transfers within each group by patient name.
     const groups = {};
     inScopeChk.forEach(t => { const d = destinationLocationFor(t); (groups[d] = groups[d] || []).push(t); });
     Object.keys(groups).forEach(k => groups[k].sort((a,b) => (a.patientName||'').localeCompare(b.patientName||'')));
     const sortedDests = Object.keys(groups).sort();
     const renderGroup = (dest) => {
       const items = groups[dest];
-      return `<div class="card chk-group" style="margin-bottom:14px;page-break-inside:avoid">
-        <div class="card-header" style="background:var(--primary);color:white;padding:10px 14px;font-size:14px">
-          📦 ${escapeHtml(dest)} <span style="opacity:.85;font-weight:400;font-size:12px;margin-left:8px">${items.length} order${items.length===1?'':'s'}</span>
+      return `<div class="chk-group">
+        <div class="chk-group-header">
+          📦 ${escapeHtml(dest)} <span class="chk-group-count">${items.length} order${items.length===1?'':'s'}</span>
         </div>
-        <div class="card-body" style="padding:0">
-          <table style="box-shadow:none;font-size:12px;width:100%;border-collapse:collapse">
-            <thead><tr style="background:var(--gray-100)">
-              <th style="padding:6px 8px;text-align:center;width:30px">✓</th>
-              <th style="padding:6px 8px;text-align:left">Patient</th>
-              <th style="padding:6px 8px;text-align:left">Drug(s) — Qty</th>
-              <th style="padding:6px 8px;text-align:left">Rx #</th>
-              <th style="padding:6px 8px;text-align:left">Type</th>
-              <th style="padding:6px 8px;text-align:left">Ant Ship</th>
-              <th style="padding:6px 8px;text-align:left">Notes</th>
-            </tr></thead>
-            <tbody>
-              ${items.map(t => {
-                const itemsHtml = (t.items || []).map(i => `${escapeHtml(i.drug || '—')}${i.qty ? ' — ' + escapeHtml(i.qty) : ''}`).join('<br>');
-                const rxHtml = (t.items || []).map(i => escapeHtml(i.rxNumber || '—')).join('<br>');
-                const notes = [
-                  t.coldItem ? '❄ Cold' : '',
-                  t.pickupAtPharmacy ? '📍 Pickup' : '',
-                  (t.transferNotes || '').slice(0, 80)
-                ].filter(Boolean).join(' · ');
-                return `<tr style="border-top:1px solid var(--gray-200)">
-                  <td style="padding:8px 8px;text-align:center"><span style="display:inline-block;width:18px;height:18px;border:2px solid var(--gray-500);border-radius:3px"></span></td>
-                  <td style="padding:8px 8px"><strong>${escapeHtml(t.patientName)}</strong></td>
-                  <td style="padding:8px 8px;line-height:1.4">${itemsHtml || '—'}</td>
-                  <td style="padding:8px 8px;font-family:monospace;font-size:11px;line-height:1.4">${rxHtml}</td>
-                  <td style="padding:8px 8px">${(t.transferType==='Refill')?'<span class="badge badge-verified" style="font-size:10px">Refill</span>':'<span class="badge badge-new" style="font-size:10px">New</span>'}</td>
-                  <td style="padding:8px 8px;white-space:nowrap">${fmtDate(t.anticipatedShipDate)||'—'}</td>
-                  <td style="padding:8px 8px;font-size:11px;color:var(--gray-700)">${escapeHtml(notes)}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
+        <table class="chk-table">
+          <thead><tr>
+            <th class="chk-col-check">✓</th>
+            <th class="chk-col-patient">Patient</th>
+            <th class="chk-col-drug">Drug(s) — Qty</th>
+            <th class="chk-col-shipto">Ship To</th>
+            <th class="chk-col-type">Type</th>
+            <th class="chk-col-date">Ant Ship</th>
+            <th class="chk-col-notes">Notes</th>
+          </tr></thead>
+          <tbody>
+            ${items.map(t => {
+              const itemsHtml = (t.items || []).map(i => `${escapeHtml(i.drug || '—')}${i.qty ? ' — ' + escapeHtml(i.qty) : ''}`).join('<br>');
+              const notes = [
+                t.coldItem ? '❄ Cold' : '',
+                (t.transferNotes || '').slice(0, 60)
+              ].filter(Boolean).join(' · ');
+              return `<tr>
+                <td class="chk-col-check"><span class="chk-box"></span></td>
+                <td class="chk-col-patient"><strong>${escapeHtml(t.patientName)}</strong></td>
+                <td class="chk-col-drug">${itemsHtml || '—'}</td>
+                <td class="chk-col-shipto">${shipToLabelFor(t)}${t.pickupAtPharmacy && t.pickupLocation ? `<div class="chk-sub">@ ${escapeHtml(t.pickupLocation)}</div>` : ''}</td>
+                <td class="chk-col-type">${(t.transferType==='Refill') ? '<span class="chk-pill">Refill</span>' : '<span class="chk-pill">New</span>'}</td>
+                <td class="chk-col-date">${fmtDate(t.anticipatedShipDate)||'—'}</td>
+                <td class="chk-col-notes">${escapeHtml(notes)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
       </div>`;
     };
     bodyHtml = `
       ${locsRow}
-      <div id="rep-print-area">
-        <h3 style="margin:0 0 6px;color:var(--primary-dark)">Packing Checklist</h3>
-        <div class="item-sub" style="margin-bottom:12px">
+      <div id="rep-print-area" class="chk-print">
+        <h3 class="chk-title">Packing Checklist</h3>
+        <div class="chk-sub">
           ${dateLabel}${selectedSet.size?` · Destinations: ${[...selectedSet].sort().join(', ')}`:' · All destinations'} · ${inScopeChk.length} order${inScopeChk.length===1?'':'s'} across ${sortedDests.length} location${sortedDests.length===1?'':'s'} · Printed ${new Date().toLocaleString()}
         </div>
         ${sortedDests.length === 0
@@ -1837,7 +1844,47 @@ function renderStats() {
     `;
   }
 
+  // CSS for the Packing Checklist — drives the colored screen look + the B&W print look.
+  // Both share the same HTML; @media print overrides the screen styles.
+  const checklistCss = `<style>
+    .chk-print { color: #111; }
+    .chk-print .chk-title { color: var(--primary-dark); margin: 0 0 6px; font-size: 16px }
+    .chk-print .chk-sub { color: var(--gray-600); font-size: 11px; margin-bottom: 12px }
+    .chk-print .chk-group { margin-bottom: 14px; page-break-inside: avoid; border: 1px solid var(--gray-300); border-radius: 6px; overflow: hidden }
+    .chk-print .chk-group-header { background: var(--primary); color: white; padding: 10px 14px; font-size: 14px; font-weight: 700 }
+    .chk-print .chk-group-count { font-weight: 400; font-size: 12px; margin-left: 8px; opacity: .9 }
+    .chk-print .chk-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed }
+    .chk-print .chk-table thead tr { background: var(--gray-100) }
+    .chk-print .chk-table th { padding: 8px 6px; text-align: left; font-weight: 700; font-size: 11px; border-bottom: 1px solid var(--gray-300) }
+    .chk-print .chk-table td { padding: 8px 6px; vertical-align: top; border-top: 1px solid var(--gray-200); line-height: 1.35; word-wrap: break-word }
+    .chk-print .chk-col-check { width: 30px; text-align: center }
+    .chk-print .chk-col-patient { width: 13% }
+    .chk-print .chk-col-drug { width: 30% }
+    .chk-print .chk-col-shipto { width: 11% }
+    .chk-print .chk-col-type { width: 8% }
+    .chk-print .chk-col-date { width: 10%; white-space: nowrap }
+    .chk-print .chk-col-notes { width: 18%; font-size: 11px; color: var(--gray-700) }
+    .chk-print .chk-box { display: inline-block; width: 18px; height: 18px; border: 2px solid #333; border-radius: 3px; vertical-align: middle }
+    .chk-print .chk-pill { display: inline-block; padding: 1px 7px; font-size: 10px; font-weight: 600; border-radius: 8px; background: var(--primary-bg); color: var(--primary-dark); border: 1px solid var(--primary-light) }
+    .chk-print .chk-sub { color: var(--gray-500); font-size: 10px; font-style: italic; margin-top: 2px }
+    /* PRINT — pure B&W so the photocopier behaves and nothing relies on CSS vars */
+    @media print {
+      .chk-print { color: #000 !important }
+      .chk-print .chk-title { color: #000 !important }
+      .chk-print .chk-sub { color: #555 !important }
+      .chk-print .chk-group { border: 1.5px solid #000 !important; page-break-inside: avoid }
+      .chk-print .chk-group-header { background: #fff !important; color: #000 !important; border-bottom: 2px solid #000 !important; font-size: 15px }
+      .chk-print .chk-group-count { color: #555 !important; opacity: 1 !important }
+      .chk-print .chk-table thead tr { background: #f0f0f0 !important }
+      .chk-print .chk-table th { color: #000 !important; border-bottom: 1.5px solid #000 !important }
+      .chk-print .chk-table td { border-top: 1px solid #999 !important }
+      .chk-print .chk-box { border: 2px solid #000 !important; width: 16px; height: 16px }
+      .chk-print .chk-pill { background: #fff !important; color: #000 !important; border: 1px solid #000 !important }
+      .chk-print .chk-col-notes { color: #333 !important }
+    }
+  </style>`;
   root.innerHTML = `
+    ${f.mode === 'checklist' ? checklistCss : ''}
     <div class="page-header">
       <div class="page-title">Reports</div>
       <div style="display:flex;gap:8px">
@@ -1882,10 +1929,33 @@ function renderStats() {
     const w = window.open('', '_blank');
     const area = document.getElementById('rep-print-area');
     if (!w || !area) return;
-    const orientation = f.mode === 'detail' ? 'landscape' : 'portrait';
+    const orientation = f.mode === 'detail' || f.mode === 'checklist' ? 'landscape' : 'portrait';
     const title = f.mode === 'detail' ? 'Transfer Detail Report'
                 : f.mode === 'checklist' ? 'Packing Checklist'
                 : 'Transfer Summary Report';
+    // For checklist mode we use the dedicated B&W styles; other modes keep their colored layout.
+    const checklistPrintCss = f.mode === 'checklist' ? `
+      .chk-print { color: #000 }
+      .chk-print .chk-title { color: #000; margin: 0 0 6px; font-size: 16px }
+      .chk-print .chk-sub { color: #555; font-size: 11px; margin-bottom: 12px }
+      .chk-print .chk-group { margin-bottom: 14px; page-break-inside: avoid; border: 1.5px solid #000; border-radius: 4px; overflow: hidden }
+      .chk-print .chk-group-header { background: #fff; color: #000; padding: 8px 12px; font-size: 15px; font-weight: 700; border-bottom: 2px solid #000 }
+      .chk-print .chk-group-count { color: #555; font-weight: 400; font-size: 12px; margin-left: 8px }
+      .chk-print .chk-table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed }
+      .chk-print .chk-table thead tr { background: #f0f0f0 }
+      .chk-print .chk-table th { padding: 6px 5px; text-align: left; font-weight: 700; font-size: 10px; border-bottom: 1.5px solid #000; color: #000 }
+      .chk-print .chk-table td { padding: 8px 5px; vertical-align: top; border-top: 1px solid #999; line-height: 1.35; word-wrap: break-word; overflow-wrap: break-word; color: #000 }
+      .chk-print .chk-col-check { width: 28px; text-align: center }
+      .chk-print .chk-col-patient { width: 13% }
+      .chk-print .chk-col-drug { width: 30% }
+      .chk-print .chk-col-shipto { width: 11% }
+      .chk-print .chk-col-type { width: 8% }
+      .chk-print .chk-col-date { width: 10%; white-space: nowrap }
+      .chk-print .chk-col-notes { width: 18%; font-size: 10px; color: #333 }
+      .chk-print .chk-box { display: inline-block; width: 16px; height: 16px; border: 2px solid #000; border-radius: 3px; vertical-align: middle }
+      .chk-print .chk-pill { display: inline-block; padding: 1px 6px; font-size: 10px; font-weight: 600; border-radius: 8px; background: #fff; color: #000; border: 1px solid #000 }
+      .chk-print .chk-sub { color: #555; font-size: 10px; font-style: italic; margin-top: 2px }
+    ` : '';
     w.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
       <style>
         @page { size: letter ${orientation}; margin: 0.5in }
@@ -1903,6 +1973,7 @@ function renderStats() {
         .kpi-label { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: .04em }
         .kpi-value { font-size: 24px; font-weight: 700; color: #233f76 }
         .kpi-sub { color: #888; font-size: 10px; margin-top: 2px }
+        ${checklistPrintCss}
       </style></head><body>${area.innerHTML}
       <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
       </body></html>`);
