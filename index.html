@@ -1617,23 +1617,39 @@ function renderStats() {
     if (t.shipTo === 'Delivery-Lancaster') return 'Lancaster';
     return null;
   }
-  // localStorage helpers — per-day "packed" state for the checklist. Keyed by today's date
-  // so each new day starts fresh.
-  function packedKey() { return 'packing_' + todayLocal(); }
+  // "Packed today" state lives on each transfer (t.packedAt timestamp + t.packedBy name) so it
+  // syncs across all users and devices via the normal transfer save/load + 30s poll. A check
+  // counts as "today's check" only if t.packedAt is from today; yesterday's value is ignored,
+  // giving us automatic daily reset without a cron.
+  function isPackedToday(tid) {
+    const t = TRANSFERS.find(x => x.id === +tid);
+    if (!t || !t.packedAt) return false;
+    return String(t.packedAt).slice(0, 10) === todayLocal();
+  }
   function loadPackedSet() {
-    try { return new Set(JSON.parse(localStorage.getItem(packedKey()) || '[]')); }
-    catch { return new Set(); }
+    const today = todayLocal();
+    return new Set(TRANSFERS.filter(t => t.packedAt && String(t.packedAt).slice(0, 10) === today).map(t => String(t.id)));
   }
-  function isPackedToday(tid) { return loadPackedSet().has(String(tid)); }
-  function setPackedToday(tid, val) {
-    const s = loadPackedSet();
-    if (val) s.add(String(tid)); else s.delete(String(tid));
-    localStorage.setItem(packedKey(), JSON.stringify([...s]));
+  async function setPackedToday(tid, val) {
+    const t = TRANSFERS.find(x => x.id === +tid);
+    if (!t) return;
+    if (val) {
+      t.packedAt = new Date().toISOString();
+      t.packedBy = CURRENT_USER.name;
+    } else {
+      t.packedAt = null;
+      t.packedBy = null;
+    }
+    await apiUpdateTransfer(t);
   }
-  function clearPackedToday(tids) {
-    const s = loadPackedSet();
-    tids.forEach(t => s.delete(String(t)));
-    localStorage.setItem(packedKey(), JSON.stringify([...s]));
+  async function clearPackedToday(tids) {
+    for (const tid of tids) {
+      const t = TRANSFERS.find(x => x.id === +tid);
+      if (!t) continue;
+      t.packedAt = null;
+      t.packedBy = null;
+      await apiUpdateTransfer(t);
+    }
   }
   // What kind of ship-to is this row? Used for the per-row indicator in the checklist.
   function shipToLabelFor(t) {
@@ -1836,8 +1852,12 @@ function renderStats() {
                 (t.transferNotes || '').slice(0, 80)
               ].filter(Boolean).join(' · ');
               const isPacked = isPackedToday(t.id);
+              const packedBy = (isPacked && t.packedBy) ? `<div class="chk-packedby">✓ ${escapeHtml(t.packedBy)}</div>` : '';
               return `<tr class="chk-row${isPacked?' chk-row-packed':''}">
-                <td class="chk-col-check"><input type="checkbox" class="chk-input" data-tid="${t.id}" ${isPacked?'checked':''} /></td>
+                <td class="chk-col-check">
+                  <input type="checkbox" class="chk-input" data-tid="${t.id}" ${isPacked?'checked':''} />
+                  ${packedBy}
+                </td>
                 <td class="chk-col-patient"><strong>${escapeHtml(t.patientName)}</strong></td>
                 <td class="chk-col-drug">${itemsHtml || '—'}</td>
                 <td class="chk-col-type">${(t.transferType==='Refill') ? '<span class="chk-pill">Refill</span>' : '<span class="chk-pill">New</span>'}</td>
@@ -1925,6 +1945,7 @@ function renderStats() {
     .chk-print .chk-row-packed { background: var(--success-bg) }
     .chk-print .chk-row-packed td { color: var(--gray-600) }
     .chk-print .chk-input { width: 20px; height: 20px; cursor: pointer; margin: 0 }
+    .chk-print .chk-packedby { font-size: 9px; color: var(--success); margin-top: 2px; font-weight: 600; white-space: nowrap }
     .chk-print .chk-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed }
     .chk-print .chk-table thead tr { background: var(--gray-100) }
     .chk-print .chk-table th { padding: 8px 6px; text-align: left; font-weight: 700; font-size: 11px; border-bottom: 1px solid var(--gray-300) }
@@ -1956,6 +1977,7 @@ function renderStats() {
       .chk-print .chk-pill { background: #fff !important; color: #000 !important; border: 1px solid #000 !important }
       .chk-print .chk-col-notes { color: #333 !important }
       .chk-print .chk-create-btn { display: none !important }
+      .chk-print .chk-packedby { display: none !important }
       .chk-print .chk-row-packed { background: #f5f5f5 !important }
       .chk-print .chk-row-packed td { color: #555 !important }
     }
@@ -2040,11 +2062,11 @@ function renderStats() {
         } catch (e) { console.warn('barcode render failed', e); }
       });
     }
-    // Interactive checkbox: toggle "packed today" state and update row styling + the
-    // per-group "Create Shipment" button visibility.
+    // Interactive checkbox: toggles a "packed today" flag persisted on the transfer record
+    // (so every user sees the same state, with ~30s polling sync). After save, re-render.
     root.querySelectorAll('.chk-input[data-tid]').forEach(cb => {
-      cb.onchange = () => {
-        setPackedToday(cb.dataset.tid, cb.checked);
+      cb.onchange = async () => {
+        await setPackedToday(cb.dataset.tid, cb.checked);
         renderStats();
       };
     });
