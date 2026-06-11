@@ -5757,14 +5757,21 @@ function openFedexPullModal() {
         if (bulk) {
           bulk.trackingNumber = s.trackingNumber;
           if (s.shipDate) bulk.shipDate = s.shipDate;
-          if (s.deliveryDate) bulk.deliveredDate = String(s.deliveryDate).slice(0,10);
-          if (bulk.status === 'Pending') bulk.status = s.deliveryDate ? 'Delivered' : 'In Transit';
+          // Only mark deliveredDate when FedEx says ACTUAL_DELIVERY (statusCode DL).
+          // The estimatedDeliveryDate is just a scheduled window — never a real delivery.
+          const isDelivered = (s.statusCode || '').toUpperCase() === 'DL';
+          if (isDelivered && s.actualDeliveryDate) {
+            bulk.deliveredDate = String(s.actualDeliveryDate).slice(0,10);
+          }
+          if (bulk.status === 'Pending') bulk.status = isDelivered ? 'Delivered' : 'In Transit';
+          else if (isDelivered && bulk.status !== 'Received') bulk.status = 'Delivered';
           await apiUpdateShipment(bulk);
           for (const tid of (bulk.transferIds || [])) {
             const t = TRANSFERS.find(x => x.id === tid);
             if (!t) continue;
             t.trackingNumber = s.trackingNumber;
             if (s.shipDate) t.dateShipped = s.shipDate;
+            if (isDelivered && s.actualDeliveryDate && !t.dateReceivedByPatient) t.dateReceivedByPatient = String(s.actualDeliveryDate).slice(0,10);
             if (!['Shipped','Delivered','Received','Canceled'].includes(t.status)) t.status = 'Shipped';
             await apiUpdateTransfer(t);
           }
@@ -5805,8 +5812,11 @@ function openFedexPullModal() {
     state.loading = false;
     render();
     if (state.applied.length) {
-      // Re-render shipments tab in the background so the new statuses show up
-      setTimeout(() => { if (typeof renderShipments === 'function' && state.tab === 'shipments') renderShipments(); }, 100);
+      // Force-sync local state with backend so the polling refresh can't race-overwrite
+      // our just-applied changes with a stale fetch it kicked off before our mutations landed.
+      try { await pollRefreshShipments(); } catch (e) { console.warn('post-pull shipments refresh failed', e); }
+      try { await pollRefreshTransfers(); } catch (e) { console.warn('post-pull transfers refresh failed', e); }
+      setTimeout(() => { if (typeof renderShipments === 'function' && state.tab === 'shipments') renderShipments(); render(); }, 100);
     }
   };
 

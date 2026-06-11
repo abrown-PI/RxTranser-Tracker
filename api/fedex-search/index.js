@@ -97,14 +97,21 @@ module.exports = async function (context, req) {
         const latest = first.latestStatusDetail || {};
         const dates = first.dateAndTimes || [];
         const shipDate = (dates.find(d => d.type === 'ACTUAL_PICKUP') || dates.find(d => d.type === 'SHIP') || {}).dateTime || null;
-        const deliveryDate = (dates.find(d => d.type === 'ACTUAL_DELIVERY') || dates.find(d => d.type === 'ESTIMATED_DELIVERY') || {}).dateTime || null;
+        // Split actual vs estimated so the client doesn't show estimated-delivery as if it were
+        // a real delivered date. Real delivery only when ACTUAL_DELIVERY is present.
+        const actualDeliveryDate = (dates.find(d => d.type === 'ACTUAL_DELIVERY') || {}).dateTime || null;
+        const estimatedDeliveryDate = (dates.find(d => d.type === 'ESTIMATED_DELIVERY') || {}).dateTime || null;
         const recipientAddress = (first.recipientInformation && first.recipientInformation.address) || {};
         shipments.push({
           reference,
           found: true,
           trackingNumber,
           shipDate: shipDate ? String(shipDate).slice(0, 10) : null,
-          deliveryDate,
+          actualDeliveryDate,
+          estimatedDeliveryDate,
+          // Back-compat alias — older client code reads `deliveryDate` and treats it as actual.
+          // Only populated when the package is actually delivered.
+          deliveryDate: actualDeliveryDate,
           status: latest.statusByLocale || latest.description || latest.code || 'Unknown',
           statusCode: latest.code || null,
           recipient: {
