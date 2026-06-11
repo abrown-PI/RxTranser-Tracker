@@ -1572,12 +1572,22 @@ function batchPrintTransfers(ids) {
 function renderStats() {
   const root = document.getElementById('view-stats');
   if (!state.reportFilter) state.reportFilter = {
-    mode: 'summary', // 'summary' or 'detail'
+    mode: 'summary', // 'summary' | 'detail' | 'checklist'
     origin: '', fill: '', status: '', type: '', shipTo: '',
     createdFrom: '', createdTo: '',
-    antShipFrom: '', antShipTo: ''
+    antShipFrom: '', antShipTo: '',
+    checklistLocations: [] // multi-select destinations for packing checklist mode
   };
   const f = state.reportFilter;
+  if (!Array.isArray(f.checklistLocations)) f.checklistLocations = [];
+
+  // For a transfer, "destination" is the pharmacy that will physically receive the package.
+  // For Patient ship-to, there's no destination pharmacy (skip from packing checklist).
+  function destinationLocationFor(t) {
+    if (t.pickupAtPharmacy && t.pickupLocation) return t.pickupLocation;
+    if (t.shipTo === 'Pharmacy') return t.originLocation;
+    return null;
+  }
 
   // Apply filters
   const scope = visibleTransfers().filter(t => {
@@ -1620,6 +1630,7 @@ function renderStats() {
     <div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:2px solid var(--gray-200);padding-bottom:0">
       <button class="rep-tab ${f.mode==='summary'?'active':''}" data-mode="summary" style="padding:8px 16px;border:0;background:${f.mode==='summary'?'var(--primary)':'transparent'};color:${f.mode==='summary'?'white':'var(--gray-700)'};border-radius:6px 6px 0 0;font-weight:600;cursor:pointer">📊 Summary</button>
       <button class="rep-tab ${f.mode==='detail'?'active':''}" data-mode="detail" style="padding:8px 16px;border:0;background:${f.mode==='detail'?'var(--primary)':'transparent'};color:${f.mode==='detail'?'white':'var(--gray-700)'};border-radius:6px 6px 0 0;font-weight:600;cursor:pointer">📋 Detail (${scope.length} transfers)</button>
+      <button class="rep-tab ${f.mode==='checklist'?'active':''}" data-mode="checklist" style="padding:8px 16px;border:0;background:${f.mode==='checklist'?'var(--primary)':'transparent'};color:${f.mode==='checklist'?'white':'var(--gray-700)'};border-radius:6px 6px 0 0;font-weight:600;cursor:pointer">📦 Packing Checklist</button>
     </div>
   `;
 
@@ -1684,6 +1695,98 @@ function renderStats() {
           ${Object.entries(tatByOrigin).sort((a,b)=>a[1].reduce((s,n)=>s+n,0)/a[1].length - b[1].reduce((s,n)=>s+n,0)/b[1].length).map(([loc, arr]) => `<tr><td><strong>${escapeHtml(loc)}</strong></td><td>${(arr.reduce((s,n)=>s+n,0)/arr.length).toFixed(1)}</td><td>${arr.length}</td></tr>`).join('')}
         </tbody></table>`}
       </div></div>
+      </div>
+    `;
+  } else if (f.mode === 'checklist') {
+    // Packing Checklist mode — shipping team picks which destination pharmacies they're packing
+    // for today, and the report groups every anticipated transfer by destination so each location's
+    // box has its own checklist. Checkboxes are physical print-and-tick — not stored.
+    const dateLabel = (f.antShipFrom || f.antShipTo)
+      ? `Anticipated ship ${f.antShipFrom||'(any)'} → ${f.antShipTo||'(any)'}`
+      : 'All anticipated ship dates';
+    // Build the destination multi-select row. State lives in f.checklistLocations.
+    const selectedSet = new Set(f.checklistLocations);
+    const locsRow = `
+      <div class="card" style="margin-bottom:14px"><div class="card-body" style="padding:10px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-weight:600;font-size:12px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.04em">Destinations to pack (${selectedSet.size} selected)</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm" id="chk-all" style="padding:2px 8px;font-size:11px">Select all</button>
+            <button class="btn btn-secondary btn-sm" id="chk-none" style="padding:2px 8px;font-size:11px">Clear</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 14px">
+          ${LOCATIONS.map(l => `<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:14px;background:${selectedSet.has(l)?'var(--primary-bg)':'white'};cursor:pointer">
+            <input type="checkbox" class="chk-loc" value="${escapeHtml(l)}" ${selectedSet.has(l)?'checked':''} />
+            ${escapeHtml(l)}
+          </label>`).join('')}
+        </div>
+        <div class="item-sub" style="margin-top:6px;font-size:11px">Destination = receiving pharmacy (Pharmacy ship-to uses origin location; pickup-mode orders use pickup location). Tip: combine with the "Ant ship from/to" date filter above to scope to a single day.</div>
+      </div></div>
+    `;
+    // Filter to transfers that have a real destination pharmacy and (if any chosen) match the selected destinations.
+    const inScopeChk = scope.filter(t => {
+      const dest = destinationLocationFor(t);
+      if (!dest) return false;
+      if (selectedSet.size > 0 && !selectedSet.has(dest)) return false;
+      return true;
+    });
+    // Group by destination, sorted alphabetically; sort transfers within each group by patient name.
+    const groups = {};
+    inScopeChk.forEach(t => { const d = destinationLocationFor(t); (groups[d] = groups[d] || []).push(t); });
+    Object.keys(groups).forEach(k => groups[k].sort((a,b) => (a.patientName||'').localeCompare(b.patientName||'')));
+    const sortedDests = Object.keys(groups).sort();
+    const renderGroup = (dest) => {
+      const items = groups[dest];
+      return `<div class="card chk-group" style="margin-bottom:14px;page-break-inside:avoid">
+        <div class="card-header" style="background:var(--primary);color:white;padding:10px 14px;font-size:14px">
+          📦 ${escapeHtml(dest)} <span style="opacity:.85;font-weight:400;font-size:12px;margin-left:8px">${items.length} order${items.length===1?'':'s'}</span>
+        </div>
+        <div class="card-body" style="padding:0">
+          <table style="box-shadow:none;font-size:12px;width:100%;border-collapse:collapse">
+            <thead><tr style="background:var(--gray-100)">
+              <th style="padding:6px 8px;text-align:center;width:30px">✓</th>
+              <th style="padding:6px 8px;text-align:left">Patient</th>
+              <th style="padding:6px 8px;text-align:left">Drug(s) — Qty</th>
+              <th style="padding:6px 8px;text-align:left">Rx #</th>
+              <th style="padding:6px 8px;text-align:left">Type</th>
+              <th style="padding:6px 8px;text-align:left">Ant Ship</th>
+              <th style="padding:6px 8px;text-align:left">Notes</th>
+            </tr></thead>
+            <tbody>
+              ${items.map(t => {
+                const itemsHtml = (t.items || []).map(i => `${escapeHtml(i.drug || '—')}${i.qty ? ' — ' + escapeHtml(i.qty) : ''}`).join('<br>');
+                const rxHtml = (t.items || []).map(i => escapeHtml(i.rxNumber || '—')).join('<br>');
+                const notes = [
+                  t.coldItem ? '❄ Cold' : '',
+                  t.pickupAtPharmacy ? '📍 Pickup' : '',
+                  (t.transferNotes || '').slice(0, 80)
+                ].filter(Boolean).join(' · ');
+                return `<tr style="border-top:1px solid var(--gray-200)">
+                  <td style="padding:8px 8px;text-align:center"><span style="display:inline-block;width:18px;height:18px;border:2px solid var(--gray-500);border-radius:3px"></span></td>
+                  <td style="padding:8px 8px"><strong>${escapeHtml(t.patientName)}</strong></td>
+                  <td style="padding:8px 8px;line-height:1.4">${itemsHtml || '—'}</td>
+                  <td style="padding:8px 8px;font-family:monospace;font-size:11px;line-height:1.4">${rxHtml}</td>
+                  <td style="padding:8px 8px">${(t.transferType==='Refill')?'<span class="badge badge-verified" style="font-size:10px">Refill</span>':'<span class="badge badge-new" style="font-size:10px">New</span>'}</td>
+                  <td style="padding:8px 8px;white-space:nowrap">${fmtDate(t.anticipatedShipDate)||'—'}</td>
+                  <td style="padding:8px 8px;font-size:11px;color:var(--gray-700)">${escapeHtml(notes)}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    };
+    bodyHtml = `
+      ${locsRow}
+      <div id="rep-print-area">
+        <h3 style="margin:0 0 6px;color:var(--primary-dark)">Packing Checklist</h3>
+        <div class="item-sub" style="margin-bottom:12px">
+          ${dateLabel}${selectedSet.size?` · Destinations: ${[...selectedSet].sort().join(', ')}`:' · All destinations'} · ${inScopeChk.length} order${inScopeChk.length===1?'':'s'} across ${sortedDests.length} location${sortedDests.length===1?'':'s'} · Printed ${new Date().toLocaleString()}
+        </div>
+        ${sortedDests.length === 0
+          ? '<div class="empty" style="padding:20px"><h3>No orders match — pick a date range and at least one destination</h3></div>'
+          : sortedDests.map(renderGroup).join('')}
       </div>
     `;
   } else {
@@ -1753,10 +1856,23 @@ function renderStats() {
     if (el) el.onchange = () => { state.reportFilter[k] = el.value; renderStats(); };
   });
   document.getElementById('rep-clear').onclick = () => {
-    Object.assign(state.reportFilter, { origin:'', fill:'', status:'', type:'', shipTo:'', createdFrom:'', createdTo:'', antShipFrom:'', antShipTo:'' });
+    Object.assign(state.reportFilter, { origin:'', fill:'', status:'', type:'', shipTo:'', createdFrom:'', createdTo:'', antShipFrom:'', antShipTo:'', checklistLocations: [] });
     renderStats();
   };
   root.querySelectorAll('.rep-tab').forEach(b => b.onclick = () => { state.reportFilter.mode = b.dataset.mode; renderStats(); });
+  // Packing Checklist — destination multi-select handlers
+  if (f.mode === 'checklist') {
+    root.querySelectorAll('.chk-loc').forEach(cb => cb.onchange = () => {
+      const set = new Set(state.reportFilter.checklistLocations);
+      if (cb.checked) set.add(cb.value); else set.delete(cb.value);
+      state.reportFilter.checklistLocations = [...set];
+      renderStats();
+    });
+    const allBtn = document.getElementById('chk-all');
+    if (allBtn) allBtn.onclick = () => { state.reportFilter.checklistLocations = [...LOCATIONS]; renderStats(); };
+    const noneBtn = document.getElementById('chk-none');
+    if (noneBtn) noneBtn.onclick = () => { state.reportFilter.checklistLocations = []; renderStats(); };
+  }
 
   // Print/PDF — works for both summary and detail modes. Opens a new window with the
   // report area extracted, then auto-fires window.print(). User picks "Save as PDF" as
@@ -1767,7 +1883,9 @@ function renderStats() {
     const area = document.getElementById('rep-print-area');
     if (!w || !area) return;
     const orientation = f.mode === 'detail' ? 'landscape' : 'portrait';
-    const title = f.mode === 'detail' ? 'Transfer Detail Report' : 'Transfer Summary Report';
+    const title = f.mode === 'detail' ? 'Transfer Detail Report'
+                : f.mode === 'checklist' ? 'Packing Checklist'
+                : 'Transfer Summary Report';
     w.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
       <style>
         @page { size: letter ${orientation}; margin: 0.5in }
