@@ -272,6 +272,9 @@ if (window.pdfjsLib) {
 // MOCK DATA — replace with SharePoint API calls later
 // =====================================================================
 const LOCATIONS = ['Erie', 'Lancaster', 'Greenville', 'Houston', 'Tucson', 'Flower Mound', 'Denton', 'Corinth', 'Jamestown', 'Virginia Beach', 'Seminole'];
+// Pseudo-destination label for the Packing Checklist (used in both Reports and the Shipments
+// shortcut button). Patient ship-tos group under this label since they have no pharmacy destination.
+const CHK_PATIENT = 'Patient (Direct Ship)';
 
 // Short pharmacy codes used in bulk shipment IDs (BULK-YYYYMMDD-CODE-NNN).
 // Sourced from the canonical PI pharmacy roster.
@@ -1593,7 +1596,6 @@ function renderStats() {
   // For a transfer, "destination" is where the package is headed: a pharmacy for pharmacy ship-to /
   // pickup orders, a patient-direct group, or Lancaster delivery. None mean it doesn't belong
   // in a packing checklist at all (no anticipated routing).
-  const CHK_PATIENT = 'Patient (Direct Ship)';
   // Lancaster Delivery items ship in the regular Lancaster pharmacy bulk box — the difference
   // is just that Lancaster will deliver them locally to the patient (vs. patient pickup at the
   // pharmacy). Same box, flagged as 🚚 Delivery on the row + packing slip.
