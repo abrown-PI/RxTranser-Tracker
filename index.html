@@ -239,7 +239,7 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 <div id="modalRoot"></div>
 
 <!-- Sign-in gate overlay: blocks app access until auth completes. Hidden after sign-in. -->
-<div id="authGate" style="display:flex;position:fixed;inset:0;background:linear-gradient(135deg,var(--primary-darker),var(--primary-dark));z-index:9999;align-items:center;justify-content:center;flex-direction:column;color:white;padding:20px">
+<div id="authGate" style="display:none;position:fixed;inset:0;background:linear-gradient(135deg,var(--primary-darker),var(--primary-dark));z-index:9999;align-items:center;justify-content:center;flex-direction:column;color:white;padding:20px">
   <img src="logo.png" alt="PI" style="height:80px;margin-bottom:12px;filter:brightness(1.1)" />
   <div style="font-size:16px;font-weight:500;opacity:.9;margin-bottom:24px;letter-spacing:.02em">Inter-Pharmacy Transfer Tracker</div>
   <div style="background:rgba(255,255,255,.1);padding:24px 32px;border-radius:12px;backdrop-filter:blur(8px);text-align:center;max-width:420px;width:100%">
@@ -6548,15 +6548,23 @@ async function initAuth() {
   document.getElementById('signInBtn').onclick = () => doSignIn(m);
   document.getElementById('gateSignInBtn').onclick = () => doSignIn(m);
 
+  // Safety: if init stalls or fails before we can decide, show the gate so the user can act.
+  // Hidden by default (so cached MSAL users don't see a flash on refresh); this catches edge
+  // cases where MSAL itself never resolves.
+  const _gateFallback = setTimeout(() => { if (!CURRENT_USER || !CURRENT_USER.email) showAuthGate(); }, 5000);
+
   try { await m.initialize(); } catch (e) { console.warn('msal initialize failed', e); }
   try { await m.handleRedirectPromise(); } catch (e) { console.warn('handleRedirectPromise', e); }
   try { await loadAdminEmails(); } catch (e) { console.warn('loadAdminEmails failed', e); }
   const accounts = m.getAllAccounts();
   if (accounts.length > 0) {
-    try { await applyMsalAccount(accounts[0]); hideAuthGate(); }
-    catch (e) { console.warn('applyMsalAccount failed during auto sign-in — staying on auth gate', e); showAuthGate(); }
+    try { await applyMsalAccount(accounts[0]); clearTimeout(_gateFallback); hideAuthGate(); }
+    catch (e) { console.warn('applyMsalAccount failed during auto sign-in — staying on auth gate', e); clearTimeout(_gateFallback); showAuthGate(); }
   } else if (!localHint) {
+    clearTimeout(_gateFallback);
     showAuthGate();
+  } else {
+    clearTimeout(_gateFallback); // local sign-in path will handle this on its own
   }
   document.getElementById('signOutBtn').onclick = async () => {
     sessionStorage.removeItem('localUserHint');
