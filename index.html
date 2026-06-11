@@ -4426,7 +4426,10 @@ function openShipment(id) {
         const res = (data.results || [])[0];
         if (res) {
           const code = (res.statusCode || '').toUpperCase();
-          if (code === 'DL' || /DELIVER/i.test(res.status || '')) {
+          // ONLY treat as Delivered if FedEx's status code is 'DL'. Avoid matching status
+          // text with "deliver" in it ("Out for delivery", "Estimated delivery", "Delivery
+          // delayed") which would otherwise misclassify in-flight or exception packages.
+          if (code === 'DL') {
             s.status = 'Delivered';
             if (res.deliveryDate) s.deliveredDate = res.deliveryDate.slice(0,10);
           } else if (code) {
@@ -5830,9 +5833,10 @@ async function refreshActiveTracking() {
     (data.results || []).forEach(res => {
       const s = SHIPMENTS.find(x => x.trackingNumber && x.trackingNumber.replace(/\s+/g,'') === res.trackingNumber);
       if (!s) return;
-      // Map FedEx status codes to our internal shipment status set
+      // Map FedEx status codes to our internal shipment status set. Strict 'DL' check —
+      // text like "Out for delivery" or "Delivery delayed" should NOT flip to Delivered.
       const code = (res.statusCode || '').toUpperCase();
-      if (code === 'DL' || /DELIVER/i.test(res.status)) {
+      if (code === 'DL') {
         s.status = 'Delivered';
         if (res.deliveryDate) s.deliveredDate = res.deliveryDate.slice(0,10);
         // Cascade to linked transfers
