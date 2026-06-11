@@ -1790,10 +1790,13 @@ function renderStats() {
         <div class="item-sub" style="margin-top:6px;font-size:11px">Pharmacy ship-tos group under the origin pharmacy. Pickup orders group under the pickup location. Patient ship-tos go to <em>Patient (Direct Ship)</em>. <em>Lancaster Delivery</em> items ship in the regular Lancaster bulk box, flagged as 🚚 Delivery on the slip.</div>
       </div></div>
     `;
+    // Only orders that still need to ship: drop anything already Shipped/Delivered/Received/Canceled.
+    const SHIPPED_STATUSES = ['Shipped', 'Delivered', 'Received', 'Canceled'];
     const inScopeChk = scope.filter(t => {
       const dest = destinationLocationFor(t);
       if (!dest) return false;
       if (selectedSet.size > 0 && !selectedSet.has(dest)) return false;
+      if (SHIPPED_STATUSES.includes(t.status)) return false;
       return true;
     });
     const groups = {};
@@ -1804,8 +1807,9 @@ function renderStats() {
       const items = groups[dest];
       const packedSet = loadPackedSet();
       const packedItems = items.filter(t => packedSet.has(String(t.id)));
-      // Pharmacy destinations can produce a BULK shipment; Patient and Lancaster groups can't.
-      const isPharmacyDest = dest !== CHK_PATIENT && dest !== CHK_LANCASTER && LOCATIONS.includes(dest);
+      // Pharmacy destinations can produce a BULK shipment; the Patient (Direct Ship) group can't
+      // (each patient-direct goes out as its own FedEx package).
+      const isPharmacyDest = dest !== CHK_PATIENT && LOCATIONS.includes(dest);
       const canCreate = isPharmacyDest && packedItems.length > 0;
       return `<div class="chk-group" data-group-dest="${escapeHtml(dest)}">
         <div class="chk-group-header">
