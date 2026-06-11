@@ -1592,6 +1592,93 @@ function batchPrintTransfers(ids) {
   });
 }
 
+// Quick-add picker for the Packing Checklist: find an open transfer whose anticipated ship
+// date isn't today, set it to today, and have it show up on the checklist. Used when an
+// order is ready earlier than originally planned.
+function openAddToTodayPicker() {
+  const root = document.getElementById('modalRoot');
+  const today = todayLocal();
+  const state2 = { query: '' };
+  const SHIPPED_STATUSES = ['Shipped', 'Delivered', 'Received', 'Canceled'];
+  const close = () => { root.innerHTML = ''; };
+  const render = () => {
+    // Eligible: transfer is not in a shipped state AND its ant ship date isn't already today
+    // AND it has a destination that fits in the checklist (drops Patient if useful — but
+    // patient-direct can also need to be bumped early so include those too).
+    const q = state2.query.trim().toLowerCase();
+    const eligible = TRANSFERS.filter(t => {
+      if (SHIPPED_STATUSES.includes(t.status)) return false;
+      if ((t.anticipatedShipDate || '').slice(0,10) === today) return false;
+      if (q) {
+        const hay = [
+          t.patientName, t.patientFirstName, t.patientLastName,
+          String(t.id),
+          (t.items||[]).map(i => i.drug+' '+i.rxNumber).join(' '),
+          t.originLocation, t.fillLocation
+        ].join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }).slice(0, 50);
+    root.innerHTML = `<div class="modal-overlay" id="atpOverlay"><div class="modal" style="max-width:760px">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">📥 Add Order to Today's Packing List</div>
+          <div class="item-sub">Find an open transfer; we'll bump its anticipated ship date to today so it shows in the checklist.</div>
+        </div>
+        <button class="modal-close" id="atpClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input id="atpSearch" placeholder="Search by patient, transfer ID, drug, Rx#, or location…" value="${escapeHtml(state2.query)}" style="width:100%;padding:10px 12px;font-size:14px;border:1px solid var(--gray-300);border-radius:6px;margin-bottom:10px" autofocus />
+        <div class="item-sub" style="font-size:11px;margin-bottom:10px">${eligible.length} open transfer${eligible.length===1?'':'s'} match${eligible.length===1?'es':''} (showing first 50).</div>
+        ${eligible.length === 0
+          ? '<div class="empty" style="padding:20px"><h3>No matching transfers</h3><p>Try a different search.</p></div>'
+          : `<table style="box-shadow:none;font-size:13px;width:100%"><thead><tr>
+              <th style="padding:6px 8px;text-align:left">Patient</th>
+              <th style="padding:6px 8px;text-align:left">Drug</th>
+              <th style="padding:6px 8px;text-align:left">From → Fill</th>
+              <th style="padding:6px 8px;text-align:left">Status</th>
+              <th style="padding:6px 8px;text-align:left">Ant Ship</th>
+              <th style="padding:6px 8px"></th>
+            </tr></thead><tbody>
+              ${eligible.map(t => {
+                const drugs = (t.items||[]).map(i => i.drug).filter(Boolean).join(', ').slice(0,60);
+                return `<tr>
+                  <td style="padding:6px 8px"><strong>${escapeHtml(t.patientName||'(unnamed)')}</strong> <span class="item-sub">#${t.id}</span></td>
+                  <td style="padding:6px 8px">${escapeHtml(drugs||'—')}</td>
+                  <td style="padding:6px 8px">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+                  <td style="padding:6px 8px"><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
+                  <td style="padding:6px 8px">${fmtDate(t.anticipatedShipDate)||'—'}</td>
+                  <td style="padding:6px 8px;text-align:right">
+                    <button class="btn btn-primary btn-sm" data-add-tid="${t.id}" style="padding:3px 10px;font-size:12px">📅 Set to Today</button>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody></table>`
+        }
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="atpCancel">Close</button>
+      </div>
+    </div></div>`;
+    document.getElementById('atpClose').onclick = close;
+    document.getElementById('atpCancel').onclick = close;
+    document.getElementById('atpOverlay').onclick = e => { if (e.target.id === 'atpOverlay') close(); };
+    const search = document.getElementById('atpSearch');
+    search.oninput = () => { state2.query = search.value; render(); search.focus(); search.setSelectionRange(state2.query.length, state2.query.length); };
+    root.querySelectorAll('[data-add-tid]').forEach(b => b.onclick = async () => {
+      const tid = +b.dataset.addTid;
+      const t = TRANSFERS.find(x => x.id === tid);
+      if (!t) return;
+      t.anticipatedShipDate = today;
+      await apiUpdateTransfer(t);
+      close();
+      renderStats();
+    });
+  };
+  render();
+}
+
 function renderStats() {
   const root = document.getElementById('view-stats');
   if (!state.reportFilter) state.reportFilter = {
@@ -1781,11 +1868,13 @@ function renderStats() {
       <div class="card" style="margin-bottom:14px"><div class="card-body" style="padding:10px 14px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
           <div style="font-weight:600;font-size:12px;color:var(--gray-700);text-transform:uppercase;letter-spacing:.04em">Ship date</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <button class="btn btn-primary btn-sm" id="chk-today" style="padding:3px 12px;font-size:12px">📅 Today</button>
             <button class="btn btn-secondary btn-sm" id="chk-tomorrow" style="padding:3px 12px;font-size:12px">Tomorrow</button>
             <button class="btn btn-secondary btn-sm" id="chk-week" style="padding:3px 12px;font-size:12px">Next 7 days</button>
             <button class="btn btn-secondary btn-sm" id="chk-cleardate" style="padding:3px 12px;font-size:12px">All dates</button>
+            <span style="border-left:1px solid var(--gray-300);height:22px;margin:0 4px"></span>
+            <button class="btn btn-primary btn-sm" id="chk-addToday" style="padding:3px 12px;font-size:12px;background:var(--success);border-color:var(--success)" title="Find an open transfer whose ship date isn't today and bump it onto today's list">📥 Add Order to Today</button>
           </div>
           <div class="item-sub" style="font-size:11px;color:var(--gray-600);flex-basis:100%;text-align:right;margin-top:-2px">${f.antShipFrom||f.antShipTo?`Currently: ${f.antShipFrom||'(any)'} → ${f.antShipTo||'(any)'}`:'No date filter set'}</div>
         </div>
@@ -2051,6 +2140,8 @@ function renderStats() {
       state.reportFilter.antShipTo = '';
       renderStats();
     };
+    const addTodayBtn = document.getElementById('chk-addToday');
+    if (addTodayBtn) addTodayBtn.onclick = () => openAddToTodayPicker();
     // Render barcodes for every Transfer ID in the checklist. Code128 plays well with
     // FedEx WorldShip's barcode scanner — focus the Customer Reference field, scan, done.
     if (window.JsBarcode) {
