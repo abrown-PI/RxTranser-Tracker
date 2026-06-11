@@ -612,6 +612,12 @@ function docList(files) {
     return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--primary)">${escapeHtml(f.name)}</a>`;
   }).join(', ');
 }
+// FedEx tracking link helper. Opens FedEx's public tracker in a new tab.
+function fedexTrackLink(tn, fallback) {
+  const t = String(tn || '').replace(/\s+/g, '');
+  if (!t) return fallback === undefined ? '—' : fallback;
+  return `<a href="https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(t)}" target="_blank" rel="noopener" title="Track on fedex.com" style="color:var(--primary);text-decoration:underline">${escapeHtml(t)}</a>`;
+}
 
 // Smarter doc list for the transfer detail modal: if pkSheets/hardCopies entries are
 // metadata-only (typical for bulk-uploaded transfers), fall back to clickable links to
@@ -1168,7 +1174,7 @@ function renderTransfers() {
             <td>${fmtDate(t.createdAt)}</td>
             <td>${fmtDate(t.anticipatedShipDate)}</td>
             <td>${fmtDate(t.dateShipped)}</td>
-            <td>${escapeHtml(t.trackingNumber||'—')}</td>
+            <td onclick="event.stopPropagation()">${fedexTrackLink(t.trackingNumber)}</td>
             <td onclick="event.stopPropagation()" style="white-space:nowrap">
               <button class="btn btn-secondary btn-sm" data-view-tx="${t.id}" title="View transfer details" style="padding:3px 7px;font-size:11px">👁 View</button>
               <button class="btn btn-secondary btn-sm" data-edit-tx="${t.id}" title="Edit transfer" style="padding:3px 7px;font-size:11px">✏️ Edit</button>
@@ -1391,7 +1397,7 @@ function buildSummarySheetHtml(t) {
     <h3>Shipping</h3>
     <div class="kv">
       <div><strong>Ship to:</strong> ${escapeHtml(t.shipTo||'—')}</div>
-      <div><strong>Tracking:</strong> ${escapeHtml(t.trackingNumber||'—')}</div>
+      <div><strong>Tracking:</strong> ${fedexTrackLink(t.trackingNumber)}</div>
     </div>
     ${addrLines.length?`<div style="font-size:12px;margin-top:4px"><strong>Address:</strong><br>${addrLines.map(escapeHtml).join('<br>')}</div>`:''}
   </div>
@@ -3983,7 +3989,7 @@ function renderShipments() {
         <td>${escapeHtml(s.destinationType)}</td>
         <td>${escapeHtml(s.carrier)}${s.labelGenerated?' <span class="badge badge-verified" style="font-size:10px">Label auto-generated</span>':''}</td>
         <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<span style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</span>`:'<span class="item-sub">—</span>'}</td>
-        <td style="font-family:monospace;font-size:12px">${escapeHtml(s.trackingNumber||'—')}</td>
+        <td style="font-family:monospace;font-size:12px" onclick="event.stopPropagation()">${fedexTrackLink(s.trackingNumber)}</td>
         <td><span style="font-weight:600">${txCount}</span> <span class="item-sub" style="font-size:11px">${txCount===1?'transfer':'transfers'}</span></td>
         <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span></td>
         <td>${fmtDate(s.shipDate)}</td>
@@ -4310,7 +4316,7 @@ function openShipment(id) {
       ${s.isBulk ? `
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;padding:8px 12px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;font-size:13px">
         <strong>FedEx Tracking:</strong>
-        <span style="font-family:monospace">${s.trackingNumber ? escapeHtml(s.trackingNumber) : '<span class="item-sub">(none — auto-match pending)</span>'}</span>
+        <span style="font-family:monospace">${s.trackingNumber ? fedexTrackLink(s.trackingNumber) : '<span class="item-sub">(none — auto-match pending)</span>'}</span>
         ${canEditTracking ? `<button class="btn btn-secondary btn-sm" id="sm-editTracking" style="margin-left:auto">${s.trackingNumber ? '✏️ Edit' : '+ Add tracking manually'}</button>` : ''}
       </div>` : ''}
 
@@ -5454,7 +5460,7 @@ function renderActionItems() {
           const isOverdue = ageMs > TWENTY_FOUR_H;
           return `<tr style="background:${isOverdue?'var(--danger-bg)':'var(--warning-bg)'}">
             <td><strong>${escapeHtml(s.fromLocation)}</strong> → ${escapeHtml(s.toLocation)}</td>
-            <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<div style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</div>`:''}${escapeHtml(s.trackingNumber||'—')}</td>
+            <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<div style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</div>`:''}${fedexTrackLink(s.trackingNumber)}</td>
             <td>${(s.transferIds||[]).length} transfer${(s.transferIds||[]).length===1?'':'s'}</td>
             <td>${delivered?fmtDate(s.deliveredDate):'—'}</td>
             <td>${isOverdue?`<strong style="color:var(--danger)">⚠ ${ageStr}</strong>`:ageStr}</td>
@@ -5720,7 +5726,7 @@ function openFedexPullModal() {
           return `<tr style="background:var(--success-bg)">
             <td><strong>${escapeHtml(t ? t.patientName : '(unknown)')}</strong></td>
             <td style="font-family:monospace">${escapeHtml(s.reference)}</td>
-            <td style="font-family:monospace;font-size:12px">${escapeHtml(s.trackingNumber)}</td>
+            <td style="font-family:monospace;font-size:12px">${fedexTrackLink(s.trackingNumber)}</td>
             <td>${fmtDate(s.shipDate)}</td>
           </tr>`;
         }).join('')}
