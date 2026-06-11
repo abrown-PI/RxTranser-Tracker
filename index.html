@@ -2707,7 +2707,14 @@ function parseTransferSheet(text) {
     return `${yy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
   })() : null;
   // Patient Address — usually two lines: street, then city/state/zip. Capture until next labeled field.
-  const patientAddrBlock = grab(/Patient Address\s*:\s*(.*?)(?=\s+(?:Drug|DAW|Doctor|Rx number|Patient Phone|Store|Person|Pharmacy information|Date|First fill|Last fill|Quantity|Refills|Instructions|Transferred By|$))/i);
+  const patientAddrBlockRaw = grab(/Patient Address\s*:\s*(.*?)(?=\s+(?:Drug|DAW|Doctor|Rx number|Patient Phone|Store|Person|Pharmacy information|Date|First fill|Last fill|Quantity|Refills|Instructions|Transferred By|$))/i);
+  // PDF text extraction can collapse the line break between street and city, smashing
+  // them together (e.g. "10281 LARCHMONT PLNPINELLAS PARK, FL 33782"). Insert a space
+  // after common USPS-style street-type abbreviations when followed directly by capital
+  // letters so the city/state/zip regex below splits correctly.
+  const patientAddrBlock = patientAddrBlockRaw
+    ? patientAddrBlockRaw.replace(/\b(ST|AVE|BLVD|RD|DR|LN|CT|PL|PLN|WAY|CIR|PKY|PKWY|TER|HWY|TRL|XING|PLZ|SQ|LOOP|PIKE|TRCE|TRACE|RDG|PARK|PASS|PATH|BEND|LOOP)([A-Z])/g, '$1 $2')
+    : null;
   let shipAddr1='', shipCity='', shipState='', shipZip='';
   if (patientAddrBlock) {
     // Split into street vs "CITY, ST ZIP". The city/state/zip pattern is the strongest anchor.
