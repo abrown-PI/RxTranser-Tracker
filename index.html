@@ -716,16 +716,25 @@ function printPackingSlip(shipment, opts) {
 </div>
 
 <table>
-  <thead><tr><th style="width:30%">Patient</th><th>Drug</th><th>Qty</th><th>Origin Rx #</th><th>Receiving Rx #</th><th>Cold</th></tr></thead>
+  <thead><tr><th style="width:25%">Patient</th><th>Drug</th><th>Qty</th><th>Origin Rx #</th><th>Receiving Rx #</th><th>Route</th><th>Cold</th></tr></thead>
   <tbody>
-    ${manifest.flatMap(t => t.items.map((i, idx) => `<tr>
+    ${manifest.flatMap(t => t.items.map((i, idx) => {
+      // Route flag — only on the first item of each transfer, so it's one badge per patient.
+      const routeBadge = idx === 0
+        ? (t.shipTo === 'Delivery-Lancaster' ? '<span style="display:inline-block;padding:2px 6px;background:#fef3c7;border:1px solid #d97706;border-radius:3px;font-size:9px;font-weight:700;color:#92400e">🚚 DELIVERY</span>'
+         : t.pickupAtPharmacy ? '<span style="display:inline-block;padding:2px 6px;background:#dbeafe;border:1px solid #2a6ebb;border-radius:3px;font-size:9px;font-weight:700;color:#1e40af">📍 PICKUP</span>'
+         : '<span style="font-size:10px;color:#666">Pharmacy</span>')
+        : '';
+      return `<tr>
       <td>${idx === 0 ? `<strong>${escapeHtml(t.patientName)}</strong>${t.patientDOB?`<div style="font-size:10px;color:#666">DOB ${escapeHtml(fmtDate(t.patientDOB))}</div>`:''}` : ''}</td>
       <td>${escapeHtml(i.drug||'—')}</td>
       <td>${escapeHtml(i.qty||'')}</td>
       <td style="font-family:monospace">${escapeHtml(i.rxNumber||'—')}</td>
       <td style="font-family:monospace">${escapeHtml(i.receivingRxNumber||'—')}</td>
+      <td>${routeBadge}</td>
       <td>${t.coldItem && idx === 0 ? '❄' : ''}</td>
-    </tr>`)).join('')}
+    </tr>`;
+    })).join('')}
   </tbody>
 </table>
 
@@ -1585,12 +1594,14 @@ function renderStats() {
   // pickup orders, a patient-direct group, or Lancaster delivery. None mean it doesn't belong
   // in a packing checklist at all (no anticipated routing).
   const CHK_PATIENT = 'Patient (Direct Ship)';
-  const CHK_LANCASTER = 'Lancaster Delivery';
+  // Lancaster Delivery items ship in the regular Lancaster pharmacy bulk box — the difference
+  // is just that Lancaster will deliver them locally to the patient (vs. patient pickup at the
+  // pharmacy). Same box, flagged as 🚚 Delivery on the row + packing slip.
   function destinationLocationFor(t) {
     if (t.pickupAtPharmacy && t.pickupLocation) return t.pickupLocation;
     if (t.shipTo === 'Pharmacy') return t.originLocation;
     if (t.shipTo === 'Patient') return CHK_PATIENT;
-    if (t.shipTo === 'Delivery-Lancaster') return CHK_LANCASTER;
+    if (t.shipTo === 'Delivery-Lancaster') return 'Lancaster';
     return null;
   }
   // localStorage helpers — per-day "packed" state for the checklist. Keyed by today's date
@@ -1735,7 +1746,7 @@ function renderStats() {
     const dateLabel = (f.antShipFrom || f.antShipTo)
       ? `Anticipated ship ${f.antShipFrom||'(any)'} → ${f.antShipTo||'(any)'}`
       : 'All anticipated ship dates';
-    const allDestOptions = [...LOCATIONS, CHK_PATIENT, CHK_LANCASTER];
+    const allDestOptions = [...LOCATIONS, CHK_PATIENT];
     const selectedSet = new Set(f.checklistLocations);
     const locsRow = `
       <div class="card" style="margin-bottom:14px"><div class="card-body" style="padding:10px 14px">
@@ -1763,7 +1774,7 @@ function renderStats() {
             ${escapeHtml(l)}
           </label>`).join('')}
         </div>
-        <div class="item-sub" style="margin-top:6px;font-size:11px">Pharmacy ship-tos group under the origin pharmacy. Pickup orders group under the pickup location. Patient ship-tos go to <em>Patient (Direct Ship)</em>. Lancaster delivery is its own group.</div>
+        <div class="item-sub" style="margin-top:6px;font-size:11px">Pharmacy ship-tos group under the origin pharmacy. Pickup orders group under the pickup location. Patient ship-tos go to <em>Patient (Direct Ship)</em>. <em>Lancaster Delivery</em> items ship in the regular Lancaster bulk box, flagged as 🚚 Delivery on the slip.</div>
       </div></div>
     `;
     const inScopeChk = scope.filter(t => {
@@ -1804,6 +1815,7 @@ function renderStats() {
               const notes = [
                 t.coldItem ? '❄ Cold' : '',
                 t.pickupAtPharmacy ? '📍 Pickup' : '',
+                t.shipTo === 'Delivery-Lancaster' ? '🚚 Delivery' : '',
                 (t.transferNotes || '').slice(0, 80)
               ].filter(Boolean).join(' · ');
               const isPacked = isPackedToday(t.id);
@@ -1964,8 +1976,9 @@ function renderStats() {
       renderStats();
     });
     const allBtn = document.getElementById('chk-all');
-    // "Select all" must include the Patient and Lancaster pseudo-destinations, not just pharmacy locations.
-    if (allBtn) allBtn.onclick = () => { state.reportFilter.checklistLocations = [...LOCATIONS, CHK_PATIENT, CHK_LANCASTER]; renderStats(); };
+    // "Select all" must include the Patient pseudo-destination, not just pharmacy locations.
+    // Lancaster Delivery now ships in the regular Lancaster bulk box so it's already covered.
+    if (allBtn) allBtn.onclick = () => { state.reportFilter.checklistLocations = [...LOCATIONS, CHK_PATIENT]; renderStats(); };
     const noneBtn = document.getElementById('chk-none');
     if (noneBtn) noneBtn.onclick = () => { state.reportFilter.checklistLocations = []; renderStats(); };
     // Quick date shortcut buttons — Today / Tomorrow / This week
@@ -4349,7 +4362,7 @@ function renderShipments() {
     state.reportFilter.mode = 'checklist';
     state.reportFilter.antShipFrom = todayLocal();
     state.reportFilter.antShipTo = todayLocal();
-    state.reportFilter.checklistLocations = [...LOCATIONS, CHK_PATIENT, CHK_LANCASTER];
+    state.reportFilter.checklistLocations = [...LOCATIONS, CHK_PATIENT];
     document.querySelector('.tab[data-tab=stats]').click();
   });
   document.getElementById('pullFedexBtn').addEventListener('click', openFedexPullModal);
