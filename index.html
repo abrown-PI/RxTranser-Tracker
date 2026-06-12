@@ -1231,9 +1231,15 @@ function renderTransfers() {
               <button class="btn btn-secondary btn-sm" data-view-tx="${t.id}" title="View transfer details" style="padding:3px 7px;font-size:11px">👁 View</button>
               <button class="btn btn-secondary btn-sm" data-edit-tx="${t.id}" title="Edit transfer" style="padding:3px 7px;font-size:11px">✏️ Edit</button>
               <button class="btn btn-primary btn-sm" data-rcvrx-tx="${t.id}" title="Enter Receiving Rx #" style="padding:3px 7px;font-size:11px">💊 Rx #</button>
-              ${t.paid === 'Paid'
-                ? `<span title="Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:#16a34a;color:white;border-radius:4px">✓ Paid</span>`
-                : `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Click to mark this transfer Paid / Charged" style="padding:3px 9px;font-size:11px;font-weight:600">💲 Mark Paid / Charged</button>`}
+              ${(() => {
+                const ps = paymentStatusFor(t);
+                // Pending = show the manual Paid-in-Store override button (cash/in-person).
+                // Anything else = show the status badge. The detail modal still has the override.
+                if (ps.code === 'pending') {
+                  return `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Mark as paid in store (cash / in-person). HealNow payments auto-update without clicking." style="padding:3px 9px;font-size:11px;font-weight:600">💲 Mark Paid in Store</button>`;
+                }
+                return `<span title="${escapeHtml(ps.tooltip||'')}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px">${escapeHtml(ps.label)}</span>`;
+              })()}
               <button class="btn btn-secondary btn-sm" data-ask="${t.id}" title="Ask a question on this transfer" style="padding:3px 7px;font-size:11px">❓ Ask</button>
             </td>
           </tr>`;
@@ -3971,6 +3977,43 @@ function openTransfer(id) {
   logAudit('view_transfer', 'transfer', id);
 }
 
+// Rolled-up transfer-level payment status. Combines the per-item HealNow paidStatus values with
+// the legacy transfer-level `paid` field (manual "Paid in Store" marker). Returns a descriptor
+// the row + modal renderers use for the badge.
+function paymentStatusFor(t) {
+  const items = (t.items || []).filter(i => i.paidStatus !== 'removed');
+  const hnPaid = items.filter(i => i.paidStatus === 'paid').length;
+  const hnCart = items.filter(i => i.paidStatus === 'cart_created').length;
+  const hnCancel = items.filter(i => i.paidStatus === 'canceled').length;
+  const hnActive = items.length;
+
+  // If staff manually marked Paid AND no HealNow activity touched items → Paid in Store
+  if (t.paid === 'Paid' && hnPaid === 0 && hnCart === 0) {
+    return { code: 'paid_store', label: '✓ Paid in Store', bg: '#16a34a', color: 'white', tooltip: `Marked by ${t.paidBy||'staff'}${t.paidAt?' on '+fmtDate(t.paidAt):''}` };
+  }
+  // Everything HealNow-tracked is paid → Paid
+  if (hnActive > 0 && hnPaid === hnActive) {
+    return { code: 'paid', label: '✓ Paid', bg: '#16a34a', color: 'white', tooltip: `All ${hnActive} Rx paid via HealNow` };
+  }
+  // Partial — some paid, some still in cart / pending
+  if (hnPaid > 0 && hnPaid < hnActive) {
+    return { code: 'partial', label: `🟡 Partial (${hnPaid}/${hnActive})`, bg: '#fef3c7', color: '#92400e', tooltip: `${hnPaid} of ${hnActive} Rx paid` };
+  }
+  // All HealNow-tracked items are canceled → Canceled
+  if (hnActive > 0 && hnCancel === hnActive) {
+    return { code: 'canceled', label: '⊘ Canceled (HealNow)', bg: '#fee2e2', color: '#991b1b', tooltip: 'All items canceled in HealNow' };
+  }
+  // HealNow has at least one cart created, none paid yet → Cart Created
+  if (hnCart > 0) {
+    return { code: 'cart_created', label: '🛒 HealNow Cart', bg: '#dbeafe', color: '#1e40af', tooltip: `${hnCart} cart${hnCart===1?'':'s'} created — waiting on patient` };
+  }
+  // Fallback to legacy paid field when no HealNow data exists
+  if (t.paid === 'Paid') {
+    return { code: 'paid_store', label: '✓ Paid in Store', bg: '#16a34a', color: 'white', tooltip: `Marked by ${t.paidBy||'staff'}${t.paidAt?' on '+fmtDate(t.paidAt):''}` };
+  }
+  return { code: 'pending', label: 'Pending', bg: '#f1f5f9', color: '#475569', tooltip: 'No payment activity yet' };
+}
+
 // Per-Rx payment-status badge for the transfer detail modal. Driven by item.paidStatus set
 // by the HealNow webhook (or future manual flows). Shows the receipt link when available.
 function renderItemPaymentRow(i) {
@@ -4187,9 +4230,20 @@ function renderModal() {
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <strong>Paid:</strong>
-              ${t.paid === 'Paid'
-                ? `<span style="display:inline-block;padding:4px 12px;font-size:12px;font-weight:700;background:#16a34a;color:white;border-radius:4px">✓ Paid${t.paidBy?' by '+escapeHtml(t.paidBy):''}${t.paidAt?' on '+fmtDate(t.paidAt):''}</span> <button class="btn btn-secondary btn-sm" id="unpaidBtn" style="padding:2px 8px;font-size:11px">Undo</button>`
-                : `<button class="btn btn-primary btn-sm" id="paidBtn" style="padding:4px 14px;font-size:12px;font-weight:600">💲 Mark Paid / Charged</button>`}
+              ${(() => {
+                const ps = paymentStatusFor(t);
+                const badge = `<span style="display:inline-block;padding:4px 12px;font-size:12px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px" title="${escapeHtml(ps.tooltip||'')}">${escapeHtml(ps.label)}</span>`;
+                // Pending → primary action is to mark Paid in Store (HealNow handles itself)
+                if (ps.code === 'pending') {
+                  return `<button class="btn btn-primary btn-sm" id="paidBtn" style="padding:4px 14px;font-size:12px;font-weight:600">💲 Mark Paid in Store</button>`;
+                }
+                // Paid in Store → allow undo (manual mistake)
+                if (ps.code === 'paid_store') {
+                  return `${badge} <button class="btn btn-secondary btn-sm" id="unpaidBtn" style="padding:2px 8px;font-size:11px">Undo</button>`;
+                }
+                // HealNow-driven states → badge only (the per-item rows show details + receipts)
+                return badge;
+              })()}
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" style="margin-top:10px" id="editShipBtn">Edit ship / tracking</button>
