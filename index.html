@@ -1209,7 +1209,7 @@ function renderTransfers() {
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
             <td><code style="font-family:monospace;font-size:12px;font-weight:600;color:var(--primary-dark)">${t.id}</code></td>
-            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<strong>${escapeHtml(displayPatientName(t))}</strong> <span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
+            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap"><span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
             <td>${(() => {
               const drugs = (t.items || []).map(i => i.drug).filter(Boolean);
               if (t.isBulkPickup) return '<span class="item-sub">—</span>';
@@ -3436,6 +3436,16 @@ function toProperCase(s) {
 }
 function displayPatientName(t) {
   return toProperCase(t && (t.patientName || ''));
+}
+// Two-line version for narrow table cells — keeps every name's wrap identical instead of
+// breaking on width.  HTML output (already trusted; callers don't escape further).
+function displayPatientNameTwoLine(t) {
+  const formatted = displayPatientName(t);
+  const sp = splitPatientName(formatted);
+  if (sp.firstName && sp.lastName) {
+    return `<div>${escapeHtml(sp.lastName)},</div><div>${escapeHtml(sp.firstName)}</div>`;
+  }
+  return escapeHtml(formatted);
 }
 
 function draftFromRefill(source) {
