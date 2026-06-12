@@ -1054,20 +1054,29 @@ function updateIncomingBadge() {
   if (b) { if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; } }
   const ab = document.getElementById('actionsBadge');
   if (ab) {
-    const today = todayLocal();
+    // Only count what actually appears on the Action Items page now: Canceled-needs-ack,
+    // Delivered-needs-check-in, and Held (Pending Clarification / Needs Formula). The
+    // past-anticipated-ship card moved to the Alerts tab — its count is reflected in the
+    // Alerts badge, not here.
     const cancelN = visibleTransfers().filter(t => t.status === 'Canceled' && !t.cancelAcknowledged).length;
     const deliveredN = visibleShipments().filter(s => s.toLocation === CURRENT_USER.location && s.status === 'Delivered').length;
-    const lateN = visibleTransfers().filter(t => t.anticipatedShipDate && t.anticipatedShipDate.slice(0,10) < today && !['Shipped','Delivered','Canceled'].includes(t.status)).length;
     const heldN = visibleTransfers().filter(t => DELAY_STATUSES.includes(t.status)).length;
-    const n = cancelN + deliveredN + lateN + heldN;
+    const n = cancelN + deliveredN + heldN;
     if (n > 0) { ab.textContent = n; ab.style.display = 'inline-block'; } else { ab.style.display = 'none'; }
   }
 }
 function updateSLABadge() {
+  // Counts what's on the Alerts tab: SLA breaches + open questions + past-anticipated-ship transfers.
+  const today = todayLocal();
   const breaches = visibleTransfers().filter(t => slaStatus(t).state === 'breach').length;
   let questions = 0;
   try { questions = openQuestionsForUser().mine.length; } catch {}
-  const count = breaches + questions;
+  const lateShip = visibleTransfers().filter(t =>
+    t.anticipatedShipDate
+    && t.anticipatedShipDate.slice(0,10) < today
+    && !['Shipped','Delivered','Received','Canceled'].includes(t.status)
+  ).length;
+  const count = breaches + questions + lateShip;
   const b = document.getElementById('slaBadge');
   if (!b) return;
   if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; }
