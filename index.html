@@ -473,7 +473,7 @@ const nextId = () => ++_nextId;
 // they were halfway through the Shipments page. Falls back to 'transfers' if nothing saved.
 const _savedTab = (() => { try { return localStorage.getItem('lastTab') || 'transfers'; } catch { return 'transfers'; } })();
 const VALID_TABS = ['transfers','new','refill','actions','shipments','sla','stats','admin'];
-const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'transfers', filterStatus: '', showCompleted: false, filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
+const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'transfers', filterStatus: '', showCompleted: false, filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
 
 // Default-view persistence: stores a snapshot of the transfer-list filters in
 // localStorage so a user's preferred view survives reloads + sessions on the
@@ -1099,6 +1099,17 @@ function renderTransfers() {
     if (state.filterType && (t.transferType || 'New') !== state.filterType) return false;
     if (state.filterPaid === 'Paid' && t.paid !== 'Paid') return false;
     if (state.filterPaid === 'NotPaid' && t.paid === 'Paid') return false;
+    if (state.filterShipToType) {
+      if (state.filterShipToType === 'Pickup') {
+        if (!t.pickupAtPharmacy) return false;
+      } else if (state.filterShipToType === 'Pharmacy') {
+        if (t.shipTo !== 'Pharmacy' || t.pickupAtPharmacy) return false;
+      } else if (state.filterShipToType === 'Patient') {
+        if (t.shipTo !== 'Patient') return false;
+      } else if (state.filterShipToType === 'Delivery-Lancaster') {
+        if (t.shipTo !== 'Delivery-Lancaster') return false;
+      }
+    }
     if (state.filterMed) {
       const q = state.filterMed.toLowerCase();
       const hit = (t.items || []).some(i => (i.drug || '').toLowerCase().includes(q));
@@ -1152,6 +1163,7 @@ function renderTransfers() {
       </label>
       <select id="f-type"><option value="">All types</option><option value="New" ${state.filterType==='New'?'selected':''}>New only</option><option value="Refill" ${state.filterType==='Refill'?'selected':''}>Refills only</option></select>
       <select id="f-paid"><option value="">Paid: all</option><option value="Paid" ${state.filterPaid==='Paid'?'selected':''}>✓ Paid only</option><option value="NotPaid" ${state.filterPaid==='NotPaid'?'selected':''}>Not paid only</option></select>
+      <select id="f-shipToType" title="Filter by where the package ships"><option value="">Ship-to: all</option><option value="Pharmacy" ${state.filterShipToType==='Pharmacy'?'selected':''}>🏪 Pharmacy only</option><option value="Patient" ${state.filterShipToType==='Patient'?'selected':''}>👤 Patient only</option><option value="Pickup" ${state.filterShipToType==='Pickup'?'selected':''}>📍 Pickup only</option><option value="Delivery-Lancaster" ${state.filterShipToType==='Delivery-Lancaster'?'selected':''}>🚚 Lancaster Delivery</option></select>
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
       <input id="f-med" placeholder="Filter by medication…" value="${escapeHtml(state.filterMed||'')}" style="min-width:180px" />
@@ -1240,6 +1252,7 @@ function renderTransfers() {
     state.showCompleted = false;
     state.filterType = '';
     state.filterPaid = '';
+    state.filterShipToType = '';
     state.filterOrigin = '';
     state.filterFill = '';
     state.filterMed = '';
@@ -1254,6 +1267,7 @@ function renderTransfers() {
   };
   document.getElementById('f-type').addEventListener('change', e => { state.filterType = e.target.value; renderTransfers(); });
   document.getElementById('f-paid').addEventListener('change', e => { state.filterPaid = e.target.value; renderTransfers(); });
+  document.getElementById('f-shipToType').addEventListener('change', e => { state.filterShipToType = e.target.value; renderTransfers(); });
   document.getElementById('f-origin').addEventListener('change', e => { state.filterOrigin = e.target.value; renderTransfers(); });
   document.getElementById('f-fill').addEventListener('change', e => { state.filterFill = e.target.value; renderTransfers(); });
   document.getElementById('f-med').addEventListener('input', e => { state.filterMed = e.target.value; renderTransfers(); });
@@ -5502,10 +5516,23 @@ async function processBulkFiles(rawFiles) {
               draft.patientName = formatPatientName(sp.firstName, sp.lastName);
             }
             if (f.patientDOB) draft.patientDOB = f.patientDOB;
-            if (f.shipAddr1) draft.shipAddr1 = f.shipAddr1;
-            if (f.shipCity) draft.shipCity = f.shipCity;
-            if (f.shipState) draft.shipState = f.shipState;
-            if (f.shipZip) draft.shipZip = f.shipZip;
+            // Patient address from OCR only belongs in shipAddr fields when shipping direct to the patient.
+            // For Pharmacy ship-to (the default for bulk uploads), the address belongs to the origin pharmacy.
+            if (draft.shipTo === 'Patient') {
+              if (f.shipAddr1) draft.shipAddr1 = f.shipAddr1;
+              if (f.shipCity) draft.shipCity = f.shipCity;
+              if (f.shipState) draft.shipState = f.shipState;
+              if (f.shipZip) draft.shipZip = f.shipZip;
+            } else if (draft.shipTo === 'Pharmacy') {
+              const pa = PHARMACY_ADDRESSES[draft.originLocation];
+              if (pa) {
+                draft.shipAddr1 = pa.addr1 || '';
+                draft.shipAddr2 = pa.addr2 || '';
+                draft.shipCity = pa.city || '';
+                draft.shipState = pa.state || '';
+                draft.shipZip = pa.zip || '';
+              }
+            }
             const first = draft.items[0];
             if (f.rxNumber) first.rxNumber = f.rxNumber;
             if (f.drug) first.drug = f.drug;
@@ -5597,10 +5624,23 @@ async function processBulkFiles(rawFiles) {
           draft.patientName = formatPatientName(sp.firstName, sp.lastName);
         }
         if (parsed.patientDOB) draft.patientDOB = parsed.patientDOB;
-        if (parsed.shipAddr1) draft.shipAddr1 = parsed.shipAddr1;
-        if (parsed.shipCity) draft.shipCity = parsed.shipCity;
-        if (parsed.shipState) draft.shipState = parsed.shipState;
-        if (parsed.shipZip) draft.shipZip = parsed.shipZip;
+        // Patient address only goes in shipAddr fields for Patient ship-to. For Pharmacy
+        // ship-to (the default), the destination is the origin pharmacy.
+        if (draft.shipTo === 'Patient') {
+          if (parsed.shipAddr1) draft.shipAddr1 = parsed.shipAddr1;
+          if (parsed.shipCity) draft.shipCity = parsed.shipCity;
+          if (parsed.shipState) draft.shipState = parsed.shipState;
+          if (parsed.shipZip) draft.shipZip = parsed.shipZip;
+        } else if (draft.shipTo === 'Pharmacy') {
+          const pa = PHARMACY_ADDRESSES[draft.originLocation];
+          if (pa) {
+            draft.shipAddr1 = pa.addr1 || '';
+            draft.shipAddr2 = pa.addr2 || '';
+            draft.shipCity = pa.city || '';
+            draft.shipState = pa.state || '';
+            draft.shipZip = pa.zip || '';
+          }
+        }
         const first = draft.items[0];
         if (parsed.rxNumber) first.rxNumber = parsed.rxNumber;
         if (parsed.drug) first.drug = parsed.drug;
@@ -7107,6 +7147,33 @@ initAuth();
       }
     }
   } catch (e) { console.warn('heal-on-load failed', e); }
+  // Heal-on-load: for shipTo='Pharmacy' transfers, the shipping address should be the origin
+  // pharmacy's address (since origin = receiving pharmacy). OCR-imported PK sheets often left
+  // the patient's home address in shipAddr1 by mistake. Sweep and correct, but only when the
+  // current address doesn't match the destination pharmacy — so legitimate ones aren't touched.
+  try {
+    let healedAddr = 0;
+    for (const t of TRANSFERS) {
+      if (t.shipTo !== 'Pharmacy') continue;
+      if (t.pickupAtPharmacy) continue;
+      const destPharm = PHARMACY_ADDRESSES[t.originLocation];
+      if (!destPharm || !destPharm.addr1) continue;
+      // Match by city/zip — different city/zip = patient address, fix it. Same city/zip = already correct.
+      const cityMatches = (t.shipCity || '').trim().toLowerCase() === (destPharm.city || '').trim().toLowerCase();
+      const zipMatches = (t.shipZip || '').trim() === (destPharm.zip || '').trim();
+      if (cityMatches && zipMatches && t.shipAddr1) continue;
+      // Replace with the pharmacy's canonical address
+      console.log('Healing address on transfer', t.id, t.patientName, 'shipTo=Pharmacy', t.originLocation, 'was:', t.shipAddr1, t.shipCity, '→', destPharm.addr1, destPharm.city);
+      t.shipAddr1 = destPharm.addr1;
+      t.shipAddr2 = destPharm.addr2 || '';
+      t.shipCity = destPharm.city || '';
+      t.shipState = destPharm.state || '';
+      t.shipZip = destPharm.zip || '';
+      apiUpdateTransfer(t);
+      healedAddr++;
+    }
+    if (healedAddr > 0) console.log(`Address heal-on-load: fixed ${healedAddr} Pharmacy ship-to transfer(s).`);
+  } catch (e) { console.warn('address heal-on-load failed', e); }
 })();
 
 // Teams notification: status changed to Pending Clarification or Needs Formula.
