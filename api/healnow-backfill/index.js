@@ -306,11 +306,11 @@ async function fetchPatientCart(patientId, context) {
   }
 }
 
-// Sweep unpaid portal transfers and check each patient's HealNow cart. Applies cart_created
-// status to items that have an active cart on HealNow. Returns counts.
+// Sweep unpaid portal transfers and check each patient's HealNow cart. HealNow's cart payload
+// has shape: { prescriptions: [{ rx_number, status, ... }], patient, totals }. We match by
+// rx_number first (exact), then patient name fallback for items where rx_number is missing.
 async function sweepCartsForUnpaidTransfers(context, dryRun) {
   const transfers = await listTransfers();
-  // Only check transfers that don't already have a known HealNow state on every item.
   const candidates = transfers.filter(t => {
     if (['Canceled'].includes(t.status)) return false;
     const items = t.items || [];
@@ -319,13 +319,11 @@ async function sweepCartsForUnpaidTransfers(context, dryRun) {
   });
   context.log(`Cart sweep: ${candidates.length} candidate transfers`);
   let patientsChecked = 0, cartsFound = 0, applied = 0, skipped = 0, errors = 0;
-  // Dedupe by patient name so we only call HealNow once per unique patient.
   const seenPatients = new Set();
   const sample = [];
   for (const t of candidates) {
     const name = String(t.patientName || '').trim();
     if (!name) continue;
-    // patientName is stored as "LAST, FIRST"; split into first + last for HealNow's API.
     let firstName = '', lastName = '';
     if (name.includes(',')) {
       const parts = name.split(',').map(s => s.trim());
@@ -337,44 +335,62 @@ async function sweepCartsForUnpaidTransfers(context, dryRun) {
       lastName = parts.slice(1).join(' ');
     }
     const key = `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
-    if (seenPatients.has(key)) continue; // already looked up this patient
+    if (seenPatients.has(key)) continue;
     seenPatients.add(key);
     patientsChecked++;
     try {
       const patient = await findHealnowPatient(firstName, lastName, context);
       if (!patient) continue;
+      // Fast pre-check: patient.cart_state tells us if there's anything to fetch.
+      // Known values include 'open' (active cart) and presumably 'empty' (none).
+      if (patient.cart_state && patient.cart_state !== 'open') continue;
       const cart = await fetchPatientCart(patient.id, context);
       if (!cart) continue;
-      const cartItems = cart.items || cart.line_items || [];
-      if (!cartItems.length) continue;
+      const cartRxs = cart.prescriptions || cart.items || [];
+      if (!cartRxs.length) continue;
       cartsFound++;
-      // Find every portal transfer for this patient (could be more than one)
       const portalTs = transfers.filter(x => normName(x.patientName) === normName(`${firstName} ${lastName}`));
-      // Apply cart_created status to each item in each portal transfer (idempotent — already-paid items skipped)
-      for (const portalT of portalTs) {
-        let touched = false;
-        for (const item of (portalT.items || [])) {
-          if (item.paidStatus === 'paid' || item.paidStatus === 'canceled' || item.paidStatus === 'removed') {
-            skipped++;
-            continue;
+      for (const cartRx of cartRxs) {
+        const cartRxNumber = String(cartRx.rx_number || '').replace(/\s+/g, '').trim();
+        const cartRxStatus = String(cartRx.status || '').toLowerCase();
+        // Map cart rx status to our internal state.
+        let newPaidStatus = 'cart_created';
+        if (['paid','completed'].includes(cartRxStatus)) newPaidStatus = 'paid';
+        else if (['canceled','cancelled','removed'].includes(cartRxStatus)) continue; // skip these here
+        // Find the portal item: first by exact rx_number, then by drug name within this patient's transfers.
+        let portalT = null, portalItem = null;
+        for (const pt of portalTs) {
+          for (const it of (pt.items || [])) {
+            const itRx = String(it.receivingRxNumber || '').replace(/\s+/g, '').trim();
+            const itRx2 = String(it.rxNumber || '').replace(/\s+/g, '').trim();
+            if (cartRxNumber && (itRx === cartRxNumber || itRx2 === cartRxNumber)) {
+              portalT = pt; portalItem = it; break;
+            }
           }
-          if (item.paidStatus === 'cart_created') {
-            skipped++;
-            continue;
-          }
-          if (!dryRun) {
-            item.paidStatus = 'cart_created';
-            item.healnowCartCreatedAt = cart.created_at || new Date().toISOString();
-            item.healnowMatchedBy = 'patientCartSweep';
-            touched = true;
-          }
-          applied++;
-          if (sample.length < 20) sample.push({ patient: name, transferId: portalT.id, cartId: cart.id, dryRun });
+          if (portalItem) break;
         }
-        if (touched && !dryRun) {
+        if (!portalItem && portalTs.length === 1) {
+          // Single portal transfer + unmatched rx → take the first item without an Rx
+          const pt = portalTs[0];
+          portalItem = (pt.items || []).find(i => !i.paidStatus && !i.receivingRxNumber) || (pt.items || [])[0];
+          portalT = pt;
+        }
+        if (!portalItem || !portalT) continue;
+        if (portalItem.paidStatus === 'paid' || portalItem.paidStatus === 'canceled' || portalItem.paidStatus === 'removed') { skipped++; continue; }
+        if (portalItem.paidStatus === newPaidStatus) { skipped++; continue; }
+        if (!dryRun) {
+          portalItem.paidStatus = newPaidStatus;
+          portalItem.healnowCartCreatedAt = cart.created_at || new Date().toISOString();
+          portalItem.healnowMatchedBy = cartRxNumber ? 'cartRx' : 'cartPatient';
+          if (cartRxNumber && !portalItem.receivingRxNumber) {
+            portalItem.receivingRxNumber = cartRxNumber;
+            portalItem.healnowBackfilledRx = true;
+          }
           rollupPaid(portalT);
           await saveTransfer(portalT);
         }
+        applied++;
+        if (sample.length < 20) sample.push({ patient: name, transferId: portalT.id, itemId: portalItem.id, rxNumber: cartRxNumber, status: newPaidStatus, dryRun });
       }
     } catch (e) {
       errors++;
