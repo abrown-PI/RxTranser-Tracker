@@ -164,11 +164,11 @@ async function fetchOrdersPage(from, to, page, perPage, context) {
   const base = process.env.HEALNOW_API_BASE || 'https://api.healnow.io/v1';
   if (!apiKey) throw Object.assign(new Error('HEALNOW_API_KEY not set'), { statusCode: 503 });
   // Try common date filter names; HealNow's actual scheme will dictate which the API honors.
+  // Note: `/orders` appears to default to paid orders only. Unpaid carts may live elsewhere.
   const params = new URLSearchParams({
     from, to,
     created_from: from, created_to: to,
-    page: String(page), per_page: String(perPage),
-    status: 'all' // try to include unpaid / open carts, not just paid
+    page: String(page), per_page: String(perPage)
   });
   const url = `${base}/orders?${params.toString()}`;
   const resp = await fetch(url, {
