@@ -200,21 +200,27 @@ async function processPrescription(rx, order, transfers, dryRun, sample, context
 
   // Derive the right paidStatus from the prescription's state on HealNow.
   // We use the explicit `status` field if present, otherwise fall back to order/payment state.
+  // HealNow uses several cart-like statuses for unpaid orders: pending, open, cart, draft, processing.
   const rxStatus = String(rx.status || rx.payment_status || '').toLowerCase();
+  const orderStatus = String(order.status || '').toLowerCase();
+  const CART_STATES = ['pending', 'open', 'cart', 'draft', 'processing', 'created', 'cart_created', 'incomplete'];
+  const PAID_STATES = ['paid', 'completed', 'complete', 'fulfilled', 'succeeded'];
+  const CANCEL_STATES = ['canceled', 'cancelled', 'manually_canceled', 'declined'];
+  const REMOVED_STATES = ['removed', 'deleted', 'voided'];
   let newPaidStatus = null;
   let amountCents = rx.amount_in_cents || rx.amount || null;
 
-  if (rxStatus === 'paid' || rxStatus === 'completed' || (order.status === 'paid' && rxStatus !== 'canceled' && rxStatus !== 'removed')) {
+  if (PAID_STATES.includes(rxStatus) || (PAID_STATES.includes(orderStatus) && !CANCEL_STATES.includes(rxStatus) && !REMOVED_STATES.includes(rxStatus))) {
     newPaidStatus = 'paid';
-  } else if (rxStatus === 'canceled' || rxStatus === 'cancelled' || rxStatus === 'manually_canceled') {
+  } else if (CANCEL_STATES.includes(rxStatus) || CANCEL_STATES.includes(orderStatus)) {
     newPaidStatus = 'canceled';
-  } else if (rxStatus === 'removed') {
+  } else if (REMOVED_STATES.includes(rxStatus)) {
     newPaidStatus = 'removed';
-  } else if (rxStatus === 'pending' || rxStatus === 'cart_created' || order.status === 'pending') {
+  } else if (CART_STATES.includes(rxStatus) || CART_STATES.includes(orderStatus)) {
     newPaidStatus = 'cart_created';
   } else {
-    // Unknown status — log and skip.
-    return { result: 'skipped', reason: 'unknown rx status', rxStatus, rxNumber, transferId: t.id };
+    // Truly unknown — log with the status string so we can extend the list next time.
+    return { result: 'skipped', reason: `unknown status rxStatus="${rxStatus}" orderStatus="${orderStatus}"`, rxNumber, transferId: t.id };
   }
 
   // Idempotent: if the item already has this status (or a more advanced one), don't re-apply.
