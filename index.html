@@ -564,7 +564,7 @@ function bindGlobalSearch() {
     visibleShipments().forEach(s => { if ((s.trackingNumber||'').toLowerCase().includes(q)) hits.push({ type: 'shipment', s }); });
     if (!hits.length) { box.innerHTML = '<div class="global-result"><em>No matches</em></div>'; box.style.display = ''; return; }
     box.innerHTML = hits.slice(0,20).map(h => h.type==='transfer'
-      ? `<div class="global-result" data-t="${h.t.id}"><strong>${escapeHtml(h.t.patientName)}</strong> <span class="badge ${STATUS_BADGE[h.t.status]}">${h.t.status}</span><div class="meta">${escapeHtml(h.t.originLocation)} → ${escapeHtml(h.t.fillLocation)} · ${h.t.items.length} Rx · ${escapeHtml(h.t.trackingNumber||'no tracking')}</div></div>`
+      ? `<div class="global-result" data-t="${h.t.id}"><strong>${escapeHtml(displayPatientName(h.t))}</strong> <span class="badge ${STATUS_BADGE[h.t.status]}">${h.t.status}</span><div class="meta">${escapeHtml(h.t.originLocation)} → ${escapeHtml(h.t.fillLocation)} · ${h.t.items.length} Rx · ${escapeHtml(h.t.trackingNumber||'no tracking')}</div></div>`
       : `<div class="global-result" data-s="${h.s.id}"><strong>Shipment ${escapeHtml(h.s.trackingNumber)}</strong><div class="meta">${escapeHtml(h.s.fromLocation)} → ${escapeHtml(h.s.toLocation)} · ${h.s.status}</div></div>`
     ).join('');
     box.style.display = '';
@@ -740,7 +740,7 @@ function printPackingSlip(shipment, opts) {
          : '<span style="font-size:10px;color:#666">Pharmacy</span>')
         : '';
       return `<tr>
-      <td>${idx === 0 ? `<strong>${escapeHtml(t.patientName)}</strong>${t.patientDOB?`<div style="font-size:10px;color:#666">DOB ${escapeHtml(fmtDate(t.patientDOB))}</div>`:''}` : ''}</td>
+      <td>${idx === 0 ? `<strong>${escapeHtml(displayPatientName(t))}</strong>${t.patientDOB?`<div style="font-size:10px;color:#666">DOB ${escapeHtml(fmtDate(t.patientDOB))}</div>`:''}` : ''}</td>
       <td>${escapeHtml(i.drug||'—')}</td>
       <td>${escapeHtml(i.qty||'')}</td>
       <td style="font-family:monospace">${escapeHtml(i.rxNumber||'—')}</td>
@@ -1209,7 +1209,7 @@ function renderTransfers() {
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
             <td><code style="font-family:monospace;font-size:12px;font-weight:600;color:var(--primary-dark)">${t.id}</code></td>
-            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
+            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<strong>${escapeHtml(displayPatientName(t))}</strong> <span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}<div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
             <td>${(() => {
               const drugs = (t.items || []).map(i => i.drug).filter(Boolean);
               if (t.isBulkPickup) return '<span class="item-sub">—</span>';
@@ -1237,12 +1237,14 @@ function renderTransfers() {
               <button class="btn btn-primary btn-sm" data-rcvrx-tx="${t.id}" title="Enter Receiving Rx #" style="padding:3px 7px;font-size:11px">💊 Rx #</button>
               ${(() => {
                 const ps = paymentStatusFor(t);
-                // Pending = show the manual Paid-in-Store override button (cash/in-person).
-                // Anything else = show the status badge. The detail modal still has the override.
-                if (ps.code === 'pending') {
-                  return `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Mark Paid in Store (cash / in-person). HealNow payments auto-update without clicking." style="padding:3px 8px;font-size:13px;font-weight:700">💲</button>`;
+                // Actions column is for click-to-do-something. Paid states get a green badge (no
+                // action needed). Everything else (Pending / Cart / Partial / Canceled) gets the
+                // 💲 override so a patient calling in to pay in store can be marked instantly,
+                // even if they had a HealNow cart open. (Status detail still shows in Payment column.)
+                if (ps.code === 'paid' || ps.code === 'paid_store') {
+                  return `<span title="${escapeHtml(ps.tooltip||'')}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px">${escapeHtml(ps.label)}</span>`;
                 }
-                return `<span title="${escapeHtml(ps.tooltip||'')}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px">${escapeHtml(ps.label)}</span>`;
+                return `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Mark Paid in Store (cash / in-person). HealNow payments auto-update without clicking." style="padding:3px 8px;font-size:13px;font-weight:700">💲</button>`;
               })()}
               <button class="btn btn-secondary btn-sm" data-ask="${t.id}" title="Ask a question on this transfer" style="padding:3px 7px;font-size:11px">❓ Ask</button>
             </td>
@@ -1988,7 +1990,7 @@ function renderStats() {
                   <input type="checkbox" class="chk-input" data-tid="${t.id}" ${isPacked?'checked':''} />
                   ${packedBy}
                 </td>
-                <td class="chk-col-patient"><strong>${escapeHtml(t.patientName)}</strong></td>
+                <td class="chk-col-patient"><strong>${escapeHtml(displayPatientName(t))}</strong></td>
                 <td class="chk-col-drug">${itemsHtml || '—'}</td>
                 <td class="chk-col-type">${(t.transferType==='Refill') ? '<span class="chk-pill">Refill</span>' : '<span class="chk-pill">New</span>'}</td>
                 <td class="chk-col-date">${fmtDate(t.anticipatedShipDate)||'—'}</td>
@@ -2047,7 +2049,7 @@ function renderStats() {
               const overdue = t.anticipatedShipDate && !['Shipped','Delivered','Canceled'].includes(t.status) && t.anticipatedShipDate < todayLocal();
               return `<tr style="border-bottom:1px solid var(--gray-200);${overdue?'background:var(--danger-bg)':''}">
                 <td style="padding:6px 8px;font-family:monospace">${t.id}</td>
-                <td style="padding:6px 8px"><strong>${escapeHtml(t.patientName)}</strong>${t.coldItem?' ❄':''}</td>
+                <td style="padding:6px 8px"><strong>${escapeHtml(displayPatientName(t))}</strong>${t.coldItem?' ❄':''}</td>
                 <td style="padding:6px 8px">${escapeHtml(drugs)}</td>
                 <td style="padding:6px 8px">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
                 <td style="padding:6px 8px">${escapeHtml(t.shipTo)}</td>
@@ -2401,7 +2403,7 @@ function renderSLA() {
         <th>Patient</th><th>From → Fill</th><th>Asked By</th><th>When</th><th>Question</th><th></th>
       </tr></thead><tbody>
         ${mine.map(({t,q}) => `<tr style="background:var(--warning-bg)" data-open-q="${t.id}">
-          <td><strong>${escapeHtml(t.patientName)}</strong></td>
+          <td><strong>${escapeHtml(displayPatientName(t))}</strong></td>
           <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
           <td>${escapeHtml(q.author)}</td>
           <td>${new Date(q.ts).toLocaleString()}</td>
@@ -2417,7 +2419,7 @@ function renderSLA() {
     ${asked.length ? `<div class="card"><div class="card-header">Questions You've Asked <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— waiting on a reply</span></div><div class="card-body">
       <table style="box-shadow:none;font-size:13px"><thead><tr><th>Patient</th><th>Sent To</th><th>When</th><th>Question</th><th></th></tr></thead><tbody>
         ${asked.map(({t,q}) => `<tr data-open-q="${t.id}">
-          <td><strong>${escapeHtml(t.patientName)}</strong></td>
+          <td><strong>${escapeHtml(displayPatientName(t))}</strong></td>
           <td>${escapeHtml([t.originLocation, t.fillLocation].filter(l => l && l !== CURRENT_USER.location).join(', '))}</td>
           <td>${new Date(q.ts).toLocaleString()}</td>
           <td>${escapeHtml((q.body||'').replace(/^❓\s*/,'').slice(0,120))}${(q.body||'').length>120?'…':''}</td>
@@ -2437,7 +2439,7 @@ function renderSLA() {
         ${lateShipping.map(t => {
           const daysLate = Math.floor((Date.parse(todayISO) - Date.parse(t.anticipatedShipDate.slice(0,10))) / 86400000);
           return `<tr style="background:var(--danger-bg)">
-            <td><strong>${escapeHtml(t.patientName||'(bulk pickup)')}</strong></td>
+            <td><strong>${escapeHtml(displayPatientName(t)||'(bulk pickup)')}</strong></td>
             <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
             <td><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
             <td>${fmtDate(t.anticipatedShipDate)}</td>
@@ -2456,7 +2458,7 @@ function renderSLA() {
             const hoursIn = Math.round((Date.now() - new Date(t.createdAt).getTime()) / 3600000);
             return `<tr class="row-sla-${sla.state}" data-id="${t.id}">
               <td>${sla.state==='breach'?`<span class="pill-danger">⚠ Overdue</span>`:`<span class="pill-warn">Approaching</span>`}</td>
-              <td><strong>${escapeHtml(t.patientName)}</strong></td>
+              <td><strong>${escapeHtml(displayPatientName(t))}</strong></td>
               <td><span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span></td>
               <td>${hoursIn}h (limit ${SLA_RULES[t.status]||'—'}h)</td>
               <td>${escapeHtml(t.originLocation)}</td>
@@ -3417,6 +3419,19 @@ function formatPatientName(firstName, lastName) {
   return l || f;
 }
 
+// Normalize patient-name capitalization for display only — data stays as entered/imported.
+// "MALAGON, ALEX" → "Malagon, Alex", but "McDonald" / "O'Brien" stay correct.
+function toProperCase(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (_, c) => c.toUpperCase())
+    .replace(/\bMc([a-z])/g, (_, c) => 'Mc' + c.toUpperCase())
+    .replace(/'([A-Z])/g, (_, c) => "'" + c.toLowerCase());
+}
+function displayPatientName(t) {
+  return toProperCase(t && (t.patientName || ''));
+}
+
 function draftFromRefill(source) {
   return {
     transferType: 'Refill',
@@ -4110,7 +4125,7 @@ function openReceivingRxModal(id) {
     <div class="modal-header">
       <div>
         <div class="modal-title">Enter Receiving Rx Number${isSingle?'':'s'}</div>
-        <div class="item-sub">${escapeHtml(t.patientName)} · Transfer ${t.id}</div>
+        <div class="item-sub">${escapeHtml(displayPatientName(t))} · Transfer ${t.id}</div>
       </div>
       <button class="modal-close" id="rcvClose">&times;</button>
     </div>
@@ -4156,7 +4171,7 @@ function renderModal() {
       <div class="modal" onclick="event.stopPropagation()">
         <div class="modal-header">
           <div>
-            <div class="modal-title">${escapeHtml(t.patientName)}</div>
+            <div class="modal-title">${escapeHtml(displayPatientName(t))}</div>
             <div class="item-sub">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)} · submitted ${fmtDate(t.createdAt)} by ${escapeHtml(t.submittedBy)}</div>
           </div>
           <button class="modal-close" id="modalClose">&times;</button>
@@ -4189,7 +4204,7 @@ function renderModal() {
             <strong>${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</strong> to ${escapeHtml(t.pickupLocation||'?')} ${t.bulkDescription?` · ${escapeHtml(t.bulkDescription)}`:''}
           </div>` : `<div class="section-title">Patient</div>
           <div style="font-size:13px;line-height:1.8">
-            <strong>${escapeHtml(t.patientName)}</strong> · DOB ${fmtDate(t.patientDOB)} · Allergies: ${escapeHtml(t.patientAllergies||'—')}
+            <strong>${escapeHtml(displayPatientName(t))}</strong> · DOB ${fmtDate(t.patientDOB)} · Allergies: ${escapeHtml(t.patientAllergies||'—')}
           </div>`}
           ${(() => {
             // Build the refill chain: the original (top of chain) + every refill that descends from it
@@ -4788,7 +4803,7 @@ function openCreateShipment() {
           return `<div class="checkbox-row" style="padding:10px;border-bottom:1px solid var(--gray-100)">
             <input type="checkbox" class="cm-t" value="${t.id}" />
             <div style="flex:1">
-              <strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}
+              <strong>${escapeHtml(displayPatientName(t))}</strong> <span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}
               <div class="item-sub">${t.items.length} Rx · ${t.items.map(i=>escapeHtml(i.drug)).join(', ').slice(0,80)}</div>
               <div class="item-sub">Transfer date: ${fmtDate(t.createdAt)}</div>
             </div>
@@ -4928,7 +4943,7 @@ function openAddTransfersToShipment(shipmentId) {
         ${eligible.map(t => `<div class="checkbox-row" style="padding:10px;border-bottom:1px solid var(--gray-100)">
           <input type="checkbox" class="add-t" value="${t.id}" />
           <div style="flex:1">
-            <strong>${escapeHtml(t.patientName)}</strong> <span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}
+            <strong>${escapeHtml(displayPatientName(t))}</strong> <span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}
             <div class="item-sub">${t.items.length} Rx · ${escapeHtml(t.items.map(i=>i.drug).join(', ').slice(0,80))}</div>
             <div class="item-sub">Transfer date: ${fmtDate(t.createdAt)}</div>
           </div>
@@ -5016,7 +5031,7 @@ function openShipment(id) {
 
       ${manifest.map(t => `<div class="item-row">
         <div class="item-head">
-          <div><strong>${escapeHtml(t.patientName)}</strong> <span class="item-sub">· DOB ${fmtDate(t.patientDOB)}</span></div>
+          <div><strong>${escapeHtml(displayPatientName(t))}</strong> <span class="item-sub">· DOB ${fmtDate(t.patientDOB)}</span></div>
           <div style="display:flex;gap:6px">
             <button class="btn btn-secondary btn-sm" data-open-t="${t.id}">Open transfer</button>
             ${canEditPending ? `<button class="btn btn-secondary btn-sm" data-rm-t="${t.id}" title="Remove from this shipment" style="color:var(--danger)">× Remove</button>` : ''}
@@ -5968,7 +5983,7 @@ function renderRefillTab() {
           ? `<div class="empty"><h3>No matches</h3><p>No transfers found for "${escapeHtml(r.query)}" by ${r.searchBy === 'patient' ? 'patient' : 'Rx #'}.</p></div>`
           : `<table style="box-shadow:none;font-size:13px"><thead><tr><th>Patient</th><th>Origin → Fill</th><th>Drugs</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
               ${matches.map(t => `<tr>
-                <td><strong>${escapeHtml(t.patientName)}</strong>${t.transferType==='Refill'?' <span class="badge badge-verified" style="font-size:10px">Refill</span>':''}</td>
+                <td><strong>${escapeHtml(displayPatientName(t))}</strong>${t.transferType==='Refill'?' <span class="badge badge-verified" style="font-size:10px">Refill</span>':''}</td>
                 <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
                 <td>${escapeHtml(t.items.map(i=>i.drug).filter(Boolean).join(', ').slice(0,80) || '(no drugs listed)')}</td>
                 <td>${fmtDate(t.createdAt)}</td>
@@ -6020,7 +6035,7 @@ function renderRefillReview(t) {
 
   root.innerHTML = `
     <div class="page-header">
-      <div class="page-title">Refill: ${escapeHtml(t.patientName)}</div>
+      <div class="page-title">Refill: ${escapeHtml(displayPatientName(t))}</div>
       <button class="btn btn-secondary btn-sm" id="rf-back">← Back to search</button>
     </div>
 
@@ -6161,7 +6176,7 @@ function renderActionItems() {
         <th>Patient</th><th>Origin → Fill</th><th>Status</th><th>Since</th><th></th>
       </tr></thead><tbody>
         ${held.map(t => `<tr style="background:var(--warning-bg)">
-          <td><strong>${escapeHtml(t.patientName||'(bulk pickup)')}</strong></td>
+          <td><strong>${escapeHtml(displayPatientName(t)||'(bulk pickup)')}</strong></td>
           <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
           <td><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
           <td>${fmtDate(t.createdAt)}</td>
@@ -6203,7 +6218,7 @@ function renderActionItems() {
         <th>Patient</th><th>Origin → Fill</th><th>Canceled By</th><th>When</th><th>Items</th><th></th>
       </tr></thead><tbody>
         ${canceled.map(t => `<tr style="background:var(--danger-bg)">
-          <td><strong>${escapeHtml(t.patientName)}</strong>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}</td>
+          <td><strong>${escapeHtml(displayPatientName(t))}</strong>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}</td>
           <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
           <td>${escapeHtml(t.canceledBy||'—')}</td>
           <td>${t.canceledAt?new Date(t.canceledAt).toLocaleString():'—'}</td>
@@ -6219,7 +6234,7 @@ function renderActionItems() {
     ${acknowledged.length ? `<div class="card"><div class="card-header">Recently Acknowledged (${acknowledged.length})</div><div class="card-body">
       <table style="box-shadow:none"><thead><tr><th>Patient</th><th>Canceled</th><th>Acknowledged By</th><th>When</th></tr></thead><tbody>
         ${acknowledged.map(t => `<tr data-open="${t.id}" style="cursor:pointer">
-          <td><strong>${escapeHtml(t.patientName)}</strong></td>
+          <td><strong>${escapeHtml(displayPatientName(t))}</strong></td>
           <td>${t.canceledAt?new Date(t.canceledAt).toLocaleString():'—'}</td>
           <td>${escapeHtml(t.acknowledgedBy||'—')}</td>
           <td>${t.acknowledgedAt?new Date(t.acknowledgedAt).toLocaleString():'—'}</td>
@@ -7364,7 +7379,7 @@ function openAskQuestionModal(transferId) {
   if (t.originLocation && t.originLocation !== CURRENT_USER.location) otherSides.add(t.originLocation);
   if (t.fillLocation && t.fillLocation !== CURRENT_USER.location) otherSides.add(t.fillLocation);
   root.innerHTML = `<div class="modal-overlay" id="aqOverlay"><div class="modal" style="max-width:560px">
-    <div class="modal-header"><div><div class="modal-title">Ask a Question</div><div class="item-sub">About: ${escapeHtml(t.patientName)} · ${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</div></div><button class="modal-close" id="aqClose">&times;</button></div>
+    <div class="modal-header"><div><div class="modal-title">Ask a Question</div><div class="item-sub">About: ${escapeHtml(displayPatientName(t))} · ${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</div></div><button class="modal-close" id="aqClose">&times;</button></div>
     <div class="modal-body">
       <div class="form-group"><label>Your question</label><textarea id="aq-body" rows="4" placeholder="What do you need to know about this transfer?" style="width:100%;padding:9px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;min-height:90px"></textarea></div>
       <div style="margin-top:10px;padding:10px 12px;background:var(--primary-bg);border-radius:6px;font-size:12px">
