@@ -400,6 +400,41 @@ module.exports = async function (context, req) {
       return;
     }
 
+    // Cart diag — for one specific patient name, dump the full patient record and cart attempts.
+    if (body.mode === 'diagCart') {
+      const apiKey = process.env.HEALNOW_API_KEY;
+      const base = process.env.HEALNOW_API_BASE || 'https://api.healnow.io/v1';
+      const lastName = body.lastName || 'Nazario';
+      const firstName = body.firstName || 'Elizabeth';
+      const out = { lastName, firstName, found: null, cartByCalls: [] };
+      try {
+        const r = await fetch(`${base}/patients?last_name=${encodeURIComponent(lastName)}&per_page=50`, {
+          headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/json' }
+        });
+        const data = await r.json();
+        const list = Array.isArray(data) ? data : (data.data || data.patients || []);
+        const match = list.find(p => String(p.first_name||'').toLowerCase() === firstName.toLowerCase()) || list[0];
+        out.found = match;
+        if (match) {
+          // Try cart with various ID formats
+          for (const idKey of ['id', 'eid']) {
+            const idVal = match[idKey];
+            if (!idVal) continue;
+            try {
+              const cr = await fetch(`${base}/patients/${encodeURIComponent(idVal)}/cart`, {
+                headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/json' }
+              });
+              const ctxt = await cr.text();
+              let cparsed; try { cparsed = JSON.parse(ctxt); } catch { cparsed = { raw: ctxt.slice(0,300) }; }
+              out.cartByCalls.push({ idKey, idVal, status: cr.status, topKeys: cparsed && typeof cparsed === 'object' ? Object.keys(cparsed) : null, body: cparsed });
+            } catch (e) { out.cartByCalls.push({ idKey, idVal, error: e.message }); }
+          }
+        }
+      } catch (e) { out.error = e.message; }
+      context.res = { status: 200, body: out };
+      return;
+    }
+
     // Diag mode — call HealNow's /patients endpoint with no params and dump the response shape.
     // Plus a targeted search for one specific patient. Useful to figure out what query format HealNow accepts.
     if (body.mode === 'diagPatients') {
