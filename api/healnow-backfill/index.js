@@ -278,6 +278,10 @@ module.exports = async function (context, req) {
     let applied = 0, skipped = 0, noMatch = 0, errors = 0, pagesFetched = 0, ordersSeen = 0, rxSeen = 0;
     const sample = [];
     const errSamples = [];
+    // Optional: surface every order matching this patient name (substring, case-insensitive)
+    // so we can diagnose why a specific patient isn't matching.
+    const patientFilter = String(body.patientFilter || '').toLowerCase();
+    const patientMatches = [];
 
     let page = 1;
     const PER_PAGE = 50;
@@ -323,8 +327,20 @@ module.exports = async function (context, req) {
       for (const order of orders) {
         const prescriptions = order.prescriptions || order.line_items || order.items || [];
         if (!prescriptions.length) {
-          // Sometimes the prescriptions are nested differently; if there's just rx data on the order itself, wrap it.
           if (order.rx_number || order.rxNumber) prescriptions.push(order);
+        }
+        // Patient filter — log every order matching to diagnose mismatches
+        if (patientFilter) {
+          const pName = `${order.patient?.first_name||''} ${order.patient?.last_name||''} ${order.patient?.full_name||''}`.toLowerCase();
+          if (pName.includes(patientFilter)) {
+            patientMatches.push({
+              orderId: order.id, ref: order.ref, status: order.status, created: order.created_at,
+              firstName: order.patient?.first_name, lastName: order.patient?.last_name,
+              patientEid: order.patient?.eid, cartState: order.patient?.cart_state,
+              itemCount: prescriptions.length,
+              itemNames: prescriptions.map(p => p.name).slice(0, 5)
+            });
+          }
         }
         for (const rx of prescriptions) {
           rxSeen++;
@@ -354,6 +370,7 @@ module.exports = async function (context, req) {
       sample, errSamples
     };
     if (firstPageSample) out.firstPageDebug = firstPageSample;
+    if (patientFilter) out.patientMatches = patientMatches;
     context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: out };
   } catch (err) {
     context.log.error('healnow-backfill error:', err);
