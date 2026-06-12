@@ -130,23 +130,85 @@ function extractAmountCents(event) {
   return d.amount_in_cents || d.amount || (d.payment && d.payment.amount_in_cents) || null;
 }
 
-// Find the transfer + item whose receivingRxNumber matches.
-function findItemByRx(transfers, rxNumber) {
-  const target = String(rxNumber || '').replace(/\s+/g, '').trim();
-  if (!target) return null;
-  for (const t of transfers) {
-    for (const item of (t.items || [])) {
-      const candidate = String(item.receivingRxNumber || '').replace(/\s+/g, '').trim();
-      if (candidate && candidate === target) return { transfer: t, item };
+// Normalize names so "BOLAND, CARISSA", "Boland Carissa", "carissa boland" all compare equal.
+function normName(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[,\.]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(' ');
+}
+
+function extractPatientName(event) {
+  const d = event && event.data;
+  if (!d) return '';
+  const p = d.patient || d.customer || {};
+  // Try the most common shapes from HealNow / common payment APIs
+  return p.full_name || p.name ||
+    [p.first_name || p.firstName, p.last_name || p.lastName].filter(Boolean).join(' ') ||
+    d.patient_name || '';
+}
+
+function extractEventDate(event) {
+  const d = event && event.data;
+  if (!d) return new Date();
+  const iso = event.created_at || event.createdAt || d.created_at || d.createdAt || d.paid_at;
+  return iso ? new Date(iso) : new Date();
+}
+
+// Find the transfer + item by Rx number first; fall back to patient name + recent date window
+// when receivingRxNumber wasn't entered in the portal.
+function findItemForEvent(transfers, event, context) {
+  const rxNumber = extractRxNumber(event);
+  const rxTarget = String(rxNumber || '').replace(/\s+/g, '').trim();
+
+  // 1) Primary: match by receivingRxNumber
+  if (rxTarget) {
+    for (const t of transfers) {
+      for (const item of (t.items || [])) {
+        const candidate = String(item.receivingRxNumber || '').replace(/\s+/g, '').trim();
+        if (candidate && candidate === rxTarget) return { transfer: t, item, matchedBy: 'receivingRx' };
+      }
+    }
+    // 2) Fallback A: match by origin Rx (in case the PMS only knows the original)
+    for (const t of transfers) {
+      for (const item of (t.items || [])) {
+        const candidate = String(item.rxNumber || '').replace(/\s+/g, '').trim();
+        if (candidate && candidate === rxTarget) return { transfer: t, item, matchedBy: 'originRx' };
+      }
     }
   }
-  // Fallback to origin Rx number — useful when the PMS only knows the original.
-  for (const t of transfers) {
-    for (const item of (t.items || [])) {
-      const candidate = String(item.rxNumber || '').replace(/\s+/g, '').trim();
-      if (candidate && candidate === target) return { transfer: t, item };
+
+  // 3) Fallback B: patient name + 60-day window of active transfers + drug heuristic
+  // Used when staff forgot to enter receivingRxNumber. Picks the single best candidate; if ambiguous
+  // (multiple transfers for same patient with no Rx), bail out so we don't paint the wrong record.
+  const eventName = normName(extractPatientName(event));
+  if (!eventName) return null;
+
+  const eventDate = extractEventDate(event);
+  const windowMs = 60 * 86400000;
+  const candidates = transfers.filter(t => {
+    if (!t.patientName || normName(t.patientName) !== eventName) return false;
+    if (['Canceled'].includes(t.status)) return false;
+    const created = t.createdAt ? new Date(t.createdAt) : null;
+    if (!created) return false;
+    const delta = Math.abs(eventDate - created);
+    return delta <= windowMs;
+  });
+  if (candidates.length === 0) return null;
+  // If only one transfer for this patient in the window, use its first unpaid item.
+  if (candidates.length === 1) {
+    const t = candidates[0];
+    const item = (t.items || []).find(i => i.paidStatus !== 'paid') || (t.items || [])[0];
+    if (item) {
+      context.log(`HealNow webhook: matched by patient-name fallback (${t.patientName}) — Rx number was missing on transfer ${t.id}`);
+      return { transfer: t, item, matchedBy: 'patientName' };
     }
   }
+  // Multiple candidates — refuse to guess. Log and let staff reconcile.
+  context.log.warn(`HealNow webhook: ambiguous fallback for patient ${extractPatientName(event)} — ${candidates.length} candidate transfers`);
   return null;
 }
 
@@ -224,27 +286,23 @@ module.exports = async function (context, req) {
     }
 
     const action = eventType.split('::')[1]; // pending | paid | canceled | removed
-    const rxNumber = extractRxNumber(event);
     const orderId = extractOrderId(event);
     const amountCents = extractAmountCents(event);
 
-    if (!rxNumber) {
-      context.log.warn(`HealNow webhook ${eventType}: no Rx number in payload`, JSON.stringify(event).slice(0, 300));
-      context.res = { status: 200, body: { ignored: 'no rx number' } };
-      return;
-    }
-
-    // Load transfers + find matching item
+    // Match the event to a transfer item. Tries receivingRx → originRx → patient name + 60-day
+    // window (in case Rx wasn't entered). Returns null when ambiguous so we don't mispaint.
     const transfers = await listTransfers(context);
-    const match = findItemByRx(transfers, rxNumber);
+    const match = findItemForEvent(transfers, event, context);
     if (!match) {
-      context.log.warn(`HealNow webhook ${eventType}: no transfer item matches Rx ${rxNumber}`);
-      // 200 so HealNow doesn't keep retrying for an Rx we don't know about.
-      context.res = { status: 200, body: { ignored: 'no matching transfer', rxNumber } };
+      const rxNumber = extractRxNumber(event);
+      const patientName = extractPatientName(event);
+      context.log.warn(`HealNow webhook ${eventType}: no transfer match. Rx=${rxNumber||'(none)'} Patient=${patientName||'(none)'}`);
+      context.res = { status: 200, body: { ignored: 'no matching transfer', rxNumber, patientName } };
       return;
     }
 
-    const { transfer: t, item } = match;
+    const { transfer: t, item, matchedBy } = match;
+    const rxNumber = extractRxNumber(event);
     const now = new Date().toISOString();
     item.healnowOrderId = orderId || item.healnowOrderId || null;
     item.healnowEventAt = now;
@@ -283,13 +341,16 @@ module.exports = async function (context, req) {
     // Roll up the per-item paid state to the transfer-level paid field for the UI badge.
     rollupPaid(t);
 
+    // Record how we matched so we have an audit trail when the patient-name fallback fires.
+    item.healnowMatchedBy = matchedBy;
+
     await saveTransfer(t);
-    context.log(`HealNow webhook ${eventType} applied to transfer ${t.id} item ${item.id} (Rx ${rxNumber})`);
+    context.log(`HealNow webhook ${eventType} applied to transfer ${t.id} item ${item.id} (matched by ${matchedBy}, Rx ${rxNumber || '(none)'})`);
 
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: { ok: true, transferId: t.id, itemId: item.id, rxNumber, action }
+      body: { ok: true, transferId: t.id, itemId: item.id, rxNumber, action, matchedBy }
     };
   } catch (err) {
     context.log.error('healnow-webhook error:', err);
