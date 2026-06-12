@@ -1197,7 +1197,7 @@ function renderTransfers() {
     <table>
       <thead><tr>
         <th style="width:30px"></th>
-        <th>ID</th><th>Patient</th><th>Medication</th><th>From → Fill</th><th>Ship To</th><th>Status</th><th>SLA</th>
+        <th>ID</th><th>Patient</th><th>Medication</th><th>From → Fill</th><th>Ship To</th><th>Status</th><th>Payment</th><th>SLA</th>
         <th>Transfer Date</th><th>Ant Ship</th><th>Ship Date</th><th>Tracking</th><th>Actions</th>
       </tr></thead>
       <tbody>
@@ -1222,6 +1222,10 @@ function renderTransfers() {
             <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
             <td>${escapeHtml(t.shipTo)}${t.pickupAtPharmacy?`<div class="item-sub" style="color:var(--primary-dark);font-weight:600">📍 ${escapeHtml(t.pickupLocation||'?')}${t.isBulkPickup?' · BULK':''}</div>`:(t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:'')}</td>
             <td onclick="event.stopPropagation()"><select class="row-status status-select" data-status-id="${t.id}" style="font-size:11px;padding:3px 4px">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
+            <td>${(() => {
+              const ps = paymentStatusFor(t);
+              return `<span title="${escapeHtml(ps.tooltip||'')}" style="display:inline-block;padding:3px 8px;font-size:11px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px;white-space:nowrap">${escapeHtml(ps.label)}</span>`;
+            })()}</td>
             <td>${slaCell}</td>
             <td>${fmtDate(t.createdAt)}</td>
             <td>${fmtDate(t.anticipatedShipDate)}</td>
@@ -1236,7 +1240,7 @@ function renderTransfers() {
                 // Pending = show the manual Paid-in-Store override button (cash/in-person).
                 // Anything else = show the status badge. The detail modal still has the override.
                 if (ps.code === 'pending') {
-                  return `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Mark as paid in store (cash / in-person). HealNow payments auto-update without clicking." style="padding:3px 9px;font-size:11px;font-weight:600">💲 Mark Paid in Store</button>`;
+                  return `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Mark Paid in Store (cash / in-person). HealNow payments auto-update without clicking." style="padding:3px 8px;font-size:13px;font-weight:700">💲</button>`;
                 }
                 return `<span title="${escapeHtml(ps.tooltip||'')}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px">${escapeHtml(ps.label)}</span>`;
               })()}
