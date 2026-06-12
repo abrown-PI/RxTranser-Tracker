@@ -7092,46 +7092,42 @@ startFedexAutoRefresh();
 startTransferAutoRefresh();
 initAuth();
 
-// Load persisted transfers from Table Storage and merge into the in-memory array, then re-render.
-// Also handles ?transfer=ID deep-links (e.g. from Teams notifications) by opening the matching detail modal.
+// Load persisted transfers + shipments in parallel, THEN run heal-on-load. Both heals
+// reference TRANSFERS, so they can't run inside the shipment IIFE alone (race condition
+// where TRANSFERS is still loading).
 (async () => {
-  const loaded = await apiLoadTransfers();
-  if (loaded && loaded.length) {
+  const [tLoaded, sLoaded] = await Promise.all([
+    apiLoadTransfers().catch(() => null),
+    apiLoadShipments().catch(() => null)
+  ]);
+  // Merge transfers
+  if (tLoaded && tLoaded.length) {
     const existingIds = new Set(TRANSFERS.map(t => t.id));
-    loaded.forEach(t => { if (!existingIds.has(t.id)) TRANSFERS.unshift(t); });
-    render();
+    tLoaded.forEach(t => { if (!existingIds.has(t.id)) TRANSFERS.unshift(t); });
   }
-  const params = new URLSearchParams(window.location.search);
-  const tid = params.get('transfer');
-  if (tid) {
-    const t = TRANSFERS.find(x => String(x.id) === String(tid));
-    if (t) openTransfer(t.id);
-  }
-})();
-
-// Load persisted shipments from Table Storage and merge with the historical
-// IIFE-derived ones. Backend wins for matching ids; we also dedupe by tracking
-// number so a backend shipment that later picks up the same tracking as an
-// IIFE shipment doesn't double-show in the Shipments tab.
-(async () => {
-  const loaded = await apiLoadShipments();
-  if (loaded && loaded.length) {
+  // Merge shipments (backend wins; dedupe IIFE-derived by tracking number)
+  if (sLoaded && sLoaded.length) {
     const existingIds = new Set(SHIPMENTS.map(s => s.id));
-    const backendTracking = new Set(loaded.map(s => (s.trackingNumber || '').trim()).filter(Boolean));
-    // Drop IIFE-derived rows that the backend now owns (matched by tracking number).
+    const backendTracking = new Set(sLoaded.map(s => (s.trackingNumber || '').trim()).filter(Boolean));
     for (let i = SHIPMENTS.length - 1; i >= 0; i--) {
       const tn = (SHIPMENTS[i].trackingNumber || '').trim();
       if (tn && backendTracking.has(tn) && !existingIds.has(SHIPMENTS[i].id)) {
         SHIPMENTS.splice(i, 1);
       }
     }
-    loaded.forEach(s => { if (!existingIds.has(s.id)) SHIPMENTS.unshift(s); });
-    render();
+    sLoaded.forEach(s => { if (!existingIds.has(s.id)) SHIPMENTS.unshift(s); });
   }
-  // Heal-on-load: if a bulk shipment is in Received status but any of its transfers are
-  // still in a pre-shipped status (New / In Progress / Pending Clarification / Needs Formula /
-  // Shipped / Delivered), the cascade missed them — propagate Received to the transfer so the
-  // UI stays consistent. Idempotent and silent; logs to console only.
+  render();
+  // Deep-link: ?transfer=ID
+  const params = new URLSearchParams(window.location.search);
+  const tid = params.get('transfer');
+  if (tid) {
+    const t = TRANSFERS.find(x => String(x.id) === String(tid));
+    if (t) openTransfer(t.id);
+  }
+
+  // ----- Heal-on-load passes (both safe to run once data is present) -----
+  // 1) Received-status cascade: if a bulk is Received but a transfer in it is still pre-shipped, fix it.
   try {
     const heal = SHIPMENTS.filter(s => s.status === 'Received' && Array.isArray(s.transferIds));
     for (const s of heal) {
@@ -7146,13 +7142,13 @@ initAuth();
         apiUpdateTransfer(t);
       }
     }
-  } catch (e) { console.warn('heal-on-load failed', e); }
-  // Heal-on-load: for shipTo='Pharmacy' transfers, the shipping address should be the origin
-  // pharmacy's address (since origin = receiving pharmacy). OCR-imported PK sheets often left
-  // the patient's home address in shipAddr1 by mistake. Sweep and correct, but only when the
-  // current address doesn't match the destination pharmacy — so legitimate ones aren't touched.
+  } catch (e) { console.warn('heal-on-load (received cascade) failed', e); }
+  // 2) Pharmacy ship-to address: for shipTo='Pharmacy' the address should be the origin
+  // pharmacy's address (origin = receiving pharmacy). Older OCR-imported records left the
+  // patient's home address there. Replace whenever the saved address doesn't match.
   try {
     let healedAddr = 0;
+    const inspected = TRANSFERS.length;
     for (const t of TRANSFERS) {
       if (t.shipTo !== 'Pharmacy') continue;
       if (t.pickupAtPharmacy) continue;
@@ -7162,7 +7158,6 @@ initAuth();
       const cityMatches = (t.shipCity || '').trim().toLowerCase() === (destPharm.city || '').trim().toLowerCase();
       const zipMatches = (t.shipZip || '').trim() === (destPharm.zip || '').trim();
       if (cityMatches && zipMatches && t.shipAddr1) continue;
-      // Replace with the pharmacy's canonical address
       console.log('Healing address on transfer', t.id, t.patientName, 'shipTo=Pharmacy', t.originLocation, 'was:', t.shipAddr1, t.shipCity, '→', destPharm.addr1, destPharm.city);
       t.shipAddr1 = destPharm.addr1;
       t.shipAddr2 = destPharm.addr2 || '';
