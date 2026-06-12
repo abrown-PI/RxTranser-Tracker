@@ -1155,7 +1155,10 @@ function renderTransfers() {
       </div>
     </div>
     <div class="filters" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:240px;flex:0 1 260px" />
+      <button class="btn btn-secondary btn-sm" id="f-saveDefault" title="Save current filters as your default view (this browser, your account)" style="padding:3px 9px;font-size:11px">💾 Save as default</button>
+      <button class="btn btn-secondary btn-sm" id="f-resetAll" title="Clear every filter and reset to all transfers" style="padding:3px 9px;font-size:11px">↺ Reset</button>
+      <span style="width:1px;height:24px;background:var(--gray-300);margin:0 4px"></span>
+      <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:200px;flex:0 1 220px" />
       <label style="font-size:12px;color:var(--gray-600)">Sort</label>
       <select id="f-sortBy">
         <option value="dateDesc" ${state.sortBy==='dateDesc'?'selected':''}>Transfer date (newest)</option>
@@ -1175,9 +1178,6 @@ function renderTransfers() {
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
       <input id="f-med" placeholder="Filter by medication…" value="${escapeHtml(state.filterMed||'')}" style="min-width:180px" />
-      <span style="width:1px;height:24px;background:var(--gray-300);margin:0 4px"></span>
-      <button class="btn btn-secondary btn-sm" id="f-saveDefault" title="Save current filters as your default view (this browser, your account)" style="padding:3px 9px;font-size:11px">💾 Save as default</button>
-      <button class="btn btn-secondary btn-sm" id="f-resetAll" title="Clear every filter and reset to all transfers" style="padding:3px 9px;font-size:11px">↺ Reset</button>
       <div style="flex:1"></div>
       <label class="checkbox-row" style="font-size:12px"><input type="checkbox" id="selectAllPrint" /> Select all visible for print</label>
     </div>
@@ -1197,7 +1197,7 @@ function renderTransfers() {
     <table>
       <thead><tr>
         <th style="width:30px"></th>
-        <th>ID</th><th>Patient</th><th>Medication</th><th>From → Fill</th><th>Ship To</th><th>Status</th><th>Payment</th><th>SLA</th>
+        <th>ID</th><th>Patient</th><th>Medication</th><th>From → Fill</th><th>Ship To</th><th>Status</th><th>Payment</th><th>Pay Date</th><th>SLA</th>
         <th>Transfer Date</th><th>Ant Ship</th><th>Ship Date</th><th>Tracking</th><th>Actions</th>
       </tr></thead>
       <tbody>
@@ -1225,6 +1225,12 @@ function renderTransfers() {
             <td>${(() => {
               const ps = paymentStatusFor(t);
               return `<span title="${escapeHtml(ps.tooltip||'')}" style="display:inline-block;padding:3px 8px;font-size:11px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px;white-space:nowrap">${escapeHtml(ps.label)}</span>`;
+            })()}</td>
+            <td>${(() => {
+              // Pay Date — earliest paidAt across items (HealNow) or the manual t.paidAt.
+              const items = (t.items || []).filter(i => i.paidAt);
+              const earliest = items.length ? items.map(i => i.paidAt).sort()[0] : (t.paid === 'Paid' ? t.paidAt : null);
+              return earliest ? fmtDate(earliest) : '<span class="item-sub">—</span>';
             })()}</td>
             <td>${slaCell}</td>
             <td>${fmtDate(t.createdAt)}</td>
@@ -3518,8 +3524,15 @@ const PRELOADED_DRUGS = [
 // freeform names) passes through untouched.
 function canonicalizeDrugName(raw) {
   if (!raw) return raw;
-  const s = String(raw);
-  // Florida-style "N. METHYLCOBALAMIN/(TIRZEPATIDE|SEMAGLUTIDE) ... (MDV|SDV)"
+  // Step 1: strip OCR garbage from the front — anything before the first letter
+  // (e.g. "' hr @05." prefix on Kelly Livingston's row, ":1:" prefix on Sembler's).
+  // Also drop zero-width characters and collapse whitespace.
+  let s = String(raw)
+    .replace(/[​-‍﻿]/g, '')
+    .replace(/^[^A-Za-z0-9]+/, '') // leading non-alnum garbage
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Step 2: Florida-style "N. METHYLCOBALAMIN/(TIRZEPATIDE|SEMAGLUTIDE) ... (MDV|SDV)"
   // → matching canonical entry by month + vial type.
   const m = s.match(/^\s*(\d+)\s*[\.\)\:\-]\s*METHYLCOBALAMIN\s*\/\s*(TIRZEPATIDE|SEMAGLUTIDE)\b.*?\b(MDV|SDV)\b/i);
   if (m) {
@@ -3530,14 +3543,29 @@ function canonicalizeDrugName(raw) {
     const canonical = PRELOADED_DRUGS.find(d => d.toUpperCase().startsWith(prefix.toUpperCase()));
     if (canonical) return canonical;
   }
-  // Injection-kit shorthand — "inj kit - tirz", "Injection kit - sema", etc.
-  // Only converts when the drug family is identifiable; bare "Injection kit"
-  // with no drug suffix is left alone for a human to clarify.
+  // Step 3: injection-kit shorthand — "inj kit - tirz", "Injection kit - sema", etc.
   const k = s.match(/^\s*inj(?:ection)?\s*kit\b.*?\b(tirz|sema)/i);
   if (k) {
     return /^tirz/i.test(k[1]) ? 'Injection Kit - Tirzepatide' : 'Injection Kit - Semaglutide';
   }
-  return raw;
+  // Step 4: try to match against the known drugs list (PRELOADED + previously used). If the
+  // cleaned OCR text contains a known drug name as a substring, snap to the canonical form.
+  // This catches cases like ", METHYLCOBALAMIN/TIRZEPATIDE..." after the leading-garbage strip.
+  try {
+    const sUp = s.toUpperCase();
+    const known = (typeof getKnownDrugs === 'function') ? getKnownDrugs() : PRELOADED_DRUGS;
+    // Sort by length descending so the most-specific match (e.g. "TIRZEPATIDE/B12 MDV (MONTH #3) INJECTABLE 11.2/0.5MG/ML")
+    // wins over a generic substring (e.g. "TIRZEPATIDE").
+    const sorted = known.slice().sort((a, b) => b.length - a.length);
+    for (const candidate of sorted) {
+      const cUp = candidate.toUpperCase();
+      if (sUp.includes(cUp)) return candidate;
+      // Also try the reverse — if the candidate contains our cleaned text (e.g. user typed a
+      // partial drug name and the canonical is longer), use the canonical.
+      if (cUp.includes(sUp) && sUp.length > 8) return candidate;
+    }
+  } catch {}
+  return s || raw; // return cleaned version even when no canonical match — drops the garbage prefix
 }
 
 // Unique drug names seen across every transfer in the system, alphabetized.
