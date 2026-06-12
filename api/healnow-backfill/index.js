@@ -346,9 +346,9 @@ async function sweepCartsForUnpaidTransfers(context, dryRun) {
     try {
       const patient = await findHealnowPatient(firstName, lastName, context);
       if (!patient) continue;
-      // Fast pre-check: patient.cart_state tells us if there's anything to fetch.
-      // Known values include 'open' (active cart) and presumably 'empty' (none).
-      if (patient.cart_state && patient.cart_state !== 'open') continue;
+      // Try the cart regardless of cart_state — HealNow may use different values for new vs
+      // partially-paid carts, and the fast bail risked silently skipping valid carts.
+      // The actual cart fetch + cart.prescriptions check below is the real filter.
       const cart = await fetchPatientCart(patient.id, context);
       if (!cart) continue;
       const cartRxs = cart.prescriptions || cart.items || [];
