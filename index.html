@@ -4917,7 +4917,10 @@ function openShipment(id) {
 
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div class="section-title" style="margin:0">Manifest (${manifest.length} transfer${manifest.length!==1?'s':''}, ${allItems.length} Rx)${isReceiver?` — ${unpackedCount}/${allItems.length} unpacked`:''}</div>
-        ${canEditPending ? `<button class="btn btn-primary btn-sm" id="sm-addTransfers">+ Add transfers</button>` : ''}
+        <div style="display:flex;gap:8px">
+          ${isReceiver && s.status === 'Delivered' && allItems.length > 0 ? `<button class="btn btn-secondary btn-sm" id="sm-checkAll" title="Check off every Rx at once (only use if you've already verified the contents)">${allUnpacked?'☑ Uncheck all':'☐ Check all'}</button>` : ''}
+          ${canEditPending ? `<button class="btn btn-primary btn-sm" id="sm-addTransfers">+ Add transfers</button>` : ''}
+        </div>
       </div>
       ${isReceiver && (s.status === 'In Transit' || s.status === 'Pending') ? `
       <div style="background:var(--warning-bg);border:1px solid var(--warning);padding:12px 14px;border-radius:var(--radius);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -4987,6 +4990,14 @@ function openShipment(id) {
   });
   const addBtn = document.getElementById('sm-addTransfers');
   if (addBtn) addBtn.onclick = () => openAddTransfersToShipment(s.id);
+  const checkAllBtn = document.getElementById('sm-checkAll');
+  if (checkAllBtn) checkAllBtn.onclick = () => {
+    // If everything's already checked, toggle clears them; otherwise check all.
+    const turningOn = !allUnpacked;
+    allItems.forEach(({i}) => { s.unpacked[i.id] = turningOn; });
+    apiUpdateShipment(s);
+    openShipment(s.id);
+  };
   root.querySelectorAll('[data-unpack]').forEach(cb => cb.onchange = e => { s.unpacked[+cb.dataset.unpack] = e.target.checked; apiUpdateShipment(s); openShipment(s.id); });
   const arrived = document.getElementById('sm-arrived');
   if (arrived) arrived.onclick = () => {
