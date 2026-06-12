@@ -259,13 +259,151 @@ async function processPrescription(rx, order, transfers, dryRun, sample, context
   return { result: 'applied', rxNumber, transferId: t.id, newPaidStatus };
 }
 
+// Look up a HealNow patient by name. HealNow API has GET /v1/patients with name filter.
+// Returns the first match or null. We use this to find a patient_id (HealNow's internal id)
+// when we only know a name from our portal transfers.
+async function findHealnowPatient(firstName, lastName, context) {
+  const apiKey = process.env.HEALNOW_API_KEY;
+  const base = process.env.HEALNOW_API_BASE || 'https://api.healnow.io/v1';
+  if (!apiKey) return null;
+  // Try a few common search param names. HealNow's exact schema isn't documented publicly.
+  const candidates = [
+    `${base}/patients?first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}`,
+    `${base}/patients?firstName=${encodeURIComponent(firstName)}&lastName=${encodeURIComponent(lastName)}`,
+    `${base}/patients?search=${encodeURIComponent(firstName + ' ' + lastName)}`,
+    `${base}/patients?q=${encodeURIComponent(firstName + ' ' + lastName)}`
+  ];
+  for (const url of candidates) {
+    try {
+      const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/json' } });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const list = Array.isArray(data) ? data : (data.patients || data.data || []);
+      // Find the first one whose first+last name matches case-insensitively.
+      const match = list.find(p => {
+        const fn = String(p.first_name || p.firstName || '').toLowerCase().trim();
+        const ln = String(p.last_name || p.lastName || '').toLowerCase().trim();
+        return fn === String(firstName).toLowerCase().trim() && ln === String(lastName).toLowerCase().trim();
+      });
+      if (match) return match;
+    } catch (e) {
+      context.log.warn(`Patient search failed for ${url}: ${e.message || e}`);
+    }
+  }
+  return null;
+}
+
+// Fetch an unpaid cart for a HealNow patient. Returns the cart object or null.
+async function fetchPatientCart(patientId, context) {
+  const apiKey = process.env.HEALNOW_API_KEY;
+  const base = process.env.HEALNOW_API_BASE || 'https://api.healnow.io/v1';
+  if (!apiKey || !patientId) return null;
+  try {
+    const resp = await fetch(`${base}/patients/${encodeURIComponent(patientId)}/cart`, {
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/json' }
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data || null;
+  } catch (e) {
+    context.log.warn(`Cart fetch failed for patient ${patientId}: ${e.message || e}`);
+    return null;
+  }
+}
+
+// Sweep unpaid portal transfers and check each patient's HealNow cart. Applies cart_created
+// status to items that have an active cart on HealNow. Returns counts.
+async function sweepCartsForUnpaidTransfers(context, dryRun) {
+  const transfers = await listTransfers();
+  // Only check transfers that don't already have a known HealNow state on every item.
+  const candidates = transfers.filter(t => {
+    if (['Canceled'].includes(t.status)) return false;
+    const items = t.items || [];
+    if (!items.length) return false;
+    return items.some(i => !i.paidStatus); // at least one item with no known HealNow state
+  });
+  context.log(`Cart sweep: ${candidates.length} candidate transfers`);
+  let patientsChecked = 0, cartsFound = 0, applied = 0, skipped = 0, errors = 0;
+  // Dedupe by patient name so we only call HealNow once per unique patient.
+  const seenPatients = new Set();
+  const sample = [];
+  for (const t of candidates) {
+    const name = String(t.patientName || '').trim();
+    if (!name) continue;
+    // patientName is stored as "LAST, FIRST"; split into first + last for HealNow's API.
+    let firstName = '', lastName = '';
+    if (name.includes(',')) {
+      const parts = name.split(',').map(s => s.trim());
+      lastName = parts[0] || '';
+      firstName = parts[1] || '';
+    } else {
+      const parts = name.split(/\s+/);
+      firstName = parts[0] || '';
+      lastName = parts.slice(1).join(' ');
+    }
+    const key = `${firstName.toLowerCase()}|${lastName.toLowerCase()}`;
+    if (seenPatients.has(key)) continue; // already looked up this patient
+    seenPatients.add(key);
+    patientsChecked++;
+    try {
+      const patient = await findHealnowPatient(firstName, lastName, context);
+      if (!patient) continue;
+      const cart = await fetchPatientCart(patient.id, context);
+      if (!cart) continue;
+      const cartItems = cart.items || cart.line_items || [];
+      if (!cartItems.length) continue;
+      cartsFound++;
+      // Find every portal transfer for this patient (could be more than one)
+      const portalTs = transfers.filter(x => normName(x.patientName) === normName(`${firstName} ${lastName}`));
+      // Apply cart_created status to each item in each portal transfer (idempotent — already-paid items skipped)
+      for (const portalT of portalTs) {
+        let touched = false;
+        for (const item of (portalT.items || [])) {
+          if (item.paidStatus === 'paid' || item.paidStatus === 'canceled' || item.paidStatus === 'removed') {
+            skipped++;
+            continue;
+          }
+          if (item.paidStatus === 'cart_created') {
+            skipped++;
+            continue;
+          }
+          if (!dryRun) {
+            item.paidStatus = 'cart_created';
+            item.healnowCartCreatedAt = cart.created_at || new Date().toISOString();
+            item.healnowMatchedBy = 'patientCartSweep';
+            touched = true;
+          }
+          applied++;
+          if (sample.length < 20) sample.push({ patient: name, transferId: portalT.id, cartId: cart.id, dryRun });
+        }
+        if (touched && !dryRun) {
+          rollupPaid(portalT);
+          await saveTransfer(portalT);
+        }
+      }
+    } catch (e) {
+      errors++;
+      context.log.warn(`Cart sweep error for ${firstName} ${lastName}: ${e.message || e}`);
+    }
+  }
+  return { patientsChecked, cartsFound, applied, skipped, errors, sample };
+}
+
 module.exports = async function (context, req) {
   try {
     if (req.method === 'GET') {
-      context.res = { status: 200, body: { ok: true, service: 'healnow-backfill', usage: 'POST with {from,to,dryRun}' } };
+      context.res = { status: 200, body: { ok: true, service: 'healnow-backfill', usage: 'POST {from,to,dryRun} for paid orders; POST {mode:"carts",dryRun} for unpaid carts' } };
       return;
     }
     const body = req.body || {};
+
+    // Cart sweep mode — look up unpaid carts per portal patient (HealNow's /orders only returns paid).
+    if (body.mode === 'carts') {
+      const dryRun = !!body.dryRun;
+      const result = await sweepCartsForUnpaidTransfers(context, dryRun);
+      context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: { dryRun, mode: 'carts', ...result } };
+      return;
+    }
     const today = new Date();
     const defaultFrom = new Date(today.getTime() - 30 * 86400000);
     const fmt = d => d.toISOString().slice(0, 10);
