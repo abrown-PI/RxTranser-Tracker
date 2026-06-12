@@ -181,14 +181,14 @@ function findItemForEvent(transfers, event, context) {
     }
   }
 
-  // 3) Fallback B: patient name + 60-day window of active transfers + drug heuristic
-  // Used when staff forgot to enter receivingRxNumber. Picks the single best candidate; if ambiguous
-  // (multiple transfers for same patient with no Rx), bail out so we don't paint the wrong record.
+  // 3) Fallback B: patient name + 7-day window of active transfers (most patients fill monthly,
+  // so a wider window risks matching last month's transfer by mistake). Used when staff forgot
+  // to enter receivingRxNumber. Picks the single best candidate; bails if ambiguous.
   const eventName = normName(extractPatientName(event));
   if (!eventName) return null;
 
   const eventDate = extractEventDate(event);
-  const windowMs = 60 * 86400000;
+  const windowMs = 7 * 86400000;
   const candidates = transfers.filter(t => {
     if (!t.patientName || normName(t.patientName) !== eventName) return false;
     if (['Canceled'].includes(t.status)) return false;
@@ -343,6 +343,16 @@ module.exports = async function (context, req) {
 
     // Record how we matched so we have an audit trail when the patient-name fallback fires.
     item.healnowMatchedBy = matchedBy;
+
+    // Back-fill receivingRxNumber when patient-name fallback matched and the event has one.
+    // This means future events for this Rx (and humans looking at the transfer) get the canonical
+    // number without anyone having to re-enter it. We only fill when the field is empty so a
+    // human-entered value never gets overwritten.
+    if (matchedBy === 'patientName' && rxNumber && !item.receivingRxNumber) {
+      item.receivingRxNumber = rxNumber;
+      item.healnowBackfilledRx = true;
+      context.log(`HealNow webhook: back-filled receivingRxNumber=${rxNumber} on transfer ${t.id} item ${item.id}`);
+    }
 
     await saveTransfer(t);
     context.log(`HealNow webhook ${eventType} applied to transfer ${t.id} item ${item.id} (matched by ${matchedBy}, Rx ${rxNumber || '(none)'})`);
