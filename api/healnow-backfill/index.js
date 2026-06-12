@@ -404,6 +404,47 @@ module.exports = async function (context, req) {
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: { dryRun, mode: 'carts', ...result } };
       return;
     }
+
+    // Diag mode — call HealNow's /patients endpoint with no params and dump the response shape.
+    // Plus a targeted search for one specific patient. Useful to figure out what query format HealNow accepts.
+    if (body.mode === 'diagPatients') {
+      const apiKey = process.env.HEALNOW_API_KEY;
+      const base = process.env.HEALNOW_API_BASE || 'https://api.healnow.io/v1';
+      const target = body.patient || 'Nazario';
+      const diagOut = { tried: [], unfiltered: null };
+      // Try unfiltered list first
+      try {
+        const r1 = await fetch(`${base}/patients?per_page=5`, { headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/json' } });
+        const txt1 = await r1.text();
+        let parsed; try { parsed = JSON.parse(txt1); } catch { parsed = { raw: txt1.slice(0,500) }; }
+        diagOut.unfiltered = {
+          status: r1.status,
+          topLevelKeys: parsed && typeof parsed === 'object' ? Object.keys(parsed) : null,
+          firstPatient: Array.isArray(parsed) ? parsed[0] : (parsed.patients?.[0] || parsed.data?.[0] || null),
+          totalReturned: Array.isArray(parsed) ? parsed.length : (parsed.patients?.length || parsed.data?.length || 0)
+        };
+      } catch (e) { diagOut.unfiltered = { error: e.message }; }
+      // Try various filter shapes
+      const shapes = [
+        `?last_name=${encodeURIComponent(target)}`,
+        `?lastName=${encodeURIComponent(target)}`,
+        `?search=${encodeURIComponent(target)}`,
+        `?q=${encodeURIComponent(target)}`,
+        `?name=${encodeURIComponent(target)}`,
+        `?filter[last_name]=${encodeURIComponent(target)}`
+      ];
+      for (const s of shapes) {
+        try {
+          const r = await fetch(`${base}/patients${s}`, { headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/json' } });
+          const txt = await r.text();
+          let parsed; try { parsed = JSON.parse(txt); } catch { parsed = null; }
+          const list = Array.isArray(parsed) ? parsed : (parsed?.patients || parsed?.data || []);
+          diagOut.tried.push({ url: s, status: r.status, count: list.length, firstMatchName: list[0] ? `${list[0].first_name||list[0].firstName||''} ${list[0].last_name||list[0].lastName||''}` : null });
+        } catch (e) { diagOut.tried.push({ url: s, error: e.message }); }
+      }
+      context.res = { status: 200, body: diagOut };
+      return;
+    }
     const today = new Date();
     const defaultFrom = new Date(today.getTime() - 30 * 86400000);
     const fmt = d => d.toISOString().slice(0, 10);
