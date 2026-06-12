@@ -130,6 +130,12 @@ function extractAmountCents(event) {
   return d.amount_in_cents || d.amount || (d.payment && d.payment.amount_in_cents) || null;
 }
 
+// Strip the prefix + suffix off an Rx like "RX#2566622-03" → "2566622". HealNow appends a
+// per-line index in webhook payloads; staff enter just the base number in the portal.
+function normRx(rx) {
+  return String(rx || '').replace(/\s+/g, '').replace(/^RX#?/i, '').split('-')[0].trim();
+}
+
 // Normalize names so "BOLAND, CARISSA", "Boland Carissa", "carissa boland" all compare equal.
 function normName(s) {
   return String(s || '')
@@ -162,21 +168,21 @@ function extractEventDate(event) {
 // when receivingRxNumber wasn't entered in the portal.
 function findItemForEvent(transfers, event, context) {
   const rxNumber = extractRxNumber(event);
-  const rxTarget = String(rxNumber || '').replace(/\s+/g, '').trim();
+  // Normalize: "RX#2566622-03" → "2566622". The -NN suffix is HealNow's per-line index; staff
+  // enter just the base number. Compare both sides normalized so they match.
+  const rxTarget = normRx(rxNumber);
 
   // 1) Primary: match by receivingRxNumber
   if (rxTarget) {
     for (const t of transfers) {
       for (const item of (t.items || [])) {
-        const candidate = String(item.receivingRxNumber || '').replace(/\s+/g, '').trim();
-        if (candidate && candidate === rxTarget) return { transfer: t, item, matchedBy: 'receivingRx' };
+        if (normRx(item.receivingRxNumber) === rxTarget) return { transfer: t, item, matchedBy: 'receivingRx' };
       }
     }
     // 2) Fallback A: match by origin Rx (in case the PMS only knows the original)
     for (const t of transfers) {
       for (const item of (t.items || [])) {
-        const candidate = String(item.rxNumber || '').replace(/\s+/g, '').trim();
-        if (candidate && candidate === rxTarget) return { transfer: t, item, matchedBy: 'originRx' };
+        if (normRx(item.rxNumber) === rxTarget) return { transfer: t, item, matchedBy: 'originRx' };
       }
     }
   }

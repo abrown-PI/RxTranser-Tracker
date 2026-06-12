@@ -89,20 +89,25 @@ function normName(s) {
     .split(/\s+/).filter(Boolean).sort().join(' ');
 }
 
+// Rx numbers come in shapes like "2576787", "RX#2566622-03", "2566622-03". The trailing -NN is
+// HealNow's prescription line index within an order — staff in our portal enter just the base
+// number. Strip the prefix + suffix so both sides compare equal.
+function normRx(rx) {
+  return String(rx || '').replace(/\s+/g, '').replace(/^RX#?/i, '').split('-')[0].trim();
+}
+
 // Match logic mirrors the webhook receiver — Rx number first, then patient name + 7d window.
 function findItemForRx(transfers, rxNumber, patientName, eventDate) {
-  const rxTarget = String(rxNumber || '').replace(/\s+/g, '').trim();
+  const rxTarget = normRx(rxNumber);
   if (rxTarget) {
     for (const t of transfers) {
       for (const item of (t.items || [])) {
-        const candidate = String(item.receivingRxNumber || '').replace(/\s+/g, '').trim();
-        if (candidate && candidate === rxTarget) return { transfer: t, item, matchedBy: 'receivingRx' };
+        if (normRx(item.receivingRxNumber) === rxTarget) return { transfer: t, item, matchedBy: 'receivingRx' };
       }
     }
     for (const t of transfers) {
       for (const item of (t.items || [])) {
-        const candidate = String(item.rxNumber || '').replace(/\s+/g, '').trim();
-        if (candidate && candidate === rxTarget) return { transfer: t, item, matchedBy: 'originRx' };
+        if (normRx(item.rxNumber) === rxTarget) return { transfer: t, item, matchedBy: 'originRx' };
       }
     }
   }
@@ -351,19 +356,16 @@ async function sweepCartsForUnpaidTransfers(context, dryRun) {
       cartsFound++;
       const portalTs = transfers.filter(x => normName(x.patientName) === normName(`${firstName} ${lastName}`));
       for (const cartRx of cartRxs) {
-        const cartRxNumber = String(cartRx.rx_number || '').replace(/\s+/g, '').trim();
+        const cartRxNumber = normRx(cartRx.rx_number);
         const cartRxStatus = String(cartRx.status || '').toLowerCase();
-        // Map cart rx status to our internal state.
         let newPaidStatus = 'cart_created';
         if (['paid','completed'].includes(cartRxStatus)) newPaidStatus = 'paid';
-        else if (['canceled','cancelled','removed'].includes(cartRxStatus)) continue; // skip these here
-        // Find the portal item: first by exact rx_number, then by drug name within this patient's transfers.
+        else if (['canceled','cancelled','removed'].includes(cartRxStatus)) continue;
+        // Find the portal item by Rx (normalized — strips -01/-02 suffixes)
         let portalT = null, portalItem = null;
         for (const pt of portalTs) {
           for (const it of (pt.items || [])) {
-            const itRx = String(it.receivingRxNumber || '').replace(/\s+/g, '').trim();
-            const itRx2 = String(it.rxNumber || '').replace(/\s+/g, '').trim();
-            if (cartRxNumber && (itRx === cartRxNumber || itRx2 === cartRxNumber)) {
+            if (cartRxNumber && (normRx(it.receivingRxNumber) === cartRxNumber || normRx(it.rxNumber) === cartRxNumber)) {
               portalT = pt; portalItem = it; break;
             }
           }
