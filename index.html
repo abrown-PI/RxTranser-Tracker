@@ -1091,9 +1091,17 @@ function renderTransfers() {
   if (!state.sortBy) state.sortBy = 'dateDesc';
   const filtered = visibleTransfers().filter(t => {
     if (state.filterStatus && t.status !== state.filterStatus) return false;
-    // Hide completed (Received) by default — they're done and clutter the active worklist.
-    // The Show completed orders checkbox flips this on.
-    if (!state.showCompleted && t.status === 'Received' && state.filterStatus !== 'Received') return false;
+    // Hide completed by default — they're done and clutter the active worklist.
+    // "Complete" depends on ship-to:
+    //   Pharmacy / pickup → Received (someone has to manually check the box in)
+    //   Patient direct    → Delivered (FedEx confirms delivery, no in-app receive step)
+    // The Show completed orders checkbox bypasses both. The status dropdown filter also bypasses
+    // so you can explicitly look at one of these states.
+    if (!state.showCompleted) {
+      const isPatientShip = t.shipTo === 'Patient' && !t.pickupAtPharmacy;
+      const completedState = isPatientShip ? 'Delivered' : 'Received';
+      if (t.status === completedState && state.filterStatus !== completedState) return false;
+    }
     if (state.filterOrigin && t.originLocation !== state.filterOrigin) return false;
     if (state.filterFill && t.fillLocation !== state.filterFill) return false;
     if (state.filterType && (t.transferType || 'New') !== state.filterType) return false;
