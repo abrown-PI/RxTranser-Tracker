@@ -277,14 +277,15 @@ async function findHealnowPatient(firstName, lastName, context) {
     });
     if (!resp.ok) return null;
     const data = await resp.json();
-    const list = Array.isArray(data) ? data : (data.data || data.patients || []);
+    let list = Array.isArray(data) ? data : (data.data || data.patients || []);
+    // CRITICAL: HealNow's last_name filter does substring matching — searching "Hug" returns
+    // "Hug", "Hughes", "Hughston", etc. We must filter to EXACT last name on our side.
+    const lnTarget = String(lastName || '').toLowerCase().trim();
+    list = list.filter(p => String(p.last_name || p.lastName || '').toLowerCase().trim() === lnTarget);
+    if (!list.length) return null;
     const fnTarget = String(firstName || '').toLowerCase().trim();
-    // Prefer exact first-name match; if none, fall back to a prefix match (handles short
-    // forms like "Liz" vs "Elizabeth"), then to list[0] if exactly one shared-last-name patient.
-    const exact = list.find(p => {
-      const fn = String(p.first_name || p.firstName || '').toLowerCase().trim();
-      return fn === fnTarget;
-    });
+    // Exact first name → prefix (Liz/Elizabeth) → single-result fallback.
+    const exact = list.find(p => String(p.first_name || p.firstName || '').toLowerCase().trim() === fnTarget);
     if (exact) return exact;
     const prefix = list.find(p => {
       const fn = String(p.first_name || p.firstName || '').toLowerCase().trim();
