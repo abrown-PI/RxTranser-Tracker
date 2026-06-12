@@ -379,7 +379,7 @@ function slaStatus(t) {
   // - ok     = anticipated date is set, in the future
   // - none   = no anticipated date set, or already shipped / canceled
   if (!t.anticipatedShipDate) return { state: 'none', hoursOver: 0 };
-  if (['Shipped','Delivered','Canceled'].includes(t.status)) return { state: 'none', hoursOver: 0 };
+  if (['Shipped','Delivered','Received','Canceled'].includes(t.status)) return { state: 'none', hoursOver: 0 };
   const today = todayLocal();
   const ant = t.anticipatedShipDate.slice(0,10);
   if (ant < today) {
