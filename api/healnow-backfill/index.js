@@ -259,38 +259,33 @@ async function processPrescription(rx, order, transfers, dryRun, sample, context
   return { result: 'applied', rxNumber, transferId: t.id, newPaidStatus };
 }
 
-// Look up a HealNow patient by name. HealNow API has GET /v1/patients with name filter.
-// Returns the first match or null. We use this to find a patient_id (HealNow's internal id)
-// when we only know a name from our portal transfers.
+// Look up a HealNow patient by last name + first name match. HealNow's GET /v1/patients
+// supports ?last_name=X for filtering (other filter params we tried were silently ignored).
+// Returns the first match whose first name also matches case-insensitively, or null.
 async function findHealnowPatient(firstName, lastName, context) {
   const apiKey = process.env.HEALNOW_API_KEY;
   const base = process.env.HEALNOW_API_BASE || 'https://api.healnow.io/v1';
-  if (!apiKey) return null;
-  // Try a few common search param names. HealNow's exact schema isn't documented publicly.
-  const candidates = [
-    `${base}/patients?first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}`,
-    `${base}/patients?firstName=${encodeURIComponent(firstName)}&lastName=${encodeURIComponent(lastName)}`,
-    `${base}/patients?search=${encodeURIComponent(firstName + ' ' + lastName)}`,
-    `${base}/patients?q=${encodeURIComponent(firstName + ' ' + lastName)}`
-  ];
-  for (const url of candidates) {
-    try {
-      const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/json' } });
-      if (!resp.ok) continue;
-      const data = await resp.json();
-      const list = Array.isArray(data) ? data : (data.patients || data.data || []);
-      // Find the first one whose first+last name matches case-insensitively.
-      const match = list.find(p => {
-        const fn = String(p.first_name || p.firstName || '').toLowerCase().trim();
-        const ln = String(p.last_name || p.lastName || '').toLowerCase().trim();
-        return fn === String(firstName).toLowerCase().trim() && ln === String(lastName).toLowerCase().trim();
-      });
-      if (match) return match;
-    } catch (e) {
-      context.log.warn(`Patient search failed for ${url}: ${e.message || e}`);
-    }
+  if (!apiKey || !lastName) return null;
+  try {
+    const resp = await fetch(`${base}/patients?last_name=${encodeURIComponent(lastName)}&per_page=50`, {
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/json' }
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const list = Array.isArray(data) ? data : (data.data || data.patients || []);
+    const fnTarget = String(firstName || '').toLowerCase().trim();
+    // Prefer exact first-name match; fall back to any same-last-name patient when only one returned.
+    const exact = list.find(p => {
+      const fn = String(p.first_name || p.firstName || '').toLowerCase().trim();
+      return fn === fnTarget;
+    });
+    if (exact) return exact;
+    if (list.length === 1) return list[0];
+    return null;
+  } catch (e) {
+    context.log.warn(`Patient search failed for ${lastName}: ${e.message || e}`);
+    return null;
   }
-  return null;
 }
 
 // Fetch an unpaid cart for a HealNow patient. Returns the cart object or null.
