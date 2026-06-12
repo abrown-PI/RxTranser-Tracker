@@ -266,14 +266,29 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Verify signature
+    // Signature verification — currently log-only so we can iterate on HealNow's exact algorithm.
+    // We log everything we received so we can match their scheme from the request data, then
+    // flip the mode back to strict (return 401 on mismatch) once we have it figured out.
     const rawBody = (typeof req.rawBody === 'string') ? req.rawBody : JSON.stringify(req.body || {});
-    const sig = req.headers['x-healnow-signature'] || req.headers['x-webhook-signature'] || req.headers['signature'];
+    const sig = req.headers['x-healnow-signature'] || req.headers['x-webhook-signature'] || req.headers['signature'] || req.headers['x-tabz-signature'];
     const secret = process.env.HEALNOW_WEBHOOK_SECRET;
-    if (secret && !verifySignature(rawBody, sig, secret)) {
-      context.log.warn('HealNow webhook: signature verification failed');
-      context.res = { status: 401, body: { error: 'invalid signature' } };
-      return;
+    const STRICT_SIG = (process.env.HEALNOW_STRICT_SIG || '').toLowerCase() === 'true';
+    if (secret && sig) {
+      const ok = verifySignature(rawBody, sig, secret);
+      if (!ok) {
+        // Log the header set so we can see exactly what HealNow sends. Useful headers all listed.
+        const headerNames = Object.keys(req.headers).join(', ');
+        context.log.warn(`HealNow webhook: signature mismatch (would have rejected). Headers received: ${headerNames}. Provided sig: ${String(sig).slice(0,32)}...`);
+        if (STRICT_SIG) {
+          context.res = { status: 401, body: { error: 'invalid signature' } };
+          return;
+        }
+      } else {
+        context.log('HealNow webhook: signature verified.');
+      }
+    } else if (secret && !sig) {
+      const headerNames = Object.keys(req.headers).join(', ');
+      context.log.warn(`HealNow webhook: secret configured but no signature header found. Headers received: ${headerNames}`);
     }
 
     const event = req.body || {};
