@@ -4375,7 +4375,7 @@ function editShip(t) {
         <div class="form-group"><label>Tx Emailed Date</label><input type="date" id="e-tx" value="${escapeHtml(t.txEmailedDate||'')}" /></div>
         <div class="form-group"><label>Date Received at Fill Location</label><input type="date" id="e-rcvErie" value="${escapeHtml(t.dateReceivedAtErie||'')}" /></div>
         <div class="form-group"><label>Date Shipped</label><input type="date" id="e-dateShipped" value="${escapeHtml(t.dateShipped||'')}" /></div>
-        <div class="form-group"><label>Tracking Number</label><div style="padding:8px 10px;background:var(--gray-50);border:1px dashed var(--gray-300);border-radius:4px;font-family:monospace;font-size:13px">${t.trackingNumber ? escapeHtml(t.trackingNumber) : '<span style="color:var(--gray-500);font-style:italic">auto-pulled from FedEx once shipped</span>'}</div></div>
+        <div class="form-group"><label>Tracking Number</label><input type="text" id="e-tracking" value="${escapeHtml(t.trackingNumber||'')}" placeholder="auto-pulled from FedEx once shipped — or paste manually here" style="font-family:monospace" /><div class="item-sub" style="font-size:11px;margin-top:3px">For patient-direct ships: paste the FedEx tracking from WorldShip. We'll immediately query FedEx for live status.</div></div>
         <div class="form-group"><label>Date Received by Patient</label><input type="date" id="e-rcvPt" value="${escapeHtml(t.dateReceivedByPatient||'')}" /></div>
         <div class="form-group"><label>Paid</label><select id="e-paid">${['Pending','HealNow','Paid','Pay in Store'].map(o=>`<option ${o===t.paid?'selected':''}>${o}</option>`).join('')}</select></div>
       </div>
@@ -4388,13 +4388,45 @@ function editShip(t) {
   root.appendChild(overlay);
   overlay.querySelector('#editClose').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#editCancel').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('#editSave').addEventListener('click', () => {
+  overlay.querySelector('#editSave').addEventListener('click', async () => {
     t.txEmailedDate = overlay.querySelector('#e-tx').value || null;
     t.dateReceivedAtErie = overlay.querySelector('#e-rcvErie').value || null;
     t.dateShipped = overlay.querySelector('#e-dateShipped').value || null;
     t.dateReceivedByPatient = overlay.querySelector('#e-rcvPt').value || null;
     t.paid = overlay.querySelector('#e-paid').value;
-    apiUpdateTransfer(t);
+    // Tracking — validate, save, then immediately pull live FedEx status if it's new/changed.
+    const rawTn = overlay.querySelector('#e-tracking').value || '';
+    const tn = String(rawTn).replace(/\s+/g, '').trim();
+    const wasChanged = tn !== (t.trackingNumber || '');
+    if (tn && !/^\d{10,22}$/.test(tn)) {
+      alert("That doesn't look like a FedEx tracking number (should be 10–22 digits). Other fields were not saved.");
+      return;
+    }
+    t.trackingNumber = tn;
+    // If a tracking # was entered and the transfer was pre-shipped, bump it to Shipped.
+    if (tn && ['New','In Progress','Pending Clarification','Needs Formula'].includes(t.status)) {
+      t.status = 'Shipped';
+      if (!t.dateShipped) t.dateShipped = todayLocal();
+    }
+    await apiUpdateTransfer(t);
+    // Live status pull — only when tracking was newly added or changed.
+    if (tn && wasChanged) {
+      try {
+        const r = await fetch('/api/fedex-track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackingNumbers: [tn] }) });
+        if (r.ok) {
+          const data = await r.json();
+          const res = (data.results || [])[0];
+          if (res) {
+            const code = (res.statusCode || '').toUpperCase();
+            if (code === 'DL') {
+              t.status = 'Delivered';
+              if (res.deliveryDate) t.dateReceivedByPatient = res.deliveryDate.slice(0,10);
+              await apiUpdateTransfer(t);
+            }
+          }
+        }
+      } catch (e) { console.warn('FedEx live-status pull failed', e); }
+    }
     overlay.remove();
     renderModal();
     render();
