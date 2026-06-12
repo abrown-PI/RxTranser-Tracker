@@ -167,7 +167,8 @@ async function fetchOrdersPage(from, to, page, perPage, context) {
   const params = new URLSearchParams({
     from, to,
     created_from: from, created_to: to,
-    page: String(page), per_page: String(perPage)
+    page: String(page), per_page: String(perPage),
+    status: 'all' // try to include unpaid / open carts, not just paid
   });
   const url = `${base}/orders?${params.toString()}`;
   const resp = await fetch(url, {
