@@ -279,12 +279,18 @@ async function findHealnowPatient(firstName, lastName, context) {
     const data = await resp.json();
     const list = Array.isArray(data) ? data : (data.data || data.patients || []);
     const fnTarget = String(firstName || '').toLowerCase().trim();
-    // Prefer exact first-name match; fall back to any same-last-name patient when only one returned.
+    // Prefer exact first-name match; if none, fall back to a prefix match (handles short
+    // forms like "Liz" vs "Elizabeth"), then to list[0] if exactly one shared-last-name patient.
     const exact = list.find(p => {
       const fn = String(p.first_name || p.firstName || '').toLowerCase().trim();
       return fn === fnTarget;
     });
     if (exact) return exact;
+    const prefix = list.find(p => {
+      const fn = String(p.first_name || p.firstName || '').toLowerCase().trim();
+      return fn && (fn.startsWith(fnTarget) || fnTarget.startsWith(fn));
+    });
+    if (prefix) return prefix;
     if (list.length === 1) return list[0];
     return null;
   } catch (e) {
