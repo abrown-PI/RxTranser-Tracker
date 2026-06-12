@@ -276,6 +276,7 @@ module.exports = async function (context, req) {
     let page = 1;
     const PER_PAGE = 50;
     const MAX_PAGES = 50; // hard cap to avoid runaway calls; ~2500 orders covered per run
+    const firstPageSample = body.debug ? [] : null;
     while (page <= MAX_PAGES) {
       let pageData;
       try { pageData = await fetchOrdersPage(from, to, page, PER_PAGE, context); }
@@ -288,6 +289,17 @@ module.exports = async function (context, req) {
       const orders = pageData.orders || [];
       if (!orders.length) break;
       ordersSeen += orders.length;
+      // Debug: capture a redacted snapshot of the first page so we can see HealNow's response shape.
+      if (firstPageSample && page === 1 && orders.length) {
+        firstPageSample.push({
+          firstOrderKeys: Object.keys(orders[0] || {}),
+          firstOrderId: orders[0].id || orders[0].order_id,
+          firstOrderCreated: orders[0].created_at || orders[0].createdAt,
+          lastOrderCreated: orders[orders.length-1].created_at || orders[orders.length-1].createdAt,
+          firstPrescription: (orders[0].prescriptions || orders[0].line_items || orders[0].items || [])[0] || null,
+          rawNextPageHint: pageData.nextPage
+        });
+      }
       for (const order of orders) {
         const prescriptions = order.prescriptions || order.line_items || order.items || [];
         if (!prescriptions.length) {
@@ -307,22 +319,22 @@ module.exports = async function (context, req) {
           }
         }
       }
-      if (!pageData.nextPage) break;
-      page = pageData.nextPage;
+      // Defensive: even if HealNow doesn't return a next-page hint, keep trying until we get
+      // an empty page (some APIs just paginate without metadata).
+      page++;
+      if (!pageData.nextPage && orders.length < PER_PAGE) break; // last partial page
     }
 
     context.log(`HealNow backfill complete: applied=${applied} skipped=${skipped} noMatch=${noMatch} errors=${errors} pages=${pagesFetched} orders=${ordersSeen} rx=${rxSeen}`);
 
-    context.res = {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: {
-        dryRun, from, to,
-        pagesFetched, ordersSeen, rxSeen,
-        applied, skipped, noMatch, errors,
-        sample, errSamples
-      }
+    const out = {
+      dryRun, from, to,
+      pagesFetched, ordersSeen, rxSeen,
+      applied, skipped, noMatch, errors,
+      sample, errSamples
     };
+    if (firstPageSample) out.firstPageDebug = firstPageSample;
+    context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: out };
   } catch (err) {
     context.log.error('healnow-backfill error:', err);
     context.res = { status: err.statusCode || 500, body: { error: err.message } };
