@@ -291,12 +291,26 @@ module.exports = async function (context, req) {
       ordersSeen += orders.length;
       // Debug: capture a redacted snapshot of the first page so we can see HealNow's response shape.
       if (firstPageSample && page === 1 && orders.length) {
+        const o = orders[0];
+        const firstRx = (o.prescriptions || o.line_items || o.items || [])[0] || {};
         firstPageSample.push({
-          firstOrderKeys: Object.keys(orders[0] || {}),
-          firstOrderId: orders[0].id || orders[0].order_id,
-          firstOrderCreated: orders[0].created_at || orders[0].createdAt,
+          firstOrderKeys: Object.keys(o || {}),
+          firstOrderId: o.id || o.order_id,
+          firstOrderEid: o.eid,
+          firstOrderRef: o.ref,
+          firstOrderDescription: o.description,
+          firstOrderStatus: o.status,
+          firstOrderCreated: o.created_at || o.createdAt,
           lastOrderCreated: orders[orders.length-1].created_at || orders[orders.length-1].createdAt,
-          firstPrescription: (orders[0].prescriptions || orders[0].line_items || orders[0].items || [])[0] || null,
+          firstPrescriptionKeys: Object.keys(firstRx),
+          firstPrescription: firstRx,
+          patientKeys: Object.keys(o.patient || {}),
+          firstOrderPatient: {
+            name: o.patient && (o.patient.full_name || o.patient.name),
+            firstName: o.patient && (o.patient.first_name || o.patient.firstName),
+            lastName: o.patient && (o.patient.last_name || o.patient.lastName),
+            eid: o.patient && o.patient.eid
+          },
           rawNextPageHint: pageData.nextPage
         });
       }
