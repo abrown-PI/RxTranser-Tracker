@@ -4991,22 +4991,33 @@ function openShipment(id) {
     openShipment(s.id);
   };
   const rec = document.getElementById('sm-receive');
-  if (rec) rec.onclick = () => {
+  if (rec) rec.onclick = async () => {
     s.status = 'Received'; s.receivedDate = todayLocal(); s.receivedBy = CURRENT_USER.name;
-    apiUpdateShipment(s);
-    // Cascade Received status + receipt info to every transfer in the package
-    s.transferIds.forEach(id => {
+    await apiUpdateShipment(s);
+    // Cascade Received status + receipt info to every transfer in the package. Awaited so
+    // a backend failure surfaces rather than silently leaving transfers in In Progress.
+    const failed = [];
+    let updated = 0;
+    for (const id of s.transferIds) {
       const t = TRANSFERS.find(x => x.id === id);
-      if (t) {
-        t.status = 'Received';
-        t.dateReceivedByPatient = s.receivedDate;
-        t.receivedBy = CURRENT_USER.name;
-        apiUpdateTransfer(t);
+      if (!t) { failed.push(id + ' (not loaded)'); continue; }
+      t.status = 'Received';
+      t.dateReceivedByPatient = s.receivedDate;
+      t.receivedBy = CURRENT_USER.name;
+      try {
+        await apiUpdateTransfer(t);
+        updated++;
         logAudit('mark_received', 'transfer', t.id, { shipmentId: s.id });
+      } catch (e) {
+        failed.push(t.id + ' (' + (e.message||e) + ')');
       }
-    });
+    }
     close();
-    alert(`Marked received — ${s.transferIds.length} transfer${s.transferIds.length===1?'':'s'} updated.`);
+    if (failed.length) {
+      alert('Marked received — ' + updated + '/' + s.transferIds.length + ' transfers updated.\n\nThe following did NOT update (they may still show as In Progress and need to be manually updated):\n' + failed.join('\n'));
+    } else {
+      alert('Marked received — ' + updated + ' transfer' + (updated===1?'':'s') + ' updated.');
+    }
     render();
   };
   const photoEl = document.getElementById('sm-photo');
@@ -7036,6 +7047,25 @@ initAuth();
     loaded.forEach(s => { if (!existingIds.has(s.id)) SHIPMENTS.unshift(s); });
     render();
   }
+  // Heal-on-load: if a bulk shipment is in Received status but any of its transfers are
+  // still in a pre-shipped status (New / In Progress / Pending Clarification / Needs Formula /
+  // Shipped / Delivered), the cascade missed them — propagate Received to the transfer so the
+  // UI stays consistent. Idempotent and silent; logs to console only.
+  try {
+    const heal = SHIPMENTS.filter(s => s.status === 'Received' && Array.isArray(s.transferIds));
+    for (const s of heal) {
+      for (const tid of s.transferIds) {
+        const t = TRANSFERS.find(x => x.id === tid);
+        if (!t) continue;
+        if (t.status === 'Received' || t.status === 'Canceled') continue;
+        console.log('Healing transfer', t.id, t.patientName, 'was', t.status, '→ Received (bulk', s.bulkShipmentId || s.id, ')');
+        t.status = 'Received';
+        if (s.receivedDate && !t.dateReceivedByPatient) t.dateReceivedByPatient = s.receivedDate;
+        if (s.receivedBy && !t.receivedBy) t.receivedBy = s.receivedBy;
+        apiUpdateTransfer(t);
+      }
+    }
+  } catch (e) { console.warn('heal-on-load failed', e); }
 })();
 
 // Teams notification: status changed to Pending Clarification or Needs Formula.
