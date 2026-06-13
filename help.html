@@ -57,6 +57,7 @@ section { page-break-inside: avoid; }
 <div class="toc">
   <h3>Contents</h3>
   <ul>
+    <li><a href="#whatsnew"><strong>🆕 What's New (June 2026)</strong></a></li>
     <li><a href="#signin">Signing In (365 or Local Account)</a></li>
     <li><a href="#new">Creating a New Transfer</a> (Single + Bulk Upload with OCR)</li>
     <li><a href="#pickup">Non-Transfer Pickup at Another Pharmacy</a> (incl. bulk pickup orders)</li>
@@ -80,22 +81,89 @@ section { page-break-inside: avoid; }
 
 <hr>
 
+<section id="whatsnew">
+<h2>🆕 What's New (June 2026)</h2>
+<p>Quick rundown of recent updates so the team isn't surprised by changed behavior.</p>
+
+<h3>HealNow payment auto-sync</h3>
+<ul>
+  <li>The portal now talks to HealNow directly. When a patient pays in HealNow (or HealNow creates a cart for them), the matching transfer updates automatically — no need to come back and click <em>Mark Paid</em>.</li>
+  <li>New <strong>Payment</strong> column on the All Transfers table shows the rolled-up status: <em>Pending</em>, <em>🛒 HealNow Cart Created</em>, <em>Partial</em>, <em>✓ Paid (HealNow)</em>, <em>✓ Paid in Store</em>, or <em>Canceled</em>.</li>
+  <li>New <strong>Pay Date</strong> column shows when payment posted.</li>
+  <li>The detail modal shows a per-Rx HealNow badge on each item so you can see exactly which scripts are paid and which are still in the cart.</li>
+  <li><strong>Manual "💲 Paid in Store" override</strong> is still available — even on transfers that already have a HealNow cart created, the small <strong>💲</strong> icon in the Actions column lets you mark it paid in store if the patient walks in and pays at the counter instead.</li>
+  <li>Receipt PDFs are auto-pulled from HealNow when a script is marked paid.</li>
+</ul>
+
+<h3>Ship-to address behavior fixed</h3>
+<ul>
+  <li>On the New Transfer form, <strong>Ship To = Pharmacy</strong> is the default and the address field now <strong>auto-fills with the origin pharmacy's address</strong> when the form opens.</li>
+  <li>Switch <strong>Ship To = Patient</strong> (or Delivery-Lancaster) → the address field <strong>clears</strong> so you can type the patient's address. Switch back to Pharmacy → it refills from the origin pharmacy.</li>
+  <li>Saved addresses on existing transfers are no longer silently overwritten on page load. (The one-time backfill that fixed ~66 mis-addressed records is done and won't keep running.)</li>
+</ul>
+
+<h3>Sign-in screen</h3>
+<ul>
+  <li>New clean look matching the Training Portal: white centered card on a solid blue background.</li>
+  <li>Microsoft 365 button is now the obvious primary action; the username + PIN form is hidden until you click the small <em>"External users or contractors? Use the username &amp; PIN login below"</em> hint.</li>
+</ul>
+
+<h3>All Transfers table</h3>
+<ul>
+  <li><strong>Wider layout (1800px)</strong> so all the new columns fit without column squish.</li>
+  <li><strong>Patient name now shows on two lines</strong> (last name then first) for consistent wrapping no matter how wide the column is.</li>
+  <li><strong>Save as default + Reset</strong> buttons moved to the start of the filter row so they're easier to find.</li>
+  <li>New <strong>Ship-To type filter</strong> (Pharmacy vs Patient) on the filter bar.</li>
+  <li>Pickup-at-pharmacy rows no longer show a 📍 pin under Ship To — they match the regular Pharmacy rows for consistency.</li>
+</ul>
+
+<h3>Status, Alerts &amp; Action Items</h3>
+<ul>
+  <li><strong>Past Anticipated Ship</strong> overdue items now live on the <strong>Alerts</strong> tab badge (not Action Items). Action Items focuses on actionable Cancel acknowledgments / Open Questions.</li>
+  <li>SLA / "Past Status Time Limit" check now <strong>excludes Received</strong> — completed transfers can't be overdue.</li>
+  <li>Delivered patient-direct ships now count as complete for the "Show completed" filter (no separate Received step on those).</li>
+</ul>
+
+<h3>Receive shipment screen</h3>
+<ul>
+  <li><strong>Select all / Unselect all</strong> toggle on the Rx checklist so you don't have to tick every box by hand for a clean shipment.</li>
+  <li>If a bulk shipment is marked Received but a transfer in it is still In Progress, the portal now auto-heals the orphaned transfer status to Received on next load.</li>
+</ul>
+
+<h3>OCR drug-name cleanup</h3>
+<ul>
+  <li>OCR results are now matched against your <strong>known drugs list</strong>. So when a scanned sheet comes back with extra leading characters or stray symbols, the portal substitutes the closest matching known drug instead of saving the garbled name.</li>
+</ul>
+
+<h3>Tracking</h3>
+<ul>
+  <li>The tracking number field on the <strong>Edit ship / tracking</strong> modal is now editable, and changing it pulls the live FedEx status right then.</li>
+</ul>
+
+<h3>Patient name display</h3>
+<ul>
+  <li>Patient names are now displayed in consistent Title Case everywhere ("MALAGON, ALEX" → "Malagon, Alex"). The underlying stored data is unchanged.</li>
+</ul>
+</section>
+
+<hr>
+
 <section id="signin">
 <h2>Signing In</h2>
 <p>The site requires sign-in before showing any data. Two options on the sign-in page:</p>
 
-<h3>Option 1: Sign in with Microsoft (preferred)</h3>
+<h3>Option 1: Sign in with Microsoft 365 (preferred)</h3>
 <ol>
-  <li>Click <strong>🔐 Sign in with Microsoft</strong></li>
+  <li>Click <strong>Sign in with Microsoft 365</strong> (blue button with the 4-color MS logo)</li>
   <li>Use your <strong>@pharmacyinnovations.net</strong> account (same one you use for Outlook/Teams)</li>
   <li>Your default location comes from the admin's Users &amp; Access list. If you see the wrong location, ask an admin to update your row — or use the location dropdown in the navbar to temporarily switch (saved across browsers and devices).</li>
 </ol>
 <div class="note"><strong>If you signed in before your location was set:</strong> Sign out and back in (or just refresh the page) — the app re-fetches your assigned location on each sign-in.</div>
 
-<h3>Option 2: Sign in without 365 account</h3>
+<h3>Option 2: External users / contractors (username + PIN)</h3>
 <p>For staff who don't have a Microsoft 365 license. An admin must create the account first.</p>
 <ol>
-  <li>Click <strong>Sign in without 365 account</strong></li>
+  <li>Click the light-gray hint <strong>"External users or contractors? Use the username &amp; PIN login below."</strong></li>
   <li>Enter your <strong>username</strong> and <strong>PIN</strong> (set by the admin)</li>
   <li>Click <strong>Sign in</strong></li>
 </ol>
@@ -413,17 +481,41 @@ section { page-break-inside: avoid; }
 </section>
 
 <section id="paid">
-<h2>Marking Transfers Paid / Charged</h2>
-<p>When the billing team has charged the patient (or HealNow has processed payment), mark the transfer paid so the team has a clear collected vs. outstanding view.</p>
+<h2>Payment Status (HealNow Auto-Sync + Paid in Store)</h2>
+<p>Payment status now updates <strong>automatically</strong> when a patient pays in HealNow (or HealNow creates a cart). You only need to click anything when the patient pays at the counter — that's the <em>Paid in Store</em> override.</p>
 
-<h3>From the All Transfers list</h3>
-<p>The Actions column on each row has a blue <strong>💲 Mark Paid / Charged</strong> button. Click once — the button immediately changes to a green <strong>✓ Paid</strong> badge with a tooltip showing who marked it and when.</p>
+<h3>The Payment column</h3>
+<p>The All Transfers table has a <strong>Payment</strong> column showing the rolled-up status for the whole transfer (based on every Rx on it):</p>
+<ul>
+  <li><strong>Pending</strong> — no payment activity yet from HealNow.</li>
+  <li><strong>🛒 HealNow Cart Created</strong> — HealNow has built a cart for the patient (text/email sent). Waiting on payment.</li>
+  <li><strong>Partial</strong> — some Rx are paid, some still pending.</li>
+  <li><strong>✓ Paid (HealNow)</strong> — fully paid through HealNow.</li>
+  <li><strong>✓ Paid in Store</strong> — billing team / counter marked it paid manually (patient paid at the pharmacy).</li>
+  <li><strong>Canceled</strong> — HealNow canceled the order.</li>
+</ul>
+<p>The <strong>Pay Date</strong> column shows when the payment posted.</p>
+
+<h3>HealNow auto-sync — how it works</h3>
+<ul>
+  <li>HealNow sends the portal an event each time a prescription goes <em>pending → cart created → paid → canceled</em>. The portal matches it to a transfer by Rx number first, then by patient name + recent transfer (7-day window) as a fallback.</li>
+  <li>When matched via patient name, the portal also <strong>back-fills the Rx number</strong> on the item so the next event matches directly without the fallback.</li>
+  <li>Receipt PDFs are pulled and stored automatically when an Rx is marked paid — viewable from the item row in the detail modal.</li>
+</ul>
+
+<h3>Per-Rx detail</h3>
+<p>Open any transfer's detail modal — each Rx row shows its own HealNow status badge so you can see exactly which scripts are paid and which are still in the cart. (Helps when a patient pays for 2 of 3 scripts and you need to know which one is still outstanding.)</p>
+
+<h3>The "💲 Paid in Store" override</h3>
+<p>The Actions column shows a small blue <strong>💲</strong> icon button on any transfer that isn't fully paid yet — including ones with a HealNow cart already created. Click it when the patient walks in and pays at the counter. The Payment column flips to <em>✓ Paid in Store</em> immediately.</p>
+
+<div class="tip"><strong>Why the icon shows on Cart Created rows:</strong> Sometimes HealNow has built a cart but the patient pays in person before they get to it. The 💲 button lets you override without waiting for HealNow.</div>
 
 <h3>From the transfer detail modal</h3>
-<p>The Shipping &amp; Billing section has the same Mark Paid button. Once paid, it shows <strong>✓ Paid by [Name] on [Date]</strong> with an Undo button alongside in case it was a mistake.</p>
+<p>Same <strong>💲 Mark Paid in Store</strong> button is in the Shipping &amp; Billing section. Once marked, it shows <strong>✓ Paid in Store by [Name] on [Date]</strong> with an Undo button.</p>
 
-<h3>Filter by paid status</h3>
-<p>The All Transfers filter bar has a <strong>Paid: all / ✓ Paid only / Not paid only</strong> dropdown so the billing team can pull "what's still outstanding" in one click. Same Paid filter is available on the Reports tab.</p>
+<h3>Filter by payment status</h3>
+<p>The All Transfers filter bar has a <strong>Payment</strong> dropdown so the billing team can pull "what's still outstanding" or "all carts waiting on patient payment" in one click. Same filter is on the Reports tab.</p>
 </section>
 
 <section id="reports">
@@ -664,7 +756,7 @@ A: Each non-transfer pickup goes to one pickup pharmacy per record. If a single 
 </section>
 
 <hr>
-<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-05-29 — Non-transfer pickup + bulk pickup orders, Pending Clarification / Needs Formula statuses with Teams notifications, retired Ready to Ship status and per-status SLA hours (now alerts off anticipated ship date), Refill clarifier for receiving pharmacies, multi-day pharmacy shipping schedule, Reports filters + Summary/Detail tabs + print, All Transfers Actions column with View/Edit/Rx#/Paid/Ask, Mark Paid / Charged button, Direction filter on Shipments (Incoming/Outgoing), next-shipment banner, appointment-date driven anticipated ship, idle timeout, audit log. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
+<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-06-13 — HealNow payment auto-sync (Payment + Pay Date columns, per-Rx badges, receipt PDFs), Paid-in-Store override always available, sign-in screen restyled to Training Portal look, Ship-To address pre-fill + clear on type switch, two-line patient names in table (1800px wider), Save as default + Reset moved to filter row start, Ship-To type filter, pickup pin removed from table, OCR drug-name matching against known drug list, editable tracking with live FedEx pull, Past Anticipated Ship moved to Alerts badge, SLA excludes Received, Receive screen Select all toggle, Bulk-Received cascade auto-heals orphan transfers. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
 
 </body>
 </html>
