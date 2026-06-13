@@ -3657,22 +3657,38 @@ function bindDraftInputs() {
   const fields = ['patientFirstName','patientLastName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote','patientPrice'];
   fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => state.draft[f] = el.value); });
 
-  // Ship-to-Pharmacy auto-fill: when user picks Pharmacy or changes origin, fill ship address from origin pharmacy
+  // Ship address auto-management. Two destinations populate from a pharmacy:
+  //   1) Ship To = Pharmacy (regular transfer back to origin)
+  //   2) Pickup at another pharmacy is on (regardless of shipTo) — destination is pickup
+  // For Patient / Delivery-Lancaster (and not a pickup), the field belongs to the
+  // patient. We clear any leftover pharmacy address on switch so the team isn't
+  // tempted to ship a patient order to a pharmacy address.
+  const setShipAddr = (a1, a2, c, st, z) => {
+    state.draft.shipAddr1 = a1 || '';
+    state.draft.shipAddr2 = a2 || '';
+    state.draft.shipCity  = c  || '';
+    state.draft.shipState = st || '';
+    state.draft.shipZip   = z  || '';
+    ['shipAddr1','shipAddr2','shipCity','shipState','shipZip'].forEach(f => {
+      const el = document.getElementById('f-'+f); if (el) el.value = state.draft[f];
+    });
+  };
   const fillPharmacyAddress = () => {
-    // Two cases populate the ship address from a pharmacy:
-    //   1) Ship To = Pharmacy (regular transfer back to origin)
-    //   2) Pickup at another pharmacy is on (regardless of shipTo) — destination is pickup
     const usePickup = !!(state.draft.pickupAtPharmacy && state.draft.pickupLocation);
-    if (state.draft.shipTo !== 'Pharmacy' && !usePickup) { recalcAntShip(); return; }
+    const goesToPharmacy = state.draft.shipTo === 'Pharmacy' || usePickup;
+    if (!goesToPharmacy) {
+      // Patient / Delivery-Lancaster: clear so the user enters the patient address.
+      // (If a Patient transfer is being edited, the saved patient address was
+      // already loaded into the draft on edit-open; this only clears when the
+      // user actively changes shipTo, which is what they're asking for.)
+      setShipAddr('', '', '', '', '');
+      recalcAntShip();
+      return;
+    }
     const destLoc = usePickup ? state.draft.pickupLocation : state.draft.originLocation;
     const addr = PHARMACY_ADDRESSES[destLoc];
     if (!addr) { recalcAntShip(); return; }
-    state.draft.shipAddr1 = addr.addr1 || '';
-    state.draft.shipAddr2 = addr.addr2 || '';
-    state.draft.shipCity = addr.city || '';
-    state.draft.shipState = addr.state || '';
-    state.draft.shipZip = addr.zip || '';
-    ['shipAddr1','shipAddr2','shipCity','shipState','shipZip'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.value = state.draft[f]; });
+    setShipAddr(addr.addr1, addr.addr2, addr.city, addr.state, addr.zip);
     recalcAntShip();
   };
 
@@ -3788,6 +3804,14 @@ function bindDraftInputs() {
 
   // Run once on form open so the date is populated on a fresh draft
   recalcAntShip();
+
+  // New-transfer pre-fill: shipTo defaults to Pharmacy, so populate the address
+  // field from the origin pharmacy if it isn't already filled. We skip this on
+  // edit so we never silently overwrite a saved address (and we skip if the
+  // user already typed something).
+  if (!state.editingTransferId && state.draft.shipTo === 'Pharmacy' && !state.draft.shipAddr1) {
+    fillPharmacyAddress();
+  }
 
   // Show/hide CC form upload based on billing
   const billingSel = document.getElementById('f-billing');
@@ -7301,32 +7325,12 @@ initAuth();
       }
     }
   } catch (e) { console.warn('heal-on-load (received cascade) failed', e); }
-  // 2) Pharmacy ship-to address: for shipTo='Pharmacy' the address should be the origin
-  // pharmacy's address (origin = receiving pharmacy). Older OCR-imported records left the
-  // patient's home address there. Replace whenever the saved address doesn't match.
-  try {
-    let healedAddr = 0;
-    const inspected = TRANSFERS.length;
-    for (const t of TRANSFERS) {
-      if (t.shipTo !== 'Pharmacy') continue;
-      if (t.pickupAtPharmacy) continue;
-      const destPharm = PHARMACY_ADDRESSES[t.originLocation];
-      if (!destPharm || !destPharm.addr1) continue;
-      // Match by city/zip — different city/zip = patient address, fix it. Same city/zip = already correct.
-      const cityMatches = (t.shipCity || '').trim().toLowerCase() === (destPharm.city || '').trim().toLowerCase();
-      const zipMatches = (t.shipZip || '').trim() === (destPharm.zip || '').trim();
-      if (cityMatches && zipMatches && t.shipAddr1) continue;
-      console.log('Healing address on transfer', t.id, t.patientName, 'shipTo=Pharmacy', t.originLocation, 'was:', t.shipAddr1, t.shipCity, '→', destPharm.addr1, destPharm.city);
-      t.shipAddr1 = destPharm.addr1;
-      t.shipAddr2 = destPharm.addr2 || '';
-      t.shipCity = destPharm.city || '';
-      t.shipState = destPharm.state || '';
-      t.shipZip = destPharm.zip || '';
-      apiUpdateTransfer(t);
-      healedAddr++;
-    }
-    if (healedAddr > 0) console.log(`Address heal-on-load: fixed ${healedAddr} Pharmacy ship-to transfer(s).`);
-  } catch (e) { console.warn('address heal-on-load failed', e); }
+  // 2) Pharmacy ship-to address heal was a one-time backfill for ~66 OCR-imported
+  // records whose ship address was the patient's home instead of the origin pharmacy.
+  // That ran already. Leaving it in would silently overwrite any legit manual edits
+  // on every load — including any future Pharmacy ship-to that uses a non-default
+  // city/zip — so it's intentionally removed. New transfers now pre-fill the
+  // pharmacy address from PHARMACY_ADDRESSES on form open (see bindDraftInputs).
 })();
 
 // Teams notification: status changed to Pending Clarification or Needs Formula.
