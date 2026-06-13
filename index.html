@@ -1220,7 +1220,7 @@ function renderTransfers() {
               return `<span title="${escapeHtml(drugs.join(', '))}">${escapeHtml(truncated)}</span>${more}`;
             })()}</td>
             <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
-            <td>${escapeHtml(t.shipTo)}${t.pickupAtPharmacy?`<div class="item-sub" style="color:var(--primary-dark);font-weight:600">📍 ${escapeHtml(t.pickupLocation||'?')}${t.isBulkPickup?' · BULK':''}</div>`:(t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:'')}</td>
+            <td>${escapeHtml(t.shipTo)}${t.pickupAtPharmacy?`<div class="item-sub" style="color:var(--primary-dark);font-weight:600">${escapeHtml(t.pickupLocation||'?')}${t.isBulkPickup?' · BULK':''}</div>`:(t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:'')}</td>
             <td onclick="event.stopPropagation()"><select class="row-status status-select" data-status-id="${t.id}" style="font-size:11px;padding:3px 4px">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
             <td>${(() => {
               const ps = paymentStatusFor(t);
