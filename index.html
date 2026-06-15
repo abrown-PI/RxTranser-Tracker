@@ -4296,15 +4296,17 @@ function paymentStatusFor(t) {
   const hnCancel = items.filter(i => i.paidStatus === 'canceled').length;
   const hnActive = items.length;
 
-  // If staff manually marked Paid AND no HealNow activity touched items → Paid in Store
-  if (t.paid === 'Paid' && hnPaid === 0 && hnCart === 0) {
-    return { code: 'paid_store', label: '✓ Paid in Store', bg: '#16a34a', color: 'white', tooltip: `Marked by ${t.paidBy||'staff'}${t.paidAt?' on '+fmtDate(t.paidAt):''}` };
-  }
-  // Everything HealNow-tracked is paid → Paid
+  // Everything HealNow-tracked is paid → Paid (trust HealNow even if staff also clicked the override).
   if (hnActive > 0 && hnPaid === hnActive) {
     return { code: 'paid', label: '✓ Paid', bg: '#16a34a', color: 'white', tooltip: `All ${hnActive} Rx paid via HealNow` };
   }
-  // Partial — some paid, some still in cart / pending
+  // Staff explicitly clicked "Paid in Store" — that's the authoritative answer for this fill,
+  // even when HealNow still has open carts (patient walked in and settled). The cart_created
+  // entries are stale from HealNow's perspective; the rollup should show paid_store.
+  if (t.paid === 'Paid') {
+    return { code: 'paid_store', label: '✓ Paid in Store', bg: '#16a34a', color: 'white', tooltip: `Marked by ${t.paidBy||'staff'}${t.paidAt?' on '+fmtDate(t.paidAt):''}` };
+  }
+  // Partial — some paid via HealNow, some still in cart / pending
   if (hnPaid > 0 && hnPaid < hnActive) {
     return { code: 'partial', label: `🟡 Partial (${hnPaid}/${hnActive})`, bg: '#fef3c7', color: '#92400e', tooltip: `${hnPaid} of ${hnActive} Rx paid` };
   }
@@ -4315,10 +4317,6 @@ function paymentStatusFor(t) {
   // HealNow has at least one cart created, none paid yet → Cart Created
   if (hnCart > 0) {
     return { code: 'cart_created', label: '🛒 HealNow Cart', bg: '#dbeafe', color: '#1e40af', tooltip: `${hnCart} cart${hnCart===1?'':'s'} created — waiting on patient` };
-  }
-  // Fallback to legacy paid field when no HealNow data exists
-  if (t.paid === 'Paid') {
-    return { code: 'paid_store', label: '✓ Paid in Store', bg: '#16a34a', color: 'white', tooltip: `Marked by ${t.paidBy||'staff'}${t.paidAt?' on '+fmtDate(t.paidAt):''}` };
   }
   return { code: 'pending', label: 'Pending', bg: '#f1f5f9', color: '#475569', tooltip: 'No payment activity yet' };
 }
@@ -4542,16 +4540,21 @@ function renderModal() {
               ${(() => {
                 const ps = paymentStatusFor(t);
                 const badge = `<span style="display:inline-block;padding:4px 12px;font-size:12px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px" title="${escapeHtml(ps.tooltip||'')}">${escapeHtml(ps.label)}</span>`;
-                // Pending → primary action is to mark Paid in Store (HealNow handles itself)
-                if (ps.code === 'pending') {
-                  return `<button class="btn btn-primary btn-sm" id="paidBtn" style="padding:4px 14px;font-size:12px;font-weight:600">💲 Mark Paid in Store</button>`;
-                }
                 // Paid in Store → allow undo (manual mistake)
                 if (ps.code === 'paid_store') {
                   return `${badge} <button class="btn btn-secondary btn-sm" id="unpaidBtn" style="padding:2px 8px;font-size:11px">Undo</button>`;
                 }
-                // HealNow-driven states → badge only (the per-item rows show details + receipts)
-                return badge;
+                // Fully paid via HealNow → badge only, nothing to override.
+                if (ps.code === 'paid') {
+                  return badge;
+                }
+                // Pending → button alone (no badge needed; the button label conveys the state)
+                if (ps.code === 'pending') {
+                  return `<button class="btn btn-primary btn-sm" id="paidBtn" style="padding:4px 14px;font-size:12px;font-weight:600">💲 Mark Paid in Store</button>`;
+                }
+                // Cart Created / Partial / Canceled — patient walked in and paid, so the team
+                // still needs the override. Show the current HealNow badge + the override button.
+                return `${badge} <button class="btn btn-primary btn-sm" id="paidBtn" style="padding:4px 14px;font-size:12px;font-weight:600">💲 Mark Paid in Store</button>`;
               })()}
             </div>
           </div>
