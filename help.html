@@ -58,6 +58,7 @@ section { page-break-inside: avoid; }
   <h3>Contents</h3>
   <ul>
     <li><a href="#whatsnew"><strong>🆕 What's New (June 2026)</strong></a></li>
+    <li><a href="#usp-overnight"><strong>❄ USP Overnight Shipping Policy</strong></a> <em>(Tacrolimus / Cyclosporine ophth, oil-based injections, etc.)</em></li>
     <li><a href="#signin">Signing In (365 or Local Account)</a></li>
     <li><a href="#new">Creating a New Transfer</a> (Single + Bulk Upload with OCR)</li>
     <li><a href="#pickup">Non-Transfer Pickup at Another Pharmacy</a> (incl. bulk pickup orders)</li>
@@ -143,6 +144,53 @@ section { page-break-inside: avoid; }
 <h3>Patient name display</h3>
 <ul>
   <li>Patient names are now displayed in consistent Title Case everywhere ("MALAGON, ALEX" → "Malagon, Alex"). The underlying stored data is unchanged.</li>
+</ul>
+</section>
+
+<hr>
+
+<section id="usp-overnight">
+<h2>❄ USP Overnight Shipping Policy</h2>
+<p><strong>Effective June 2026</strong> (from Megan Smith / clinical leadership):</p>
+<p>Several of our <strong>compounded sterile medications</strong> now require overnight cold shipping to comply with updated USP standards. Patients receiving these medications are now charged <strong>$50 for overnight shipping directly to their home</strong>, rather than the previous 2-day option. Per USP regulations, these sterile-prepared medications must be shipped overnight and stored frozen.</p>
+
+<div class="note"><strong>Existing patients (6-month rule):</strong> If the patient has filled the medication within the last 6 months they get <strong>one complimentary overnight shipping</strong>; future fills are $50.<br>
+<strong>New patients or no fill in 6+ months:</strong> charged $50 on this fill.</div>
+
+<h3>Medications requiring overnight shipping</h3>
+<ul>
+  <li>Tacrolimus ophthalmic</li>
+  <li>Cyclosporine ophthalmic</li>
+  <li>Medroxyprogesterone injection</li>
+  <li>Estradiol ophthalmic</li>
+  <li>Oil-based injections, including:
+    <ul>
+      <li>Testosterone</li>
+      <li>Testosterone combination products</li>
+      <li>Estradiol (oil)</li>
+      <li>Progesterone (oil)</li>
+      <li>Other oil-based injectable formulations</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>How the portal helps</h3>
+<ul>
+  <li>When you type one of these drugs on the <strong>New Transfer</strong> or <strong>Edit Transfer</strong> form, a yellow warning box pops up under the Items section with the policy reminder and a recommended charge.</li>
+  <li>Once the patient name is filled in, the warning checks the patient's history: it tells you <strong>"✨ Complimentary this fill"</strong> (if last fill was within 6 months) or <strong>"💰 Charge $50"</strong> (new patient or 6+ months since last fill).</li>
+  <li>The <strong>Delivery Charge</strong> dropdown now includes a <strong>$50 (USP overnight)</strong> option — set this when the patient is being charged.</li>
+  <li>A portal-wide yellow banner reminds the team until they dismiss it.</li>
+</ul>
+
+<h3>Admins: editing the warning list</h3>
+<p>Go to <strong>Admin → Drug Warnings</strong>. You can:</p>
+<ul>
+  <li><strong>Edit the match patterns</strong> — one pattern per line, space-separated terms (all must be present). Example: <code>tacrolimus ophth</code> matches drugs containing both "tacrolimus" and "ophth" (case-insensitive).</li>
+  <li><strong>Change the headline, body, and complimentary / standard messages</strong> that appear in the warning box.</li>
+  <li><strong>Change the charge amount</strong> ($50 today; if pricing changes, update here).</li>
+  <li><strong>Change the complimentary window</strong> (6 months today). Set to blank if the rule doesn't apply.</li>
+  <li><strong>Uncheck "Active"</strong> to disable a warning without deleting it.</li>
+  <li><strong>+ Add Warning</strong> to create new rules for future policies — the same engine works for any drug-policy callout.</li>
 </ul>
 </section>
 
@@ -756,7 +804,7 @@ A: Each non-transfer pickup goes to one pickup pharmacy per record. If a single 
 </section>
 
 <hr>
-<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-06-13 — HealNow payment auto-sync (Payment + Pay Date columns, per-Rx badges, receipt PDFs), Paid-in-Store override always available, sign-in screen restyled to Training Portal look, Ship-To address pre-fill + clear on type switch, two-line patient names in table (1800px wider), Save as default + Reset moved to filter row start, Ship-To type filter, pickup pin removed from table, OCR drug-name matching against known drug list, editable tracking with live FedEx pull, Past Anticipated Ship moved to Alerts badge, SLA excludes Received, Receive screen Select all toggle, Bulk-Received cascade auto-heals orphan transfers. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
+<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-06-15 — USP overnight cold-shipping policy notice with admin-editable Drug Warnings + inline form warning + $50 dropdown option + dismissible portal banner. HealNow payment auto-sync (Payment + Pay Date columns, per-Rx badges, receipt PDFs), Paid-in-Store override always available, sign-in screen restyled to Training Portal look, Ship-To address pre-fill + clear on type switch, two-line patient names in table (1800px wider), Save as default + Reset moved to filter row start, Ship-To type filter, pickup pin removed from table, OCR drug-name matching against known drug list, editable tracking with live FedEx pull, Past Anticipated Ship moved to Alerts badge, SLA excludes Received, Receive screen Select all toggle, Bulk-Received cascade auto-heals orphan transfers. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
 
 </body>
 </html>

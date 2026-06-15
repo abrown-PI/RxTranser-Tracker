@@ -59,7 +59,10 @@ function redactWebhooks(settings) {
     adminEmails: settings.adminEmails || [],
     dailySummaryRecipients: settings.dailySummaryRecipients || [],
     locationEmails: settings.locationEmails || {},
-    pharmacyAddresses: settings.pharmacyAddresses || {}
+    pharmacyAddresses: settings.pharmacyAddresses || {},
+    // Only return drugWarnings when explicitly stored — lets the frontend keep
+    // its seed value on a fresh install (Array.isArray check on the client).
+    ...(Array.isArray(settings.drugWarnings) ? { drugWarnings: settings.drugWarnings } : {})
   };
 }
 
@@ -109,6 +112,11 @@ module.exports = async function (context, req) {
       if (incoming.pharmacyAddresses && typeof incoming.pharmacyAddresses === 'object') {
         pharmacyAddresses = incoming.pharmacyAddresses;
       }
+      // Drug warnings — full replace if provided (array of rule objects)
+      let drugWarnings = current.drugWarnings || [];
+      if (Array.isArray(incoming.drugWarnings)) {
+        drugWarnings = incoming.drugWarnings;
+      }
       const merged = {
         ...current,
         teamsWebhooks,
@@ -116,6 +124,7 @@ module.exports = async function (context, req) {
         dailySummaryRecipients,
         locationEmails,
         pharmacyAddresses,
+        drugWarnings,
         askQuestionRouting: incoming.askQuestionRouting || current.askQuestionRouting || 'opposite-side'
       };
       await writeSettings(merged);

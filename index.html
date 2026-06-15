@@ -212,6 +212,19 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
   </div>
 </nav>
 
+<div id="policyBanner" style="display:none;background:#fffbeb;border-bottom:1px solid #d97706;padding:10px 24px;font-size:13px;color:#78350f">
+  <div style="max-width:1800px;margin:0 auto;display:flex;align-items:center;gap:14px">
+    <span style="font-size:18px">⚠</span>
+    <div style="flex:1;line-height:1.5">
+      <strong>USP Overnight Shipping Policy (effective immediately):</strong>
+      Several sterile compounded medications (Tacrolimus / Cyclosporine / Estradiol <em>ophthalmic</em>, Medroxyprogesterone <em>injection</em>, oil-based injections incl. Testosterone / Estradiol / Progesterone) now require <strong>overnight cold shipping</strong>. Patients pay <strong>$50 overnight</strong> directly to home — no 2-day option.
+      Existing patients who filled within the last 6 months get <strong>one complimentary overnight</strong>; future fills are $50. New patients or 6+ months since last fill = $50 now.
+      <a href="help.html#usp-overnight" target="_blank" style="color:#92400e;font-weight:600">Full policy →</a>
+    </div>
+    <button id="dismissPolicyBanner" title="Dismiss" style="background:transparent;border:0;color:#78350f;font-size:18px;cursor:pointer;line-height:1;padding:4px 8px">×</button>
+  </div>
+</div>
+
 <div id="nextShipmentBanner" style="display:none;background:linear-gradient(90deg,#cfdbed,#dde7f4);border-bottom:1px solid var(--primary-light);padding:8px 24px;font-size:13px;color:var(--primary-darker);text-align:center"></div>
 
 <div class="tabs">
@@ -317,6 +330,37 @@ let CURRENT_USER = USERS[0]; // defaults to admin for demo
 
 // SLA rules (hours allowed per status before breach)
 let SLA_RULES = { 'New': 24, 'In Progress': 72 };
+
+// Drug Warnings — admin-editable rules that surface a yellow notice on the
+// New/Edit Transfer form when an item's drug name matches one of the patterns.
+// Each `matchers` line is space-separated terms; ALL terms must appear in the
+// drug name (case-insensitive). Multiple lines OR together.
+// `complimentaryWindowMonths`, when set, triggers a patient-history lookup:
+//   - if the patient filled this drug within the window → suggest 1 complimentary
+//   - otherwise (new patient or last fill > window months ago) → charge the fee
+// Persisted via /api/settings.drugWarnings — admins edit on Admin tab.
+let DRUG_WARNINGS = [
+  {
+    id: 'usp-overnight',
+    active: true,
+    label: 'USP Overnight Shipping (Sterile Compounds)',
+    matchers: [
+      'tacrolimus ophth', 'tacrolimus eye',
+      'cyclosporine ophth', 'cyclosporine eye',
+      'estradiol ophth', 'estradiol eye',
+      'medroxyprogesterone inj', 'medroxyprogesterone depot',
+      'testosterone oil', 'testosterone inj', 'testosterone cyp', 'testosterone enan', 'testosterone prop',
+      'estradiol oil', 'estradiol cyp', 'estradiol valer',
+      'progesterone oil', 'progesterone inj'
+    ],
+    headline: 'USP overnight cold shipping required',
+    body: 'Per updated USP standards, this sterile-compounded medication must ship overnight and be stored frozen. Patient ships directly to home (no 2-day option).',
+    chargeAmount: 50,
+    complimentaryWindowMonths: 6,
+    complimentaryText: 'This patient filled this drug within the last 6 months → give 1 complimentary overnight this fill. Next fill will be $50.',
+    standardText: 'New patient or no fill of this drug in the last 6 months → charge the patient $50 for overnight shipping. Set Delivery Charge to $50 and check ❄ Cold item.'
+  }
+];
 
 // Formula library — reusable formulas scoped to the originating location
 let FORMULAS = [
@@ -2543,6 +2587,60 @@ function renderAdmin() {
     </div></div>
 
 
+    <div class="card"><div class="card-header">Drug Warnings <button class="btn btn-primary btn-sm" id="addDrugWarningBtn">+ Add Warning</button></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:12px">When a team member types a drug name on a New or Edit Transfer that matches one of these patterns, a yellow warning box pops up under the Items section with whatever message + charge guidance you set here. Useful for policy callouts like the USP overnight-shipping rule.</p>
+      <p class="item-sub" style="margin-bottom:14px"><strong>Match pattern syntax:</strong> one pattern per line. Each line is space-separated terms — <em>all</em> terms must appear in the drug name (case-insensitive). Examples: <code>tacrolimus ophth</code> matches any drug containing both "tacrolimus" and "ophth". Multiple lines work as OR.</p>
+      <div id="drugWarningsList">
+        ${DRUG_WARNINGS.map((w, i) => `
+          <div class="warning-rule" style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px;margin-bottom:14px" data-wi="${i}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">
+              <div style="display:flex;align-items:center;gap:8px;flex:1">
+                <input type="checkbox" data-dw="${i}" data-k="active" ${w.active?'checked':''} style="margin:0" title="Active — uncheck to disable without deleting" />
+                <input data-dw="${i}" data-k="label" value="${escapeHtml(w.label||'')}" placeholder="Short name (e.g. USP Overnight Shipping)" style="flex:1;padding:6px 10px;border:1px solid var(--gray-300);border-radius:5px;font-weight:600" />
+              </div>
+              <button class="btn btn-secondary btn-sm" data-rmw="${i}">Remove</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+              <div>
+                <label style="font-size:11px;font-weight:600;color:var(--gray-700);text-transform:uppercase;letter-spacing:.03em">Match patterns (one per line)</label>
+                <textarea data-dw="${i}" data-k="matchers" rows="6" placeholder="tacrolimus ophth\ncyclosporine ophth\n..." style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--gray-300);border-radius:5px;font-family:'Consolas',monospace;font-size:12px;resize:vertical">${escapeHtml((w.matchers||[]).join('\n'))}</textarea>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div>
+                  <label style="font-size:11px;font-weight:600;color:var(--gray-700);text-transform:uppercase;letter-spacing:.03em">Warning headline</label>
+                  <input data-dw="${i}" data-k="headline" value="${escapeHtml(w.headline||'')}" placeholder="USP overnight cold shipping required" style="width:100%;margin-top:4px;padding:6px 10px;border:1px solid var(--gray-300);border-radius:5px" />
+                </div>
+                <div>
+                  <label style="font-size:11px;font-weight:600;color:var(--gray-700);text-transform:uppercase;letter-spacing:.03em">Warning body</label>
+                  <textarea data-dw="${i}" data-k="body" rows="3" placeholder="Per updated USP standards..." style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--gray-300);border-radius:5px;font-size:13px;resize:vertical">${escapeHtml(w.body||'')}</textarea>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  <div>
+                    <label style="font-size:11px;font-weight:600;color:var(--gray-700);text-transform:uppercase;letter-spacing:.03em">Charge $ amount</label>
+                    <input type="number" min="0" step="1" data-dw="${i}" data-k="chargeAmount" value="${escapeHtml(String(w.chargeAmount||''))}" placeholder="50" style="width:100%;margin-top:4px;padding:6px 10px;border:1px solid var(--gray-300);border-radius:5px" />
+                  </div>
+                  <div>
+                    <label style="font-size:11px;font-weight:600;color:var(--gray-700);text-transform:uppercase;letter-spacing:.03em" title="If set, the portal looks at the patient's history. Within window = complimentary; outside = charged.">Complimentary window (months)</label>
+                    <input type="number" min="0" step="1" data-dw="${i}" data-k="complimentaryWindowMonths" value="${escapeHtml(String(w.complimentaryWindowMonths||''))}" placeholder="6 (optional)" style="width:100%;margin-top:4px;padding:6px 10px;border:1px solid var(--gray-300);border-radius:5px" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label style="font-size:11px;font-weight:600;color:var(--gray-700);text-transform:uppercase;letter-spacing:.03em">Complimentary message <span class="hint" style="text-transform:none;font-weight:400">(shown when patient had a recent fill)</span></label>
+                <textarea data-dw="${i}" data-k="complimentaryText" rows="2" placeholder="Patient filled this within the last 6 months..." style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--gray-300);border-radius:5px;font-size:13px;resize:vertical">${escapeHtml(w.complimentaryText||'')}</textarea>
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:600;color:var(--gray-700);text-transform:uppercase;letter-spacing:.03em">Standard message <span class="hint" style="text-transform:none;font-weight:400">(shown when there's no recent fill / new patient)</span></label>
+                <textarea data-dw="${i}" data-k="standardText" rows="2" placeholder="Charge the patient..." style="width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--gray-300);border-radius:5px;font-size:13px;resize:vertical">${escapeHtml(w.standardText||'')}</textarea>
+              </div>
+            </div>
+          </div>
+        `).join('') || '<div class="empty" style="padding:24px"><p>No drug warnings configured. Click <strong>+ Add Warning</strong> to create one.</p></div>'}
+      </div>
+    </div></div>
+
     <div class="card"><div class="card-header">Formula Library <button class="btn btn-primary btn-sm" id="addFormulaBtn">+ Add Formula</button></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">Formulas are scoped to a single location. Users from that location can pick them by name when creating a transfer instead of re-uploading.</p>
       <table style="box-shadow:none"><thead><tr><th>Name</th><th>Location</th><th>Link</th><th>Added By</th><th></th></tr></thead><tbody>
@@ -2820,6 +2918,46 @@ function renderAdmin() {
     renderAdmin(); // refresh the row styling to reflect new selection
   });
   root.querySelectorAll('[data-rmf]').forEach(b => b.onclick = () => { FORMULAS.splice(+b.dataset.rmf, 1); renderAdmin(); });
+
+  // Drug Warnings: edit / add / remove with debounced persistence
+  let _dwSaveTimer = null;
+  const persistDrugWarningsDebounced = () => { clearTimeout(_dwSaveTimer); _dwSaveTimer = setTimeout(persistDrugWarnings, 500); };
+  root.querySelectorAll('[data-dw]').forEach(el => {
+    const handler = () => {
+      const i = +el.dataset.dw, k = el.dataset.k;
+      const w = DRUG_WARNINGS[i]; if (!w) return;
+      if (el.type === 'checkbox') w[k] = el.checked;
+      else if (k === 'matchers') w[k] = String(el.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+      else if (k === 'chargeAmount' || k === 'complimentaryWindowMonths') w[k] = el.value === '' ? '' : Number(el.value);
+      else w[k] = el.value;
+      persistDrugWarningsDebounced();
+    };
+    el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', handler);
+  });
+  root.querySelectorAll('[data-rmw]').forEach(b => b.onclick = () => {
+    if (!confirm('Remove this drug warning?')) return;
+    DRUG_WARNINGS.splice(+b.dataset.rmw, 1);
+    persistDrugWarnings();
+    renderAdmin();
+  });
+  const addDw = document.getElementById('addDrugWarningBtn');
+  if (addDw) addDw.onclick = () => {
+    DRUG_WARNINGS.push({
+      id: 'dw-' + Date.now(),
+      active: true,
+      label: '',
+      matchers: [],
+      headline: '',
+      body: '',
+      chargeAmount: '',
+      complimentaryWindowMonths: '',
+      complimentaryText: '',
+      standardText: ''
+    });
+    persistDrugWarnings();
+    renderAdmin();
+  };
+
   document.getElementById('addFormulaBtn').onclick = () => {
     const name = prompt('Formula name?'); if (!name) return;
     const loc = prompt('Location? (one of: ' + LOCATIONS.join(', ') + ')', CURRENT_USER.location);
@@ -3115,7 +3253,7 @@ function renderNewForm() {
       <div class="section"><div class="section-title">Shipping</div>
       <div class="form-grid">
         <div class="form-group"><label>Ship To</label><select id="f-shipTo">${['Pharmacy','Delivery-Lancaster','Patient'].map(s=>`<option ${s===d.shipTo?'selected':''}>${s}</option>`).join('')}</select></div>
-        <div class="form-group"><label>Delivery Charge (if applicable)</label><select id="f-deliveryCharge"><option value="">—</option>${['3','5','15'].map(v=>`<option ${v===d.deliveryCharge?'selected':''}>$${v}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Delivery Charge (if applicable)</label><select id="f-deliveryCharge"><option value="">—</option>${['3','5','15','50'].map(v=>`<option ${v===d.deliveryCharge?'selected':''}>$${v}${v==='50'?' (USP overnight)':''}</option>`).join('')}</select></div>
         <div class="form-group full"><label>Address Line 1</label><input id="f-shipAddr1" value="${escapeHtml(d.shipAddr1)}" /></div>
         <div class="form-group full"><label>Address Line 2</label><input id="f-shipAddr2" value="${escapeHtml(d.shipAddr2)}" /></div>
         <div class="form-group"><label>City</label><input id="f-shipCity" value="${escapeHtml(d.shipCity)}" /></div>
@@ -3208,6 +3346,7 @@ function renderNewForm() {
       </div>
       <div id="itemsEditor"></div>
       <button class="btn btn-secondary btn-sm" id="addItemBtn" style="margin-top:8px">+ Add another Rx</button>
+      <div id="drugWarningBox" style="display:none;margin-top:14px"></div>
       </div>
 
       <div class="section" style="margin-top:24px;display:flex;gap:8px;justify-content:flex-end">
@@ -3598,6 +3737,49 @@ function canonicalizeDrugName(raw) {
 //   • Collapse internal whitespace + trim — so "Drug  X" and "Drug X" merge.
 //   • Lower-cased key for dedupe, but the first-seen cleaned casing is kept
 //     for display so we don't ALL-CAP everything.
+// Drug Warnings matchers
+// matchers entry is space-separated terms; ALL terms must appear in the drug name (case-insensitive).
+function drugMatchesWarning(drug, warning) {
+  if (!warning || !warning.active || !Array.isArray(warning.matchers)) return false;
+  const d = String(drug || '').toLowerCase();
+  if (!d) return false;
+  return warning.matchers.some(line => {
+    const terms = String(line || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return false;
+    return terms.every(t => d.includes(t));
+  });
+}
+// Return the unique set of active warnings matched by any item's drug.
+function matchDrugWarnings(items) {
+  const matched = new Map();
+  (items || []).forEach(it => {
+    const drug = (it && it.drug) || '';
+    DRUG_WARNINGS.forEach(w => {
+      if (matched.has(w.id)) return;
+      if (drugMatchesWarning(drug, w)) matched.set(w.id, w);
+    });
+  });
+  return [...matched.values()];
+}
+// Look back through TRANSFERS for the most recent fill of any drug that matches
+// the warning's matchers for the same patient. Returns Date or null.
+function lastFillForWarning(patientName, warning, excludeTransferId) {
+  if (!patientName || !warning) return null;
+  const target = String(patientName).toLowerCase().trim();
+  if (!target) return null;
+  let best = null;
+  for (const t of TRANSFERS) {
+    if (excludeTransferId && t.id === excludeTransferId) continue;
+    const tn = String(t.patientName || '').toLowerCase().trim();
+    if (tn !== target) continue;
+    if (!Array.isArray(t.items) || !t.items.length) continue;
+    if (!t.items.some(it => drugMatchesWarning(it && it.drug, warning))) continue;
+    const created = t.createdAt ? new Date(t.createdAt) : null;
+    if (!created || isNaN(created)) continue;
+    if (!best || created > best) best = created;
+  }
+  return best;
+}
 function getKnownDrugs() {
   const seen = new Map(); // normalized key -> cleaned display value
   // Seed with canonical names first so they always appear, and so a matching
@@ -3619,6 +3801,41 @@ function getKnownDrugs() {
     if (!seen.has(key)) seen.set(key, cleaned);
   }));
   return [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+// Render the yellow drug-warning box below the Items section. Looks at the
+// current draft's items + patient name and surfaces any matched DRUG_WARNINGS,
+// with a per-warning patient-history hint (complimentary vs. charge).
+function renderDrugWarningBox() {
+  const box = document.getElementById('drugWarningBox');
+  if (!box) return;
+  const matches = matchDrugWarnings(state.draft && state.draft.items);
+  if (!matches.length) { box.innerHTML = ''; box.style.display = 'none'; return; }
+  const patientName = state.draft && state.draft.patientName;
+  const excludeId = state.editingTransferId || null;
+  const html = matches.map(w => {
+    const last = w.complimentaryWindowMonths ? lastFillForWarning(patientName, w, excludeId) : null;
+    const windowMs = (w.complimentaryWindowMonths || 0) * 30 * 86400000;
+    const withinWindow = !!(last && (Date.now() - last.getTime() <= windowMs));
+    let hint = '';
+    if (w.complimentaryWindowMonths) {
+      if (!patientName) {
+        hint = '<div style="margin-top:6px;font-size:12px;color:#92400e">Enter the patient name above — the portal will then tell you whether this fill is complimentary or $50.</div>';
+      } else if (withinWindow) {
+        hint = `<div style="margin-top:8px;padding:8px 10px;background:#dcfce7;border:1px solid #86efac;border-radius:5px;font-size:13px;color:#166534"><strong>✨ Complimentary this fill</strong> — last fill was ${fmtDate(last.toISOString())}. ${escapeHtml(w.complimentaryText || '')}</div>`;
+      } else {
+        const lastTxt = last ? `Last fill of this drug was ${fmtDate(last.toISOString())} (more than ${w.complimentaryWindowMonths} months ago)` : 'No prior fill of this drug found for this patient';
+        hint = `<div style="margin-top:8px;padding:8px 10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:5px;font-size:13px;color:#92400e"><strong>💰 Charge $${w.chargeAmount || 50}</strong> — ${escapeHtml(lastTxt)}. ${escapeHtml(w.standardText || '')}</div>`;
+      }
+    }
+    return `<div style="background:#fffbeb;border:1px solid #d97706;border-left:4px solid #d97706;border-radius:6px;padding:12px 14px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:14px;color:#92400e;margin-bottom:4px">⚠ ${escapeHtml(w.headline || w.label || 'Drug warning')}</div>
+      <div style="font-size:13px;color:#78350f;line-height:1.5">${escapeHtml(w.body || '')}</div>
+      ${hint}
+    </div>`;
+  }).join('');
+  box.innerHTML = html;
+  box.style.display = 'block';
 }
 
 function renderDraftItems() {
@@ -3649,16 +3866,24 @@ function renderDraftItems() {
     el.addEventListener('input', e => {
       const idx = +el.dataset.idx, k = el.dataset.k;
       state.draft.items[idx][k] = el.type === 'checkbox' ? el.checked : el.value;
+      if (k === 'drug') renderDrugWarningBox();
     });
   });
   wrap.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => {
     state.draft.items.splice(+b.dataset.rm, 1); renderDraftItems();
   }));
+  renderDrugWarningBox();
 }
 
 function bindDraftInputs() {
   const fields = ['patientFirstName','patientLastName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote','patientPrice'];
-  fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => state.draft[f] = el.value); });
+  fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => {
+    state.draft[f] = el.value;
+    if (f === 'patientFirstName' || f === 'patientLastName') {
+      state.draft.patientName = formatPatientName(state.draft.patientFirstName, state.draft.patientLastName);
+      renderDrugWarningBox();
+    }
+  }); });
 
   // Ship address auto-management. Two destinations populate from a pharmacy:
   //   1) Ship To = Pharmacy (regular transfer back to origin)
@@ -6939,8 +7164,17 @@ async function loadAdminEmails() {
       if (!addr) return;
       PHARMACY_ADDRESSES[loc] = { ...(PHARMACY_ADDRESSES[loc] || {}), ...addr };
     });
+    // Replace the seed DRUG_WARNINGS with persisted values when present.
+    if (Array.isArray(data.drugWarnings)) DRUG_WARNINGS = data.drugWarnings;
     return _adminEmails;
   } catch { return []; }
+}
+
+function persistDrugWarnings() {
+  fetch('/api/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ drugWarnings: DRUG_WARNINGS })
+  }).catch(() => {});
 }
 
 // Apply a signed-in Microsoft account to CURRENT_USER. Looks up the user's assigned
@@ -7024,10 +7258,23 @@ function hideAuthGate() {
   if (gate) gate.style.display = 'none';
   startIdleTimer();
   updateNextShipmentBanner();
+  showPolicyBanner();
 }
 
 // Banner just under the navbar: 'Your next pharmacy shipment is expected on Tuesday MM/DD/YYYY'
 // Pulls the shipping day from PHARMACY_ADDRESSES[CURRENT_USER.location].shippingDay.
+// Dismissible policy banner (shown until user clicks ×; flag in localStorage).
+// Bump the storage key version when the policy text changes to re-surface to everyone.
+const POLICY_BANNER_KEY = 'policyBannerDismissed:usp-overnight-2026-06-15';
+function showPolicyBanner() {
+  const b = document.getElementById('policyBanner');
+  if (!b) return;
+  if (localStorage.getItem(POLICY_BANNER_KEY) === '1') return;
+  b.style.display = 'block';
+  const x = document.getElementById('dismissPolicyBanner');
+  if (x) x.onclick = () => { localStorage.setItem(POLICY_BANNER_KEY, '1'); b.style.display = 'none'; };
+}
+
 function updateNextShipmentBanner() {
   const banner = document.getElementById('nextShipmentBanner');
   if (!banner) return;
