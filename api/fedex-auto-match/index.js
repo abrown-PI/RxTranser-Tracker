@@ -172,7 +172,13 @@ module.exports = async function (context, req) {
     // FedEx reference (not the transfer ID), so we query by that and apply the tracking
     // to every transfer in the bulk.
     const shipments = await loadShipments();
-    const openBulkShipments = shipments.filter(s => s.bulkShipmentId && !s.trackingNumber && s.status !== 'Received');
+    // Include Received bulks too — receivers commonly mark "Received" the morning the box
+    // arrives, BEFORE the auto-match cron has a chance to populate tracking. Excluding Received
+    // bulks meant any quickly-received package lost its auto-pull forever (real incident: Erie→Seminole
+    // 6/8, 6/10, 6/15 all missed tracking auto-fill because Seminole clicked Received same/next day).
+    // FedEx's 30-day shipDate window in searchByReferences naturally drops ancient bulks; otherwise
+    // we want every open-tracking bulk queried.
+    const openBulkShipments = shipments.filter(s => s.bulkShipmentId && !s.trackingNumber);
 
     if (openTransfers.length === 0 && openBulkShipments.length === 0) {
       context.res = { status: 200, body: { applied: 0, message: 'No open transfers or bulk shipments without tracking' } };
