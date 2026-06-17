@@ -2,11 +2,12 @@ name: FedEx Auto-Match (every 3 hrs, 7a-8p ET window)
 
 on:
   schedule:
-    # 6 runs/day at 12, 15, 18, 21, 0, 1 UTC.
-    # In EST (winter):  7am, 10am, 1pm, 4pm, 7pm, 8pm ET
-    # In EDT (summer):  8am, 11am, 2pm, 5pm, 8pm, 9pm ET
-    # Both calendars hit the 7a-8p ET window staff requested with one trailing late run.
-    - cron: '0 12,15,18,21,0,1 * * *'
+    # 7 runs/day at 11, 12, 15, 18, 21, 0, 1 UTC.
+    # In EST (winter):  6am, 7am, 10am, 1pm, 4pm, 7pm, 8pm ET
+    # In EDT (summer):  7am, 8am, 11am, 2pm, 5pm, 8pm, 9pm ET
+    # The early 6/7am ET run is a pre-shift safety net so staff arriving at 8am
+    # see tracking already populated for anything FedEx indexed overnight.
+    - cron: '0 11,12,15,18,21,0,1 * * *'
   workflow_dispatch: # also allow manual triggering from the Actions tab
 
 jobs:
