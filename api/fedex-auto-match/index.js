@@ -189,27 +189,42 @@ module.exports = async function (context, req) {
     const applied = [];
 
     // First: handle bulk shipments. Any match applies the tracking to ALL transfers in the bulk.
+    // We also stamp every open bulk with lastAutoMatchAttemptAt + lastAutoMatchResult so the
+    // UI can show "Last checked at X, no tracking found yet" and prompt the team to verify
+    // that the BULK-* ID was actually typed into WorldShip's Customer Reference field.
+    const nowIso = new Date().toISOString();
     for (const s of openBulkShipments) {
       const match = found[s.bulkShipmentId];
-      if (!match) continue;
-      if (!dryRun) {
-        s.trackingNumber = match.trackingNumber;
-        if (match.shipDate) s.shipDate = match.shipDate;
-        if (!s.status || s.status === 'Pending') s.status = 'In Transit';
-        await updateShipment(s);
-        // Cascade tracking to every transfer in this bulk
-        for (const tid of (s.transferIds || [])) {
-          const t = transfers.find(x => x.id === tid);
-          if (!t) continue;
-          t.trackingNumber = match.trackingNumber;
-          if (match.shipDate) t.dateShipped = match.shipDate;
-          if (!['Shipped', 'Delivered', 'Canceled'].includes(t.status)) t.status = 'Shipped';
-          t.fedexAutoMatched = true;
-          t.fedexAutoMatchedAt = new Date().toISOString();
-          await updateTransfer(t);
+      if (match) {
+        if (!dryRun) {
+          s.trackingNumber = match.trackingNumber;
+          if (match.shipDate) s.shipDate = match.shipDate;
+          if (!s.status || s.status === 'Pending') s.status = 'In Transit';
+          s.lastAutoMatchAttemptAt = nowIso;
+          s.lastAutoMatchResult = 'matched';
+          await updateShipment(s);
+          // Cascade tracking to every transfer in this bulk
+          for (const tid of (s.transferIds || [])) {
+            const t = transfers.find(x => x.id === tid);
+            if (!t) continue;
+            t.trackingNumber = match.trackingNumber;
+            if (match.shipDate) t.dateShipped = match.shipDate;
+            if (!['Shipped', 'Delivered', 'Canceled'].includes(t.status)) t.status = 'Shipped';
+            t.fedexAutoMatched = true;
+            t.fedexAutoMatchedAt = nowIso;
+            await updateTransfer(t);
+          }
+        }
+        applied.push({ kind: 'bulk', bulkShipmentId: s.bulkShipmentId, trackingNumber: match.trackingNumber, transfersUpdated: (s.transferIds || []).length });
+      } else {
+        // No FedEx match for this BULK-* reference. Record the attempt so the UI can show
+        // a "no tracking found yet" hint with the timestamp.
+        if (!dryRun) {
+          s.lastAutoMatchAttemptAt = nowIso;
+          s.lastAutoMatchResult = 'no-match';
+          await updateShipment(s);
         }
       }
-      applied.push({ kind: 'bulk', bulkShipmentId: s.bulkShipmentId, trackingNumber: match.trackingNumber, transfersUpdated: (s.transferIds || []).length });
     }
 
     // Then: handle individual transfers (non-bulk, ship-to-patient typically)
