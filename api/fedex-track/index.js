@@ -88,12 +88,17 @@ module.exports = async function (context, req) {
           const latest = first.latestStatusDetail || {};
           const dates = first.dateAndTimes || [];
           const deliveryDate = (dates.find(d => d.type === 'ACTUAL_DELIVERY') || dates.find(d => d.type === 'ESTIMATED_DELIVERY') || {}).dateTime || null;
+          // Ship date prefers actual pickup time; falls back to label-generation SHIP timestamp.
+          // Needed because Track-by-Reference sometimes returns the tracking # before FedEx has
+          // stamped the actual pickup, leaving the bulk's shipDate null until /track is hit again.
+          const shipDate = (dates.find(d => d.type === 'ACTUAL_PICKUP') || dates.find(d => d.type === 'SHIP') || {}).dateTime || null;
           results.push({
             trackingNumber: tn,
             status: latest.statusByLocale || latest.description || latest.code || 'Unknown',
             statusCode: latest.code || null,
             statusDescription: latest.description || null,
             deliveryDate,
+            shipDate,
             lastEvent: (first.scanEvents && first.scanEvents[0]) ? {
               date: first.scanEvents[0].date,
               eventDescription: first.scanEvents[0].eventDescription,

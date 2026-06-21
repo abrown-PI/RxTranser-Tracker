@@ -5309,8 +5309,8 @@ function openShipment(id) {
     <div class="modal-body">
       <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
         <span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>
-        <div><strong>Ship:</strong> ${fmtDate(s.shipDate)}</div>
-        <div><strong>Delivered:</strong> ${fmtDate(s.deliveredDate)}</div>
+        <div><strong>Ship:</strong> ${fmtDate(s.shipDate)} ${canEditTracking ? `<button id="sm-editShip" title="Edit ship date" style="background:none;border:none;cursor:pointer;padding:0 2px;font-size:11px;color:var(--primary)">✏️</button>` : ''}</div>
+        <div><strong>Delivered:</strong> ${fmtDate(s.deliveredDate)} ${canEditTracking ? `<button id="sm-editDelivered" title="Edit delivered date" style="background:none;border:none;cursor:pointer;padding:0 2px;font-size:11px;color:var(--primary)">✏️</button>` : ''}</div>
         <div><strong>Received:</strong> ${fmtDate(s.receivedDate)}${s.receivedBy?` by ${escapeHtml(s.receivedBy)}`:''}</div>
         ${isReceiver?`<div style="flex:1"></div><span class="pill-warn">📦 Headed to your location — unpack below</span>`:''}
       </div>
@@ -5561,6 +5561,84 @@ function openShipment(id) {
       scanInput.value = '';
       if (hit) openShipment(s.id);
     });
+  }
+
+  // Manual edit handlers for ship + delivered dates. Auto-match populates these
+  // from FedEx but Track-by-Reference occasionally returns a tracking number before
+  // the actual pickup timestamp lands, leaving shipDate blank — staff need a way in.
+  const promptDate = (label, current) => {
+    const raw = prompt(`${label} (YYYY-MM-DD, blank to clear):`, current || '');
+    if (raw === null) return undefined;
+    const v = String(raw).trim();
+    if (!v) return '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) { alert('Use YYYY-MM-DD format (e.g., 2026-06-17).'); return undefined; }
+    return v;
+  };
+  const editShipBtn = document.getElementById('sm-editShip');
+  if (editShipBtn) editShipBtn.onclick = async () => {
+    const v = promptDate('Ship date', s.shipDate);
+    if (v === undefined) return;
+    s.shipDate = v || null;
+    // Cascade to every transfer in the bulk so individual transfer rows show the same ship date.
+    s.transferIds.forEach(tid => {
+      const t = TRANSFERS.find(x => x.id === tid);
+      if (!t) return;
+      if (s.shipDate) t.dateShipped = s.shipDate;
+      else if (t.dateShipped === s.shipDate) t.dateShipped = null;
+      apiUpdateTransfer(t);
+    });
+    await apiUpdateShipment(s);
+    if (typeof renderShipments === 'function' && state.tab === 'shipments') renderShipments();
+    openShipment(s.id);
+  };
+  const editDelBtn = document.getElementById('sm-editDelivered');
+  if (editDelBtn) editDelBtn.onclick = async () => {
+    const v = promptDate('Delivered date', s.deliveredDate);
+    if (v === undefined) return;
+    s.deliveredDate = v || null;
+    if (s.deliveredDate && (s.status === 'Pending' || s.status === 'In Transit')) s.status = 'Delivered';
+    await apiUpdateShipment(s);
+    if (typeof renderShipments === 'function' && state.tab === 'shipments') renderShipments();
+    openShipment(s.id);
+  };
+
+  // Self-heal: when this bulk has tracking but is missing shipDate (or deliveredDate),
+  // re-query FedEx via /api/fedex-track which always returns these from the per-tracking
+  // record. This covers the case where the auto-match cron applied the tracking before
+  // FedEx had stamped the actual pickup time.
+  if (s.isBulk && s.trackingNumber && (!s.shipDate || !s.deliveredDate)) {
+    (async () => {
+      try {
+        const r = await fetch('/api/fedex-track', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trackingNumbers: [s.trackingNumber] })
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        const res = (data.results || [])[0];
+        if (!res) return;
+        let changed = false;
+        if (!s.shipDate && res.shipDate) { s.shipDate = String(res.shipDate).slice(0,10); changed = true; }
+        if (!s.deliveredDate && res.deliveryDate && (res.statusCode || '').toUpperCase() === 'DL') {
+          s.deliveredDate = String(res.deliveryDate).slice(0,10); changed = true;
+        }
+        if (!changed) return;
+        s.fedexLastStatus = res.status;
+        s.fedexLastChecked = new Date().toISOString();
+        // Cascade dateShipped to transfers (only if their row is missing it — don't overwrite manual edits).
+        s.transferIds.forEach(tid => {
+          const t = TRANSFERS.find(x => x.id === tid);
+          if (!t) return;
+          let tChanged = false;
+          if (s.shipDate && !t.dateShipped) { t.dateShipped = s.shipDate; tChanged = true; }
+          if (s.deliveredDate && !t.dateReceivedByPatient) { t.dateReceivedByPatient = s.deliveredDate; tChanged = true; }
+          if (tChanged) apiUpdateTransfer(t);
+        });
+        await apiUpdateShipment(s);
+        if (typeof renderShipments === 'function' && state.tab === 'shipments') renderShipments();
+        openShipment(s.id);
+      } catch (e) { console.warn('shipDate self-heal failed', e); }
+    })();
   }
 }
 
