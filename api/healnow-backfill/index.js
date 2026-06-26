@@ -288,16 +288,32 @@ async function processPrescription(rx, order, transfers, dryRun, sample, context
     return { result: 'skipped', reason: `unknown status rxStatus="${rxStatus}" orderStatus="${orderStatus}"`, rxNumber, transferId: t.id };
   }
 
-  // Idempotent: if the item already has this status (or a more advanced one), don't re-apply.
-  // Order of advancement: cart_created < paid (paid is terminal); canceled/removed are terminal.
+  // Idempotent: skip if status is already at the target or more advanced. EXCEPTION: if the
+  // item is already 'paid' but is missing the receipt blob (the post-rebrand failure mode where
+  // webhook captured paidStatus but couldn't extract order_id → no receipt fetch), drop down to
+  // the receipt-only path below so we still pull the PDF.
+  const isPaidWithoutReceipt = item.paidStatus === 'paid' && newPaidStatus === 'paid' && !item.healnowReceiptBlob;
   if (item.paidStatus === 'paid' && newPaidStatus !== 'paid') {
     return { result: 'skipped', reason: 'already paid', rxNumber, transferId: t.id };
   }
-  if (item.paidStatus === newPaidStatus) {
+  if (item.paidStatus === newPaidStatus && !isPaidWithoutReceipt) {
     return { result: 'skipped', reason: 'no change', rxNumber, transferId: t.id };
   }
 
   if (!dryRun) {
+    // Receipt-recovery only — paidStatus already set, just need to populate the missing PDF
+    // and the order_id that the webhook missed.
+    if (isPaidWithoutReceipt) {
+      const orderIdToUse = order.id || order.order_id;
+      if (orderIdToUse) {
+        item.healnowOrderId = item.healnowOrderId || orderIdToUse;
+        const blob = await fetchAndStoreReceipt(orderIdToUse, context);
+        if (blob) item.healnowReceiptBlob = blob;
+      }
+      await saveTransfer(t);
+      if (sample.length < 20) sample.push({ rxNumber, drug: drugName, patient: patientName, transferId: t.id, newPaidStatus: 'receipt-recovered', matchedBy, dryRun });
+      return { result: 'applied', rxNumber, transferId: t.id, newPaidStatus: 'receipt-recovered' };
+    }
     item.healnowOrderId = order.id || order.order_id || item.healnowOrderId;
     item.healnowEventAt = new Date().toISOString();
     item.healnowMatchedBy = matchedBy;
@@ -319,8 +335,9 @@ async function processPrescription(rx, order, transfers, dryRun, sample, context
     rollupPaid(t);
     await saveTransfer(t);
   }
-  if (sample.length < 20) sample.push({ rxNumber, drug: drugName, patient: patientName, transferId: t.id, newPaidStatus, matchedBy, dryRun });
-  return { result: 'applied', rxNumber, transferId: t.id, newPaidStatus };
+  const reportedStatus = isPaidWithoutReceipt ? 'receipt-recovered' : newPaidStatus;
+  if (sample.length < 20) sample.push({ rxNumber, drug: drugName, patient: patientName, transferId: t.id, newPaidStatus: reportedStatus, matchedBy, dryRun });
+  return { result: 'applied', rxNumber, transferId: t.id, newPaidStatus: reportedStatus };
 }
 
 // Look up a HealNow patient by last name + first name match. HealNow's GET /v1/patients
