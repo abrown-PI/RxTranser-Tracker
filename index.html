@@ -404,17 +404,30 @@ function latestShippingDayAtOrBefore(addr, endDate) {
   return null;
 }
 
+// Sentinel value the admin can pick from the top-right location switcher to widen visibility
+// back to every location. Without this, admins see ONLY their currently-selected location's
+// transfers — matching how techs see their location only, so admins can act as a single
+// location without scrolling past 10 other pharmacies' work.
+const ALL_LOCATIONS = 'All locations';
 function canSeeTransfer(t) {
-  if (CURRENT_USER.role === 'admin') return true;
-  if (t.originLocation === CURRENT_USER.location) return true;
-  if (t.fillLocation === CURRENT_USER.location) return true;
-  // Pickup-at-other-pharmacy: the destination pharmacy should also see the transfer
-  if (t.pickupAtPharmacy && t.pickupLocation === CURRENT_USER.location) return true;
+  const loc = CURRENT_USER.location;
+  if (CURRENT_USER.role === 'admin' && loc === ALL_LOCATIONS) return true;
+  if (t.originLocation === loc) return true;
+  if (t.fillLocation === loc) return true;
+  if (t.pickupAtPharmacy && t.pickupLocation === loc) return true;
   return false;
 }
 function canSeeShipment(s) {
-  if (CURRENT_USER.role === 'admin') return true;
-  return s.fromLocation === CURRENT_USER.location || s.toLocation === CURRENT_USER.location;
+  const loc = CURRENT_USER.location;
+  if (CURRENT_USER.role === 'admin' && loc === ALL_LOCATIONS) return true;
+  return s.fromLocation === loc || s.toLocation === loc;
+}
+// Returns a real pharmacy location for places that need a defaultable origin/from value —
+// when the admin is in "All locations" mode, fall back to the first location rather than
+// emitting "All locations" as a form value.
+function activeRealLocation() {
+  const loc = CURRENT_USER && CURRENT_USER.location;
+  return (loc && loc !== ALL_LOCATIONS) ? loc : LOCATIONS[0];
 }
 function visibleTransfers() { return TRANSFERS.filter(canSeeTransfer); }
 function visibleShipments() { return SHIPMENTS.filter(canSeeShipment); }
@@ -2371,7 +2384,8 @@ function renderStats() {
         if (!inGroup.length) { alert('No packed items in this group.'); return; }
         if (!confirm(`Create a BULK shipment to ${dest} with ${inGroup.length} packed transfer${inGroup.length===1?'':'s'} and print the packing slip?`)) return;
         // Use Erie as the from-location if user is at Erie, otherwise current location.
-        const fromLoc = CURRENT_USER.location;
+        // Falls back to a real location when admin is in the "All locations" view.
+        const fromLoc = activeRealLocation();
         const bulkId = generateBulkShipmentId(dest, todayLocal());
         const shipment = {
           id: nextId(),
@@ -3091,7 +3105,7 @@ function renderAdmin() {
       const sampleShipment = {
         id: 'SAMPLE',
         bulkShipmentId: 'BULK-SAMPLE-001',
-        fromLocation: CURRENT_USER.location || 'Erie',
+        fromLocation: activeRealLocation(),
         toLocation: 'Seminole',
         carrier: 'FedEx',
         trackingNumber: '794612345678',
@@ -3691,7 +3705,7 @@ function freshDraft() {
   return {
     transferType: 'New', refillOfId: null,
     patientName: '', patientFirstName: '', patientLastName: '', patientDOB: '', patientAllergies: '',
-    originLocation: CURRENT_USER.location, fillLocation: 'Erie',
+    originLocation: activeRealLocation(), fillLocation: 'Erie',
     shipTo: 'Pharmacy', deliveryCharge: '',
     shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
     billing: 'HealNow', ccOnFileInPaladin: false, ccForm: null, patientPrice: '',
@@ -7586,7 +7600,12 @@ async function applyMsalAccount(account) {
   // Location switcher (guarded)
   const locSel = document.getElementById('locationSwitcher');
   if (!locSel) return; // navbar not present? still treat sign-in as successful
-  locSel.innerHTML = LOCATIONS.map(l => `<option value="${l}" ${l===user.location?'selected':''}>${l}</option>`).join('');
+  // Admin-only "All locations" option — restores the see-everything view (the default before
+  // the per-location filtering was added). Techs and managers don't see it.
+  const allLocOpt = (user.role === 'admin')
+    ? `<option value="${ALL_LOCATIONS}" ${user.location === ALL_LOCATIONS ? 'selected' : ''}>★ All locations (admin)</option>`
+    : '';
+  locSel.innerHTML = allLocOpt + LOCATIONS.map(l => `<option value="${l}" ${l===user.location?'selected':''}>${l}</option>`).join('');
   locSel.onchange = () => {
     user.location = locSel.value;
     localStorage.setItem('userLocation_' + email, locSel.value);
