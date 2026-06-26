@@ -124,10 +124,11 @@ function drugOverlap(a, b) {
   return shared / Math.min(A.size, B.size);
 }
 
-// Match logic mirrors the webhook receiver. Order of preference:
+// Match logic. Order of preference:
 //   1. Rx number (most specific — but Tabz's order::paid events dropped rx_number from line items)
-//   2. Patient name + drug-name overlap (handles the rx_number-missing case post-rebrand)
-//   3. Patient name + single candidate within 7d window (legacy fallback)
+//   2. Patient name + single candidate within 7d window (preserves legacy behavior — was working)
+//   3. Patient name + drug-name overlap within 30d window (NEW — disambiguates refill chains
+//      when window-widening creates multiple candidates)
 function findItemForRx(transfers, rxNumber, patientName, eventDate, drugName) {
   const rxTarget = normRx(rxNumber);
   if (rxTarget) {
@@ -144,30 +145,38 @@ function findItemForRx(transfers, rxNumber, patientName, eventDate, drugName) {
   }
   const eventName = normName(patientName);
   if (!eventName) return null;
-  const windowMs = 30 * 86400000;
-  const candidates = transfers.filter(t => {
+  const matchesPatient = (t) => {
     if (!t.patientName || normName(t.patientName) !== eventName) return false;
     if (['Canceled'].includes(t.status)) return false;
-    const created = t.createdAt ? new Date(t.createdAt) : null;
-    if (!created) return false;
-    return Math.abs(eventDate - created) <= windowMs;
-  });
-  if (candidates.length === 1) {
-    const t = candidates[0];
+    return !!t.createdAt;
+  };
+  const within = (t, days) => Math.abs(eventDate - new Date(t.createdAt)) <= days * 86400000;
+  // Pass A — strict 7d single candidate. Preserves the legacy behavior that was already matching.
+  const closeCandidates = transfers.filter(t => matchesPatient(t) && within(t, 7));
+  if (closeCandidates.length === 1) {
+    const t = closeCandidates[0];
     const item = (t.items || []).find(i => i.paidStatus !== 'paid') || (t.items || [])[0];
     if (item) return { transfer: t, item, matchedBy: 'patientName' };
   }
-  // Multiple candidates — try to disambiguate by drug name match across items.
-  if (candidates.length > 1 && drugName) {
+  // Pass B — widen to 30d, disambiguate by drug overlap. Catches refills/retros and cases
+  // where the patient has multiple transfers in the window. Threshold 0.34 ≈ "shared 1 of 3
+  // meaningful tokens" — strict enough to avoid wrong refill chains, loose enough to handle
+  // PMS/Tabz name variants (TIRZEPATIDE/B12 MDV vs Tirzepatide Injection).
+  const wideCandidates = transfers.filter(t => matchesPatient(t) && within(t, 30));
+  if (wideCandidates.length === 1) {
+    const t = wideCandidates[0];
+    const item = (t.items || []).find(i => i.paidStatus !== 'paid') || (t.items || [])[0];
+    if (item) return { transfer: t, item, matchedBy: 'patientName30d' };
+  }
+  if (wideCandidates.length > 1 && drugName) {
     let best = null, bestScore = 0;
-    for (const t of candidates) {
+    for (const t of wideCandidates) {
       for (const item of (t.items || [])) {
         const score = drugOverlap(item.drug, drugName);
         if (score > bestScore) { bestScore = score; best = { transfer: t, item }; }
       }
     }
-    // Require >=0.5 overlap to declare a confident match (avoids picking the wrong refill chain).
-    if (best && bestScore >= 0.5) return { ...best, matchedBy: `patientName+drug(${bestScore.toFixed(2)})` };
+    if (best && bestScore >= 0.34) return { ...best, matchedBy: `patientName+drug(${bestScore.toFixed(2)})` };
   }
   return null;
 }
