@@ -2831,6 +2831,17 @@ function renderAdmin() {
       <div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="tw-save">Save webhook URLs</button> <span class="item-sub" id="tw-saveResult" style="margin-left:10px"></span></div>
     </div></div>
 
+    <div class="card"><div class="card-header"><img src="/tabz-logo.png" alt="Tabz" style="height:18px;vertical-align:-4px;margin-right:6px">Integration <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— backfill missed paid statuses and pull missing receipt PDFs</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">When a Tabz event fires but a receipt didn't pull (or the webhook missed the event), use this to query the Tabz orders API directly for a date window and apply the matching logic to existing transfers. Safe to re-run — it's idempotent.</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+        <div><label class="hint" style="display:block">From</label><input type="date" id="tz-from" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px" /></div>
+        <div><label class="hint" style="display:block">To</label><input type="date" id="tz-to" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px" /></div>
+        <button class="btn btn-secondary btn-sm" id="tz-dryrun">Dry run (preview only)</button>
+        <button class="btn btn-primary btn-sm" id="tz-apply">Apply backfill</button>
+      </div>
+      <pre id="tz-result" style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:4px;padding:10px;font-size:12px;font-family:'Consolas',monospace;white-space:pre-wrap;max-height:400px;overflow:auto;margin:0"></pre>
+    </div></div>
+
     <div class="card"><div class="card-header">Audit Log <span class="item-sub" id="audit-status" style="font-weight:400;text-transform:none;letter-spacing:0">— who accessed/modified what, and when</span></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:10px">Append-only record of transfer access and changes. Useful for HIPAA audits and investigating who saw or modified a particular transfer. Click any row to inspect details.</p>
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
@@ -3277,6 +3288,60 @@ function renderAdmin() {
       root.querySelectorAll('[data-loc]').forEach(el => { el.value = ''; });
     } catch (e) { result.innerHTML = '<span style="color:var(--danger)">Save failed: ' + escapeHtml(e.message) + '</span>'; }
   };
+
+  // Tabz integration backfill — default to last 7 days, post to /api/healnow-backfill.
+  // dryRun: shows what WOULD update without saving. Apply: persists changes + pulls receipts.
+  (function wireTabzBackfill() {
+    const fromEl = document.getElementById('tz-from');
+    const toEl = document.getElementById('tz-to');
+    const resultEl = document.getElementById('tz-result');
+    if (!fromEl || !toEl || !resultEl) return;
+    const today = new Date();
+    const wkAgo = new Date(today.getTime() - 7 * 86400000);
+    fromEl.value = wkAgo.toISOString().slice(0, 10);
+    toEl.value = today.toISOString().slice(0, 10);
+    async function runBackfill(dryRun) {
+      const from = fromEl.value, to = toEl.value;
+      if (!from || !to) { resultEl.textContent = 'Pick from + to dates.'; return; }
+      resultEl.textContent = `${dryRun ? 'Dry-running' : 'Applying'} backfill for ${from} → ${to}…`;
+      try {
+        const r = await fetch('/api/healnow-backfill', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to, dryRun })
+        });
+        const txt = await r.text();
+        let data; try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+        if (!r.ok) {
+          resultEl.textContent = `HTTP ${r.status}\n\n${JSON.stringify(data, null, 2)}`;
+          return;
+        }
+        // Pretty summary up top, full JSON below for diagnostics.
+        const lines = [];
+        lines.push(`${dryRun ? '[DRY RUN]' : '[APPLIED]'}  ${from} → ${to}`);
+        if (typeof data.matched === 'number') lines.push(`matched=${data.matched}  applied=${data.applied}  ignored=${data.ignored}  errors=${data.errors||0}`);
+        if (Array.isArray(data.sample) && data.sample.length) {
+          lines.push('\nSample of matches:');
+          data.sample.forEach(s => lines.push(`  ${s.rxNumber||'(no rx)'} · ${s.patient||'(no name)'} · transfer ${s.transferId} → ${s.newPaidStatus}${s.matchedBy?' (by '+s.matchedBy+')':''}`));
+        }
+        lines.push('\n— full response —\n' + JSON.stringify(data, null, 2));
+        resultEl.textContent = lines.join('\n');
+        if (!dryRun) {
+          // Reload transfers so the UI shows the freshly-pulled receipts/statuses.
+          try {
+            const fresh = await apiLoadTransfers();
+            if (Array.isArray(fresh)) { TRANSFERS.length = 0; TRANSFERS.push(...fresh); render(); }
+          } catch {}
+        }
+      } catch (e) {
+        resultEl.textContent = 'Network/fetch error: ' + e.message;
+      }
+    }
+    document.getElementById('tz-dryrun').onclick = () => runBackfill(true);
+    document.getElementById('tz-apply').onclick = () => {
+      if (!confirm('Apply backfill? This pulls payment status + receipt PDFs from Tabz and updates matching transfers. Safe to re-run.')) return;
+      runBackfill(false);
+    };
+  })();
 }
 
 // =====================================================================
