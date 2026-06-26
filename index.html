@@ -4085,6 +4085,21 @@ function bindDraftInputs() {
   const fillPharmacyAddress = () => {
     const usePickup = !!(state.draft.pickupAtPharmacy && state.draft.pickupLocation);
     const goesToPharmacy = state.draft.shipTo === 'Pharmacy' || usePickup;
+    // Switching to Patient ship-to — if the draft has a stashed OCR'd patient address (set
+    // during bulk upload), restore it. Otherwise clear so the user enters it manually.
+    if (state.draft.shipTo === 'Patient') {
+      const stashed = (state.draft.patientShipAddr1 || state.draft.patientShipCity);
+      if (stashed) {
+        setShipAddr(
+          state.draft.patientShipAddr1 || '', '',
+          state.draft.patientShipCity || '',
+          state.draft.patientShipState || '',
+          state.draft.patientShipZip || ''
+        );
+        recalcAntShip();
+        return;
+      }
+    }
     if (!goesToPharmacy) {
       // Patient / Delivery-Lancaster: clear so the user enters the patient address.
       // (If a Patient transfer is being edited, the saved patient address was
@@ -4855,7 +4870,12 @@ function renderModal() {
   if (printBlankCCBtn) printBlankCCBtn.addEventListener('click', () => printCCAuthForm(t));
   document.getElementById('refillBtn').addEventListener('click', () => {
     state.draft = draftFromRefill(t);
-    closeModal();
+    state.newMode = 'single';
+    // Direct-clear the modal instead of closeModal() — closeModal uses async history.back()
+    // which fires popstate AFTER our tab click, undoing the navigation and snapping the user
+    // back into the modal (or worse, leaving them on whatever tab they came from with bulk mode).
+    state.openTransferId = null;
+    const mr = document.getElementById('modalRoot'); if (mr) mr.innerHTML = '';
     document.querySelector('.tab[data-tab=new]').click();
   });
   // Rx History — clicking Open on another entry in the chain re-renders the modal for that transfer
@@ -4891,7 +4911,9 @@ function renderModal() {
     state.draft = JSON.parse(JSON.stringify(t));
     state.editingTransferId = t.id;
     state.newMode = 'single';
-    closeModal();
+    // Direct-clear (see refillBtn handler for why we don't use closeModal here).
+    state.openTransferId = null;
+    const mr = document.getElementById('modalRoot'); if (mr) mr.innerHTML = '';
     document.querySelector('.tab[data-tab=new]').click();
   });
   const deleteBtn = document.getElementById('deleteTransferBtn');
@@ -6023,11 +6045,7 @@ function renderBulkUpload() {
             ${LOCATIONS.map(l => `<option ${l==='Erie'?'selected':''}>${l}</option>`).join('')}
           </select>
         </div>
-        <div style="display:flex;gap:6px;align-items:center">
-          <label style="font-size:12px;color:var(--gray-600)">Anticipated Ship Date:</label>
-          <input id="bulk-anticipatedShip" type="date" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px" />
-        </div>
-        <span class="hint" style="flex-basis:100%">These fill in on every draft created from this upload. You can still override per-draft.</span>
+        <span class="hint" style="flex-basis:100%">Applied to every draft created from this upload. You can still override per-draft.</span>
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
         <label class="btn btn-primary" style="cursor:pointer;margin:0">
@@ -6195,10 +6213,8 @@ async function processBulkFiles(rawFiles) {
   const newDrafts = [];
   // Bulk-level defaults applied to every draft created in this batch
   const bulkFill = (document.getElementById('bulk-fillLocation') || {}).value || '';
-  const bulkAntShip = (document.getElementById('bulk-anticipatedShip') || {}).value || '';
   const applyBulkDefaults = (draft) => {
     if (bulkFill) draft.fillLocation = bulkFill;
-    if (bulkAntShip) draft.anticipatedShipDate = bulkAntShip;
   };
   for (const file of rawFiles) {
     if (!/\.pdf$/i.test(file.name)) {
@@ -6296,6 +6312,13 @@ async function processBulkFiles(rawFiles) {
               draft.patientName = formatPatientName(sp.firstName, sp.lastName);
             }
             if (f.patientDOB) draft.patientDOB = f.patientDOB;
+            // Always stash the OCR'd patient address on the draft so that switching shipTo to
+            // Patient later (in the bulk editor) can restore it. Without this stash the address
+            // is lost the moment shipTo=Pharmacy overwrites shipAddr* with the pharmacy address.
+            if (f.shipAddr1) draft.patientShipAddr1 = f.shipAddr1;
+            if (f.shipCity) draft.patientShipCity = f.shipCity;
+            if (f.shipState) draft.patientShipState = f.shipState;
+            if (f.shipZip) draft.patientShipZip = f.shipZip;
             // Patient address from OCR only belongs in shipAddr fields when shipping direct to the patient.
             // For Pharmacy ship-to (the default for bulk uploads), the address belongs to the origin pharmacy.
             if (draft.shipTo === 'Patient') {
@@ -6404,6 +6427,11 @@ async function processBulkFiles(rawFiles) {
           draft.patientName = formatPatientName(sp.firstName, sp.lastName);
         }
         if (parsed.patientDOB) draft.patientDOB = parsed.patientDOB;
+        // Stash the OCR'd patient address on the draft (see other bulk-create branch for why).
+        if (parsed.shipAddr1) draft.patientShipAddr1 = parsed.shipAddr1;
+        if (parsed.shipCity) draft.patientShipCity = parsed.shipCity;
+        if (parsed.shipState) draft.patientShipState = parsed.shipState;
+        if (parsed.shipZip) draft.patientShipZip = parsed.shipZip;
         // Patient address only goes in shipAddr fields for Patient ship-to. For Pharmacy
         // ship-to (the default), the destination is the origin pharmacy.
         if (draft.shipTo === 'Patient') {
@@ -6659,7 +6687,18 @@ function renderRefillTab() {
     </div></div>
   `;
   document.getElementById('rf-by').onchange = e => { r.searchBy = e.target.value; renderRefillTab(); };
-  document.getElementById('rf-q').oninput = e => { r.query = e.target.value; renderRefillTab(); };
+  document.getElementById('rf-q').oninput = e => {
+    // Save cursor + restore after the renderRefillTab() re-builds the input — otherwise
+    // innerHTML replacement destroys the input element and the user loses focus mid-type.
+    const caret = e.target.selectionStart;
+    r.query = e.target.value;
+    renderRefillTab();
+    const fresh = document.getElementById('rf-q');
+    if (fresh) {
+      fresh.focus();
+      try { fresh.setSelectionRange(caret, caret); } catch {}
+    }
+  };
   root.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
     r.pickedId = +b.dataset.pick;
     r.includedItems = {};
@@ -6675,6 +6714,8 @@ function renderRefillTab() {
     state.draft.priorRxNumber = '';
     state.draft.priorTransferDate = '';
     state.draft.priorTransferNote = '';
+    state.newMode = 'single'; // Without this, sticky bulk-mode from earlier sessions
+                              // routes the manual-refill flow into the bulk-upload screen.
     document.querySelector('.tab[data-tab=new]').click();
   };
 }
@@ -6781,6 +6822,7 @@ function renderRefillReview(t) {
     if (draft.items.length === 0) draft.items = [freshItem()];
     state.draft = draft;
     state.refill = null;
+    state.newMode = 'single'; // See rf-manual handler — same sticky-bulk-mode fix.
     document.querySelector('.tab[data-tab=new]').click();
   };
 }
