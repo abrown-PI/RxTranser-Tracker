@@ -121,7 +121,16 @@ function extractRxNumber(event) {
 function extractOrderId(event) {
   const d = event && event.data;
   if (!d) return null;
-  return d.order_id || d.orderId || d.order || null;
+  // Tabz post-rebrand: `order::paid` events nest the order under data.order with id at data.order.id
+  // (instead of data.order_id like the prior prescription::paid events). Old paths kept first for
+  // backwards compat — first non-null wins.
+  return (
+    d.order_id || d.orderId ||
+    (d.order && (d.order.id || d.order.order_id || d.order.orderId)) ||
+    (d.prescription && (d.prescription.order_id || d.prescription.orderId)) ||
+    (typeof d.order === 'string' ? d.order : null) ||
+    null
+  );
 }
 
 function extractAmountCents(event) {
@@ -308,9 +317,11 @@ module.exports = async function (context, req) {
 
     const event = req.body || {};
     const eventType = event.type || event.event || '';
-    if (!eventType.startsWith('prescription::')) {
-      // We only care about prescription-level events. Acknowledge others so HealNow doesn't retry.
-      context.log(`HealNow webhook: ignoring non-prescription event type ${eventType}`);
+    // Tabz's OpenAPI spec only documents `order::*` events; we still see `prescription::*`
+    // events come through too (legacy compatibility). Handle both — same downstream logic
+    // applies since the matching code reads patient + rx + drug name from the event data.
+    if (!eventType.startsWith('prescription::') && !eventType.startsWith('order::')) {
+      context.log(`Tabz webhook: ignoring non-prescription/order event type ${eventType}`);
       context.res = { status: 200, body: { ignored: eventType } };
       return;
     }

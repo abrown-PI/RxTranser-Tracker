@@ -1,0 +1,34 @@
+name: Tabz nightly receipt backfill
+
+# Nightly safety net that pulls the prior day's Tabz receipts. If any webhook event
+# arrived with an unexpected payload shape (the post-rebrand failure mode), this catches
+# it within 24h instead of leaving the receipt blob blank forever. Idempotent — only
+# touches items whose paidStatus is set but receipt blob is missing.
+on:
+  schedule:
+    # 06:00 UTC = 1am EST / 2am EDT. Picks the start of US business so the prior day
+    # is complete and receipts have settled in Tabz's system.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Tabz backfill for prior day
+        run: |
+          FROM=$(date -u -d "yesterday" +%Y-%m-%d)
+          TO=$(date -u +%Y-%m-%d)
+          echo "Backfilling Tabz receipts: $FROM → $TO"
+          response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
+            "https://red-island-0bb34e510.7.azurestaticapps.net/api/healnow-backfill" \
+            -H "Content-Type: application/json" \
+            -d "{\"from\":\"$FROM\",\"to\":\"$TO\",\"dryRun\":false}")
+          body=$(echo "$response" | sed '$d')
+          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+          echo "HTTP $status"
+          echo "$body" | head -50
+          if [ "$status" != "200" ]; then
+            echo "::error::Tabz backfill returned $status"
+            exit 1
+          fi
