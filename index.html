@@ -573,6 +573,7 @@ function bindTabs() {
       document.querySelectorAll('[id^=view-]').forEach(v => v.style.display = 'none');
       document.getElementById('view-' + state.tab).style.display = '';
       render();
+      HISTORY.push();
     };
   });
   // On init, apply the saved tab's visual state (active class + view visibility) so the user
@@ -582,6 +583,64 @@ function bindTabs() {
   const initView = document.getElementById('view-' + state.tab);
   if (initView) initView.style.display = '';
 }
+
+// === Browser back/forward integration ===
+// Each navigation (tab switch, transfer modal open) pushes a history entry so the browser's
+// back button moves through prior screens inside the portal instead of leaving the SPA entirely.
+// On popstate we re-derive UI state from history.state and re-render the affected pieces.
+// _applying is a guard so the popstate handler doesn't loop by triggering another push.
+let _historyApplying = false;
+const HISTORY = {
+  current() {
+    return {
+      tab: state.tab || 'transfers',
+      openTransferId: state.openTransferId || null
+    };
+  },
+  url(s) {
+    const p = new URLSearchParams();
+    if (s.tab && s.tab !== 'transfers') p.set('tab', s.tab);
+    if (s.openTransferId) p.set('transfer', s.openTransferId);
+    const qs = p.toString();
+    return window.location.pathname + (qs ? '?' + qs : '');
+  },
+  push() {
+    if (_historyApplying) return;
+    const s = HISTORY.current();
+    const cur = history.state || {};
+    if (cur.tab === s.tab && (cur.openTransferId || null) === (s.openTransferId || null)) return;
+    history.pushState(s, '', HISTORY.url(s));
+  },
+  replace() {
+    history.replaceState(HISTORY.current(), '', HISTORY.url(HISTORY.current()));
+  }
+};
+window.addEventListener('popstate', (e) => {
+  _historyApplying = true;
+  try {
+    const s = e.state || HISTORY.current();
+    if (VALID_TABS.includes(s.tab) && s.tab !== state.tab) {
+      state.tab = s.tab;
+      try { localStorage.setItem('lastTab', state.tab); } catch {}
+      document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
+      document.querySelectorAll('[id^=view-]').forEach(v => v.style.display = 'none');
+      const view = document.getElementById('view-' + state.tab);
+      if (view) view.style.display = '';
+      render();
+    }
+    const targetTid = s.openTransferId || null;
+    if (targetTid !== (state.openTransferId || null)) {
+      if (targetTid) {
+        state.openTransferId = +targetTid;
+        if (typeof renderModal === 'function') renderModal();
+      } else {
+        state.openTransferId = null;
+        const mr = document.getElementById('modalRoot');
+        if (mr) mr.innerHTML = '';
+      }
+    }
+  } finally { _historyApplying = false; }
+});
 bindTabs();
 
 function applyRoleVisibility() {
@@ -673,8 +732,9 @@ function toDateISO(d) {
   if (!d) return '';
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+// Note: stored value 'HealNow' kept for data backwards-compat (Tabz is just the rebrand).
 const BILLING_OPTIONS = [
-  ['HealNow', 'HealNow'],
+  ['HealNow', 'Tabz'],
   ['CreditCard', 'Credit Card'],
   ['PayInStore', 'Pay In Store']
 ];
@@ -1084,7 +1144,12 @@ function printDocs(items) {
     } else {
       // Attached document: just the file, no header (use Print Summary Sheet for the ID/info)
       if (!it.dataUrl) {
-        out.push(`<div style="color:#999;font-size:12px">[ No preview available — ${escapeHtml(it.name||'document')} was not stored with data ]</div>`);
+        // Skip — don't push a placeholder page. A null dataUrl means either the blob upload
+        // failed at attach time or it's a legacy record whose dataUrl was stripped during
+        // the blob migration. Either way, a blank page in the print queue isn't useful;
+        // the staff will notice the doc missing from the transfer detail screen instead.
+        out.pop(); // remove the <div class="doc"> we just pushed so we don't leave an empty page
+        return;
       } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
         out.push(`<img src="${it.dataUrl}" onerror="this.outerHTML='<div style=&quot;border:2px dashed #c00;padding:14px;color:#c00;font-size:12px&quot;>⚠ Image could not be loaded — the stored file is missing or unreadable. URL: <code style=&quot;font-family:monospace&quot;>${escapeHtml(it.dataUrl)}</code></div>'" />`);
       } else {
@@ -1314,7 +1379,7 @@ function renderTransfers() {
                 if (ps.code === 'paid' || ps.code === 'paid_store') {
                   return `<span title="${escapeHtml(ps.tooltip||'')}" style="display:inline-block;padding:3px 9px;font-size:11px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px">${escapeHtml(ps.label)}</span>`;
                 }
-                return `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Mark Paid in Store (cash / in-person). HealNow payments auto-update without clicking." style="padding:3px 8px;font-size:13px;font-weight:700">💲</button>`;
+                return `<button class="btn btn-primary btn-sm" data-paid-tx="${t.id}" title="Mark Paid in Store (cash / in-person). Tabz payments auto-update without clicking." style="padding:3px 8px;font-size:13px;font-weight:700">💲</button>`;
               })()}
               <button class="btn btn-secondary btn-sm" data-ask="${t.id}" title="Ask a question on this transfer" style="padding:3px 7px;font-size:11px">❓ Ask</button>
             </td>
@@ -4301,6 +4366,7 @@ function openTransfer(id) {
   state.openTransferId = id;
   renderModal();
   logAudit('view_transfer', 'transfer', id);
+  HISTORY.push();
 }
 
 // Rolled-up transfer-level payment status. Combines the per-item HealNow paidStatus values with
@@ -4315,7 +4381,7 @@ function paymentStatusFor(t) {
 
   // Everything HealNow-tracked is paid → Paid (trust HealNow even if staff also clicked the override).
   if (hnActive > 0 && hnPaid === hnActive) {
-    return { code: 'paid', label: '✓ Paid', bg: '#16a34a', color: 'white', tooltip: `All ${hnActive} Rx paid via HealNow` };
+    return { code: 'paid', label: '✓ Paid', bg: '#16a34a', color: 'white', tooltip: `All ${hnActive} Rx paid via Tabz` };
   }
   // Staff explicitly clicked "Paid in Store" — that's the authoritative answer for this fill,
   // even when HealNow still has open carts (patient walked in and settled). The cart_created
@@ -4329,29 +4395,30 @@ function paymentStatusFor(t) {
   }
   // All HealNow-tracked items are canceled → Canceled
   if (hnActive > 0 && hnCancel === hnActive) {
-    return { code: 'canceled', label: '⊘ Canceled (HealNow)', bg: '#fee2e2', color: '#991b1b', tooltip: 'All items canceled in HealNow' };
+    return { code: 'canceled', label: '⊘ Canceled (Tabz)', bg: '#fee2e2', color: '#991b1b', tooltip: 'All items canceled in Tabz' };
   }
   // HealNow has at least one cart created, none paid yet → Cart Created
   if (hnCart > 0) {
-    return { code: 'cart_created', label: '🛒 HealNow Cart', bg: '#dbeafe', color: '#1e40af', tooltip: `${hnCart} cart${hnCart===1?'':'s'} created — waiting on patient` };
+    return { code: 'cart_created', label: '🛒 Tabz Cart', bg: '#dbeafe', color: '#1e40af', tooltip: `${hnCart} cart${hnCart===1?'':'s'} created — waiting on patient` };
   }
   return { code: 'pending', label: 'Pending', bg: '#f1f5f9', color: '#475569', tooltip: 'No payment activity yet' };
 }
 
 // Per-Rx payment-status badge for the transfer detail modal. Driven by item.paidStatus set
 // by the HealNow webhook (or future manual flows). Shows the receipt link when available.
+const TABZ_LOGO_HTML = '<img src="/tabz-logo.png" alt="Tabz" style="height:13px;vertical-align:-2px" />';
 function renderItemPaymentRow(i) {
   const status = i.paidStatus || '';
   if (!status && !i.healnowOrderId) return ''; // nothing to show
   const badges = {
-    cart_created: { label: 'HealNow cart created', bg: '#dbeafe', color: '#1e40af', icon: '📨' },
+    cart_created: { label: 'cart created', bg: '#dbeafe', color: '#1e40af', icon: TABZ_LOGO_HTML },
     paid:         { label: 'Paid',                  bg: '#dcfce7', color: '#166534', icon: '✓' },
-    canceled:     { label: 'HealNow canceled',      bg: '#fef3c7', color: '#92400e', icon: '⊘' },
-    removed:      { label: 'HealNow removed',       bg: '#fee2e2', color: '#991b1b', icon: '🗑' }
+    canceled:     { label: 'Tabz canceled',      bg: '#fef3c7', color: '#92400e', icon: '⊘' },
+    removed:      { label: 'Tabz removed',       bg: '#fee2e2', color: '#991b1b', icon: '🗑' }
   };
   const b = badges[status] || { label: status, bg: '#f1f5f9', color: '#334155', icon: '·' };
   const amt = i.paidAmountCents ? `$${(i.paidAmountCents/100).toFixed(2)}` : '';
-  const via = i.paidVia === 'phone' ? 'phone (MOTO)' : i.paidVia === 'healnow' ? 'HealNow' : '';
+  const via = i.paidVia === 'phone' ? 'phone (MOTO)' : i.paidVia === 'healnow' ? 'Tabz' : '';
   const when = i.paidAt ? new Date(i.paidAt).toLocaleString() : '';
   const receiptLink = i.healnowReceiptBlob
     ? `<a href="${escapeHtml(blobUrl(i.healnowReceiptBlob))}" target="_blank" rel="noopener" style="color:var(--primary);text-decoration:underline;font-size:12px;margin-left:8px">📄 Receipt</a>`
@@ -4465,7 +4532,16 @@ function openReceivingRxModal(id) {
     renderTransfers();
   };
 }
-function closeModal() { state.openTransferId = null; document.getElementById('modalRoot').innerHTML = ''; }
+function closeModal() {
+  // If the modal-open state is on the history stack, route through history.back() so the URL,
+  // history, and UI all stay in sync. Otherwise fall back to a direct close.
+  if (history.state && history.state.openTransferId) {
+    history.back();
+    return;
+  }
+  state.openTransferId = null;
+  document.getElementById('modalRoot').innerHTML = '';
+}
 
 function renderModal() {
   const t = TRANSFERS.find(x => x.id === state.openTransferId);
@@ -4819,7 +4895,7 @@ function editShip(t) {
         <div class="form-group"><label>Date Shipped</label><input type="date" id="e-dateShipped" value="${escapeHtml(t.dateShipped||'')}" /></div>
         <div class="form-group"><label>Tracking Number</label><input type="text" id="e-tracking" value="${escapeHtml(t.trackingNumber||'')}" placeholder="auto-pulled from FedEx once shipped — or paste manually here" style="font-family:monospace" /><div class="item-sub" style="font-size:11px;margin-top:3px">For patient-direct ships: paste the FedEx tracking from WorldShip. We'll immediately query FedEx for live status.</div></div>
         <div class="form-group"><label>Date Received by Patient</label><input type="date" id="e-rcvPt" value="${escapeHtml(t.dateReceivedByPatient||'')}" /></div>
-        <div class="form-group"><label>Paid</label><select id="e-paid">${['Pending','HealNow','Paid','Pay in Store'].map(o=>`<option ${o===t.paid?'selected':''}>${o}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Paid</label><select id="e-paid">${[['Pending','Pending'],['HealNow','Tabz'],['Paid','Paid'],['Pay in Store','Pay in Store']].map(([v,l])=>`<option value="${v}" ${v===t.paid?'selected':''}>${l}</option>`).join('')}</select></div>
       </div>
     </div>
     <div class="modal-footer">
@@ -5651,16 +5727,27 @@ function openShipment(id) {
 
 // Upload a base64 blob to /api/blobs. Returns the blob name (NOT the URL).
 async function uploadBlob(base64, contentType, prefix) {
-  try {
-    const r = await fetch('/api/blobs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: base64, contentType, prefix })
-    });
-    if (!r.ok) throw new Error('Upload failed: ' + r.status);
-    const data = await r.json();
-    return data.name;
-  } catch (e) { console.warn('uploadBlob failed', e); return null; }
+  // Retry up to 3 times with backoff (1s, 2s, 4s). The previous "fail silently → null" path
+  // was producing transfers whose attachments existed in metadata but had no actual blob,
+  // which is what made "documents printing as [No preview available]" recur.
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch('/api/blobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: base64, contentType, prefix })
+      });
+      if (!r.ok) throw new Error('Upload failed: ' + r.status);
+      const data = await r.json();
+      return data.name;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 2) await new Promise(res => setTimeout(res, Math.pow(2, attempt) * 1000));
+    }
+  }
+  console.warn('uploadBlob failed after 3 attempts', lastErr);
+  return null;
 }
 
 // Build a URL the browser can use to fetch a stored blob.
@@ -7688,6 +7775,8 @@ initAuth();
     const t = TRANSFERS.find(x => String(x.id) === String(tid));
     if (t) openTransfer(t.id);
   }
+  // Seed history.state from current view so popstate has somewhere to restore to.
+  HISTORY.replace();
 
   // ----- Heal-on-load passes (both safe to run once data is present) -----
   // 1) Received-status cascade: if a bulk is Received but a transfer in it is still pre-shipped, fix it.

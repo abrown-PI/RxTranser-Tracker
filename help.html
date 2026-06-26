@@ -86,14 +86,14 @@ section { page-break-inside: avoid; }
 <h2>🆕 What's New (June 2026)</h2>
 <p>Quick rundown of recent updates so the team isn't surprised by changed behavior.</p>
 
-<h3>HealNow payment auto-sync</h3>
+<h3><img src="tabz-logo.png" alt="Tabz" style="height:22px;vertical-align:-5px;margin-right:6px"> payment auto-sync</h3>
 <ul>
-  <li>The portal now talks to HealNow directly. When a patient pays in HealNow (or HealNow creates a cart for them), the matching transfer updates automatically — no need to come back and click <em>Mark Paid</em>.</li>
-  <li>New <strong>Payment</strong> column on the All Transfers table shows the rolled-up status: <em>Pending</em>, <em>🛒 HealNow Cart Created</em>, <em>Partial</em>, <em>✓ Paid (HealNow)</em>, <em>✓ Paid in Store</em>, or <em>Canceled</em>.</li>
+  <li>The portal now talks to Tabz directly. When a patient pays in Tabz (or Tabz creates a cart for them), the matching transfer updates automatically — no need to come back and click <em>Mark Paid</em>.</li>
+  <li>New <strong>Payment</strong> column on the All Transfers table shows the rolled-up status: <em>Pending</em>, <em>🛒 Tabz Cart Created</em>, <em>Partial</em>, <em>✓ Paid (Tabz)</em>, <em>✓ Paid in Store</em>, or <em>Canceled</em>.</li>
   <li>New <strong>Pay Date</strong> column shows when payment posted.</li>
-  <li>The detail modal shows a per-Rx HealNow badge on each item so you can see exactly which scripts are paid and which are still in the cart.</li>
-  <li><strong>Manual "💲 Paid in Store" override</strong> is still available — even on transfers that already have a HealNow cart created, the small <strong>💲</strong> icon in the Actions column lets you mark it paid in store if the patient walks in and pays at the counter instead.</li>
-  <li>Receipt PDFs are auto-pulled from HealNow when a script is marked paid.</li>
+  <li>The detail modal shows a per-Rx Tabz badge on each item so you can see exactly which scripts are paid and which are still in the cart.</li>
+  <li><strong>Manual "💲 Paid in Store" override</strong> is still available — even on transfers that already have a Tabz cart created, the small <strong>💲</strong> icon in the Actions column lets you mark it paid in store if the patient walks in and pays at the counter instead.</li>
+  <li>Receipt PDFs are auto-pulled from Tabz when a script is marked paid.</li>
 </ul>
 
 <h3>Ship-to address behavior fixed</h3>
@@ -529,35 +529,35 @@ section { page-break-inside: avoid; }
 </section>
 
 <section id="paid">
-<h2>Payment Status (HealNow Auto-Sync + Paid in Store)</h2>
-<p>Payment status now updates <strong>automatically</strong> when a patient pays in HealNow (or HealNow creates a cart). You only need to click anything when the patient pays at the counter — that's the <em>Paid in Store</em> override.</p>
+<h2>Payment Status (<img src="tabz-logo.png" alt="Tabz" style="height:24px;vertical-align:-6px"> Auto-Sync + Paid in Store)</h2>
+<p>Payment status now updates <strong>automatically</strong> when a patient pays in Tabz (or Tabz creates a cart). You only need to click anything when the patient pays at the counter — that's the <em>Paid in Store</em> override.</p>
 
 <h3>The Payment column</h3>
 <p>The All Transfers table has a <strong>Payment</strong> column showing the rolled-up status for the whole transfer (based on every Rx on it):</p>
 <ul>
-  <li><strong>Pending</strong> — no payment activity yet from HealNow.</li>
-  <li><strong>🛒 HealNow Cart Created</strong> — HealNow has built a cart for the patient (text/email sent). Waiting on payment.</li>
+  <li><strong>Pending</strong> — no payment activity yet from Tabz.</li>
+  <li><strong>🛒 Tabz Cart Created</strong> — Tabz has built a cart for the patient (text/email sent). Waiting on payment.</li>
   <li><strong>Partial</strong> — some Rx are paid, some still pending.</li>
-  <li><strong>✓ Paid (HealNow)</strong> — fully paid through HealNow.</li>
+  <li><strong>✓ Paid (Tabz)</strong> — fully paid through Tabz.</li>
   <li><strong>✓ Paid in Store</strong> — billing team / counter marked it paid manually (patient paid at the pharmacy).</li>
-  <li><strong>Canceled</strong> — HealNow canceled the order.</li>
+  <li><strong>Canceled</strong> — Tabz canceled the order.</li>
 </ul>
 <p>The <strong>Pay Date</strong> column shows when the payment posted.</p>
 
-<h3>HealNow auto-sync — how it works</h3>
+<h3>Tabz auto-sync — how it works</h3>
 <ul>
-  <li>HealNow sends the portal an event each time a prescription goes <em>pending → cart created → paid → canceled</em>. The portal matches it to a transfer by Rx number first, then by patient name + recent transfer (7-day window) as a fallback.</li>
+  <li>Tabz sends the portal an event each time a prescription goes <em>pending → cart created → paid → canceled</em>. The portal matches it to a transfer by Rx number first, then by patient name + recent transfer (7-day window) as a fallback.</li>
   <li>When matched via patient name, the portal also <strong>back-fills the Rx number</strong> on the item so the next event matches directly without the fallback.</li>
   <li>Receipt PDFs are pulled and stored automatically when an Rx is marked paid — viewable from the item row in the detail modal.</li>
 </ul>
 
 <h3>Per-Rx detail</h3>
-<p>Open any transfer's detail modal — each Rx row shows its own HealNow status badge so you can see exactly which scripts are paid and which are still in the cart. (Helps when a patient pays for 2 of 3 scripts and you need to know which one is still outstanding.)</p>
+<p>Open any transfer's detail modal — each Rx row shows its own Tabz status badge so you can see exactly which scripts are paid and which are still in the cart. (Helps when a patient pays for 2 of 3 scripts and you need to know which one is still outstanding.)</p>
 
 <h3>The "💲 Paid in Store" override</h3>
-<p>The Actions column shows a small blue <strong>💲</strong> icon button on any transfer that isn't fully paid yet — including ones with a HealNow cart already created. Click it when the patient walks in and pays at the counter. The Payment column flips to <em>✓ Paid in Store</em> immediately.</p>
+<p>The Actions column shows a small blue <strong>💲</strong> icon button on any transfer that isn't fully paid yet — including ones with a Tabz cart already created. Click it when the patient walks in and pays at the counter. The Payment column flips to <em>✓ Paid in Store</em> immediately.</p>
 
-<div class="tip"><strong>Why the icon shows on Cart Created rows:</strong> Sometimes HealNow has built a cart but the patient pays in person before they get to it. The 💲 button lets you override without waiting for HealNow.</div>
+<div class="tip"><strong>Why the icon shows on Cart Created rows:</strong> Sometimes Tabz has built a cart but the patient pays in person before they get to it. The 💲 button lets you override without waiting for Tabz.</div>
 
 <h3>From the transfer detail modal</h3>
 <p>Same <strong>💲 Mark Paid in Store</strong> button is in the Shipping &amp; Billing section. Once marked, it shows <strong>✓ Paid in Store by [Name] on [Date]</strong> with an Undo button.</p>
@@ -804,7 +804,7 @@ A: Each non-transfer pickup goes to one pickup pharmacy per record. If a single 
 </section>
 
 <hr>
-<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-06-15 — USP overnight cold-shipping policy notice with admin-editable Drug Warnings + inline form warning + $50 dropdown option + dismissible portal banner. HealNow payment auto-sync (Payment + Pay Date columns, per-Rx badges, receipt PDFs), Paid-in-Store override always available, sign-in screen restyled to Training Portal look, Ship-To address pre-fill + clear on type switch, two-line patient names in table (1800px wider), Save as default + Reset moved to filter row start, Ship-To type filter, pickup pin removed from table, OCR drug-name matching against known drug list, editable tracking with live FedEx pull, Past Anticipated Ship moved to Alerts badge, SLA excludes Received, Receive screen Select all toggle, Bulk-Received cascade auto-heals orphan transfers. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
+<p style="color: var(--gray-500); font-size: 12px; text-align: center;"><em>Updated 2026-06-15 — USP overnight cold-shipping policy notice with admin-editable Drug Warnings + inline form warning + $50 dropdown option + dismissible portal banner. Tabz payment auto-sync (Payment + Pay Date columns, per-Rx badges, receipt PDFs), Paid-in-Store override always available, sign-in screen restyled to Training Portal look, Ship-To address pre-fill + clear on type switch, two-line patient names in table (1800px wider), Save as default + Reset moved to filter row start, Ship-To type filter, pickup pin removed from table, OCR drug-name matching against known drug list, editable tracking with live FedEx pull, Past Anticipated Ship moved to Alerts badge, SLA excludes Received, Receive screen Select all toggle, Bulk-Received cascade auto-heals orphan transfers. Need to edit this guide? Edit <code>help.html</code> in the repo.</em></p>
 
 </body>
 </html>
