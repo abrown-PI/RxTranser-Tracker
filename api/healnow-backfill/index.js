@@ -96,8 +96,39 @@ function normRx(rx) {
   return String(rx || '').replace(/\s+/g, '').replace(/^RX#?/i, '').split('-')[0].trim();
 }
 
-// Match logic mirrors the webhook receiver — Rx number first, then patient name + 7d window.
-function findItemForRx(transfers, rxNumber, patientName, eventDate) {
+// Normalize a drug name for fuzzy compare — lowercase, strip dosage units, common boilerplate.
+// Result: "TIRZEPATIDE/B12 MDV (MONTH #2) INJECTABLE 11.2/0.5MG/ML" → "tirzepatide b12 mdv injectable"
+// so we can match against Tabz's "Tirzepatide / B12 Injection" style names.
+function normDrug(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[#()/,]/g, ' ')
+    .replace(/\b(month\s*\d+|inj|injectable|injection|tablet|capsule|cream|cap|tab|mg|ml|gm?|mcg|sol|solution|sup|mdv|svv|svp|kit|usp|nf)\b/g, ' ')
+    .replace(/[\d.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Tokenize a drug name into a set of meaningful tokens for overlap scoring.
+function drugTokens(s) {
+  const n = normDrug(s);
+  if (!n) return new Set();
+  return new Set(n.split(/\s+/).filter(w => w.length >= 4));
+}
+
+// Compute Jaccard-ish overlap: shared / smaller side. 1.0 = full subset, 0 = no overlap.
+function drugOverlap(a, b) {
+  const A = drugTokens(a), B = drugTokens(b);
+  if (!A.size || !B.size) return 0;
+  let shared = 0;
+  for (const t of A) if (B.has(t)) shared++;
+  return shared / Math.min(A.size, B.size);
+}
+
+// Match logic mirrors the webhook receiver. Order of preference:
+//   1. Rx number (most specific — but Tabz's order::paid events dropped rx_number from line items)
+//   2. Patient name + drug-name overlap (handles the rx_number-missing case post-rebrand)
+//   3. Patient name + single candidate within 7d window (legacy fallback)
+function findItemForRx(transfers, rxNumber, patientName, eventDate, drugName) {
   const rxTarget = normRx(rxNumber);
   if (rxTarget) {
     for (const t of transfers) {
@@ -113,7 +144,7 @@ function findItemForRx(transfers, rxNumber, patientName, eventDate) {
   }
   const eventName = normName(patientName);
   if (!eventName) return null;
-  const windowMs = 7 * 86400000;
+  const windowMs = 30 * 86400000;
   const candidates = transfers.filter(t => {
     if (!t.patientName || normName(t.patientName) !== eventName) return false;
     if (['Canceled'].includes(t.status)) return false;
@@ -125,6 +156,18 @@ function findItemForRx(transfers, rxNumber, patientName, eventDate) {
     const t = candidates[0];
     const item = (t.items || []).find(i => i.paidStatus !== 'paid') || (t.items || [])[0];
     if (item) return { transfer: t, item, matchedBy: 'patientName' };
+  }
+  // Multiple candidates — try to disambiguate by drug name match across items.
+  if (candidates.length > 1 && drugName) {
+    let best = null, bestScore = 0;
+    for (const t of candidates) {
+      for (const item of (t.items || [])) {
+        const score = drugOverlap(item.drug, drugName);
+        if (score > bestScore) { bestScore = score; best = { transfer: t, item }; }
+      }
+    }
+    // Require >=0.5 overlap to declare a confident match (avoids picking the wrong refill chain).
+    if (best && bestScore >= 0.5) return { ...best, matchedBy: `patientName+drug(${bestScore.toFixed(2)})` };
   }
   return null;
 }
@@ -193,13 +236,20 @@ async function fetchOrdersPage(from, to, page, perPage, context) {
 // Process a single prescription record from a HealNow order and apply matching logic.
 // Returns one of: 'applied', 'skipped', 'no-match', 'error'.
 async function processPrescription(rx, order, transfers, dryRun, sample, context) {
-  const rxNumber = rx.rx_number || rx.rxNumber || rx.number || rx.eid || '';
+  // rx_number can hide in several spots in the new Tabz order::paid payload — Tabz's OrderItem
+  // line items don't carry it directly anymore (see openapi.json OrderItem schema). Look across
+  // the prescription record AND the source object (which points back at the original Rx).
+  const rxNumber = rx.rx_number || rx.rxNumber || rx.number || rx.prescription_number ||
+    (rx.source && (rx.source.rx_number || rx.source.rxNumber || rx.source.number)) ||
+    (rx.prescription && (rx.prescription.rx_number || rx.prescription.number)) ||
+    '';
+  const drugName = rx.name || rx.drug || rx.drug_name || rx.description || '';
   const patientName = (order.patient && (order.patient.full_name || order.patient.name)) ||
     [order.patient && (order.patient.first_name || order.patient.firstName), order.patient && (order.patient.last_name || order.patient.lastName)].filter(Boolean).join(' ') ||
     order.patient_name || '';
   const eventDate = new Date(order.created_at || order.createdAt || rx.paid_at || Date.now());
 
-  const match = findItemForRx(transfers, rxNumber, patientName, eventDate);
+  const match = findItemForRx(transfers, rxNumber, patientName, eventDate, drugName);
   if (!match) return { result: 'no-match', rxNumber, patientName };
 
   const { transfer: t, item, matchedBy } = match;
@@ -260,7 +310,7 @@ async function processPrescription(rx, order, transfers, dryRun, sample, context
     rollupPaid(t);
     await saveTransfer(t);
   }
-  if (sample.length < 20) sample.push({ rxNumber, patient: patientName, transferId: t.id, newPaidStatus, matchedBy, dryRun });
+  if (sample.length < 20) sample.push({ rxNumber, drug: drugName, patient: patientName, transferId: t.id, newPaidStatus, matchedBy, dryRun });
   return { result: 'applied', rxNumber, transferId: t.id, newPaidStatus };
 }
 
