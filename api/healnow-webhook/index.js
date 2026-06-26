@@ -237,18 +237,26 @@ function rollupPaid(t) {
   }
 }
 
-// Fetch the receipt PDF from HealNow and upload it to our blob storage. Returns { blobName, size } or null.
+// Fetch the receipt PDF from HealNow and upload it to our blob storage.
+// Returns { ok: true, blobName, size } on success OR { ok: false, error: '...' } on failure
+// so the caller can persist the failure reason on the item — gives us per-Rx visibility into
+// why receipts didn't come through (e.g. 401 = key rotated, 404 = endpoint moved, etc.).
 async function fetchAndStoreReceipt(orderId, context) {
   const apiKey = process.env.HEALNOW_API_KEY;
   const base = process.env.HEALNOW_API_BASE || 'https://api.healnow.io/v1';
-  if (!apiKey || !orderId) return null;
+  if (!apiKey) return { ok: false, error: 'HEALNOW_API_KEY not set' };
+  if (!orderId) return { ok: false, error: 'No order_id on event' };
+  const url = `${base}/orders/${encodeURIComponent(orderId)}/receipt`;
   try {
-    const resp = await fetch(`${base}/orders/${encodeURIComponent(orderId)}/receipt`, {
+    const resp = await fetch(url, {
       headers: { 'Authorization': 'Bearer ' + apiKey, 'Accept': 'application/pdf' }
     });
     if (!resp.ok) {
-      context.log.warn(`HealNow receipt fetch failed: ${resp.status}`);
-      return null;
+      let detail = '';
+      try { detail = (await resp.text()).slice(0, 200); } catch {}
+      const msg = `HTTP ${resp.status} from ${url}${detail ? ' — ' + detail : ''}`;
+      context.log.warn('HealNow receipt fetch failed: ' + msg);
+      return { ok: false, error: msg };
     }
     const buf = Buffer.from(await resp.arrayBuffer());
     const container = getBlobContainer();
@@ -257,10 +265,11 @@ async function fetchAndStoreReceipt(orderId, context) {
     await blobClient.upload(buf, buf.length, {
       blobHTTPHeaders: { blobContentType: 'application/pdf' }
     });
-    return { blobName, size: buf.length };
+    return { ok: true, blobName, size: buf.length };
   } catch (e) {
-    context.log.warn('HealNow receipt error:', e.message || e);
-    return null;
+    const msg = e.message || String(e);
+    context.log.warn('HealNow receipt error:', msg);
+    return { ok: false, error: 'Network/fetch error: ' + msg };
   }
 }
 
@@ -339,10 +348,19 @@ module.exports = async function (context, req) {
         item.paidAt = now;
         item.paidAmountCents = amountCents || item.paidAmountCents || null;
         item.paidVia = (action === 'moto') ? 'phone' : 'healnow';
-        // Fire-and-handle receipt fetch (best effort — webhook 200 even if it fails).
-        if (orderId) {
+        // Log the full event so we can see Tabz's exact paid-event shape (esp. where order_id lives)
+        // when diagnosing receipt failures. Logged once per paid event — manageable volume.
+        try { context.log('HealNow paid event payload: ' + JSON.stringify(event).slice(0, 2000)); } catch {}
+        // Fetch receipt and persist either the blob URL OR the failure reason so the UI can show why.
+        {
           const receipt = await fetchAndStoreReceipt(orderId, context);
-          if (receipt) item.healnowReceiptBlob = receipt.blobName;
+          if (receipt.ok) {
+            item.healnowReceiptBlob = receipt.blobName;
+            item.healnowReceiptError = null;
+          } else {
+            item.healnowReceiptError = receipt.error;
+            item.healnowReceiptAttemptAt = now;
+          }
         }
         break;
       case 'canceled':

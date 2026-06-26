@@ -4423,8 +4423,18 @@ function renderItemPaymentRow(i) {
   const receiptLink = i.healnowReceiptBlob
     ? `<a href="${escapeHtml(blobUrl(i.healnowReceiptBlob))}" target="_blank" rel="noopener" style="color:var(--primary);text-decoration:underline;font-size:12px;margin-left:8px">📄 Receipt</a>`
     : '';
+  // When paid but no receipt blob, show the failure reason + a retry button. Failure reason is
+  // set by the webhook on receipt-fetch failure (e.g. "HTTP 401 from .../orders/X/receipt").
+  // The retry button calls the dedicated /api/healnow-receipt-retry endpoint to refetch.
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === 'admin';
+  const receiptDiag = (status === 'paid' && !i.healnowReceiptBlob)
+    ? `<span style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-size:11px">
+         ${i.healnowReceiptError ? `<span style="color:#991b1b" title="${escapeHtml(i.healnowReceiptError)}">⚠ Receipt missing: ${escapeHtml(String(i.healnowReceiptError).slice(0,80))}</span>` : `<span style="color:#92400e">⚠ Receipt not yet fetched</span>`}
+         ${isAdmin && i.healnowOrderId ? `<button class="btn btn-secondary btn-sm" data-retry-receipt="${i.id}" style="padding:2px 8px;font-size:11px">🔄 Retry</button>` : ''}
+       </span>`
+    : '';
   const meta = (status === 'paid')
-    ? `<span class="item-sub" style="font-size:11px;margin-left:6px">${[amt, via, when].filter(Boolean).join(' · ')}</span>${receiptLink}`
+    ? `<span class="item-sub" style="font-size:11px;margin-left:6px">${[amt, via, when].filter(Boolean).join(' · ')}</span>${receiptLink}${receiptDiag}`
     : '';
   return `<div style="margin-top:6px;display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px">
     <span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${b.bg};color:${b.color};font-weight:700;font-size:11px">${b.icon} ${escapeHtml(b.label)}</span>
@@ -4839,6 +4849,40 @@ function renderItems(t) {
       if (item) {
         item.receivingRxNumber = el.value.trim();
         apiUpdateTransfer(t);
+      }
+    });
+  });
+  // Retry receipt fetch — admin-only, shown next to paid items missing a receipt PDF.
+  wrap.querySelectorAll('[data-retry-receipt]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const itemId = +btn.dataset.retryReceipt;
+      const item = t.items.find(x => x.id === itemId);
+      if (!item || !item.healnowOrderId) return;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = '… fetching';
+      try {
+        const r = await fetch('/api/healnow-receipt-retry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transferId: t.id, itemId })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.ok && data.ok) {
+          item.healnowReceiptBlob = data.blobName;
+          item.healnowReceiptError = null;
+          await apiUpdateTransfer(t);
+          renderModal();
+        } else {
+          item.healnowReceiptError = data.error || ('HTTP ' + r.status);
+          await apiUpdateTransfer(t);
+          renderModal();
+          alert('Receipt fetch failed: ' + (data.error || ('HTTP ' + r.status)));
+        }
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = original;
+        alert('Network error: ' + err.message);
       }
     });
   });
