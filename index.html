@@ -1128,14 +1128,36 @@ function openPageViewer(bulkDraft) {
 function printDocs(items) {
   const w = window.open('', '_blank');
   if (!w) { alert('Pop-up blocked — please allow pop-ups for this site so the print queue can open.'); return; }
+  // Count how many items have actual printable data so we can fall back to a meaningful error
+  // page when every doc is null-source (broken legacy attachments) instead of producing a
+  // totally blank print job.
+  const printableCount = items.filter(it => it.summaryHtml || it.dataUrl).length;
+  const missingDocs = items.filter(it => !it.summaryHtml && !it.dataUrl);
   const html = ['<!DOCTYPE html><html><head><title>Print</title><style>',
     '@page { margin: 0.4in; }',
     'body { margin: 0; font-family: Arial, sans-serif; color: #111; }',
     '.doc { page-break-after: always; }',
     '.doc:last-child { page-break-after: auto; }',
     'img, embed, iframe { max-width: 100%; border: 0; display: block; }',
+    '.print-error { padding: 40px; max-width: 600px; margin: 80px auto; border: 3px solid #c00; border-radius: 8px; background: #fff8f8; }',
+    '.print-error h1 { color: #c00; font-size: 22px; margin: 0 0 12px }',
+    '.print-error p { font-size: 14px; line-height: 1.6; margin: 8px 0 }',
+    '.print-error ul { font-size: 14px; line-height: 1.6 }',
     '</style></head><body>'].join('');
   const out = [html];
+  // Zero-printable fallback: tell the user clearly what to do instead of producing blank pages.
+  if (printableCount === 0 && items.length > 0) {
+    out.push(`<div class="print-error">
+      <h1>⚠ Nothing to print</h1>
+      <p>This transfer's attached documents are missing their file data — most likely the original upload failed silently before this print fix landed. Re-attach the document(s) in the transfer detail screen and then print again.</p>
+      <p><strong>Missing on ${escapeHtml(items[0].patientName || 'this transfer')}:</strong></p>
+      <ul>${missingDocs.map(it => `<li>${escapeHtml(it.title || it.name || 'document')}</li>`).join('')}</ul>
+    </div>`);
+    out.push('</body></html>');
+    w.document.write(out.join(''));
+    w.document.close();
+    return;
+  }
   items.forEach(it => {
     out.push('<div class="doc">');
     if (it.summaryHtml) {
@@ -1144,11 +1166,9 @@ function printDocs(items) {
     } else {
       // Attached document: just the file, no header (use Print Summary Sheet for the ID/info)
       if (!it.dataUrl) {
-        // Skip — don't push a placeholder page. A null dataUrl means either the blob upload
-        // failed at attach time or it's a legacy record whose dataUrl was stripped during
-        // the blob migration. Either way, a blank page in the print queue isn't useful;
-        // the staff will notice the doc missing from the transfer detail screen instead.
-        out.pop(); // remove the <div class="doc"> we just pushed so we don't leave an empty page
+        // Skip this entry — the zero-printable check above already handled the "all missing" case;
+        // if we're here, OTHER docs do have data, so we silently drop this single broken one.
+        out.pop();
         return;
       } else if ((it.type||'').startsWith('image/') || /\.(png|jpe?g|gif|tiff?)$/i.test(it.name||'')) {
         out.push(`<img src="${it.dataUrl}" onerror="this.outerHTML='<div style=&quot;border:2px dashed #c00;padding:14px;color:#c00;font-size:12px&quot;>⚠ Image could not be loaded — the stored file is missing or unreadable. URL: <code style=&quot;font-family:monospace&quot;>${escapeHtml(it.dataUrl)}</code></div>'" />`);
@@ -4747,7 +4767,10 @@ function renderModal() {
   });
   document.querySelectorAll('[data-cc-print]').forEach(b => b.onclick = () => {
     if (!t.ccForm) { alert('No CC form attached.'); return; }
-    printDocs([{ transferId: t.id, patientName: t.patientName, transferMeta: `${t.originLocation} → ${t.fillLocation}`, title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: t.ccForm.dataUrl }]);
+    // Resolve dataUrl OR blobName — most CC Auth uploads land as blobName-only after the
+    // persistence layer strips dataUrl. Passing only t.ccForm.dataUrl was producing blanks.
+    const src = t.ccForm.dataUrl || (t.ccForm.blobName ? blobUrl(t.ccForm.blobName) : null);
+    printDocs([{ transferId: t.id, patientName: t.patientName, transferMeta: `${t.originLocation} → ${t.fillLocation}`, title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: src }]);
   });
   const printBlankCCBtn = document.getElementById('modal-printCCBlank');
   if (printBlankCCBtn) printBlankCCBtn.addEventListener('click', () => printCCAuthForm(t));
@@ -4767,7 +4790,13 @@ function renderModal() {
   const printAttachBtn = document.getElementById('printAttachmentsBtn');
   if (printAttachBtn) printAttachBtn.addEventListener('click', () => {
     askAntShipDateBeforePrint([t], (newDate) => {
-      if (newDate) { t.anticipatedShipDate = newDate; apiUpdateTransfer(t); }
+      // Combine ship-date set + status auto-advance (New → In Progress) into a single PUT to
+      // mirror batchPrintTransfers. Previously this path skipped the advance — printing from
+      // the modal left the status in "New" even though the docs went out the door.
+      let changed = false;
+      if (newDate) { t.anticipatedShipDate = newDate; changed = true; }
+      if (t.status === 'New') { t.status = 'In Progress'; changed = true; }
+      if (changed) apiUpdateTransfer(t);
       printDocs(getPrintableDocsForTransfer(t));
     });
   });
