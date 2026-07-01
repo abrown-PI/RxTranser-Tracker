@@ -469,7 +469,7 @@ let TRANSFERS = (typeof IMPORT_DATA !== 'undefined' ? IMPORT_DATA : []).map(d =>
   originLocation: d.originLocation, fillLocation: d.fillLocation,
   shipTo: d.shipTo, deliveryCharge: '',
   shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
-  billing: (d.paid === 'HealNow' || d.paid === 'Healnow') ? 'HealNow' : (d.paid === 'Credit Card' || d.paid === 'CC') ? 'CreditCard' : (d.paid === 'Pay at Store' || d.paid === 'Pay In Store') ? 'PayInStore' : 'HealNow',
+  billing: (d.paid === 'HealNow' || d.paid === 'Healnow') ? 'HealNow' : (d.paid === 'Credit Card' || d.paid === 'CC') ? 'CreditCard' : (d.paid === 'Pay at Store' || d.paid === 'Pay In Store') ? 'PayInStore' : (d.paid === 'Program') ? 'Program' : 'HealNow',
   ccOnFileInPaladin: false,
   ccForm: null,
   txEmailedDate: d.txEmailedDate, dateReceivedAtErie: d.dateReceivedAtErie,
@@ -749,7 +749,8 @@ function toDateISO(d) {
 const BILLING_OPTIONS = [
   ['HealNow', 'Tabz'],
   ['CreditCard', 'Credit Card'],
-  ['PayInStore', 'Pay In Store']
+  ['PayInStore', 'Pay In Store'],
+  ['Program', 'Program']
 ];
 function billingLabel(value) {
   const found = BILLING_OPTIONS.find(([v]) => v === value);
