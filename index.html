@@ -1364,10 +1364,6 @@ function renderTransfers() {
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
       <input id="f-med" placeholder="Filter by medication…" value="${escapeHtml(state.filterMed||'')}" style="min-width:180px" />
       <select id="f-weightLoss" title="Weight-loss drug filter — auto-detected from drug name"><option value="">Weight-loss: all</option><option value="exclude" ${state.filterWeightLoss==='exclude'?'selected':''}>Hide weight-loss</option><option value="only" ${state.filterWeightLoss==='only'?'selected':''}>Weight-loss only</option></select>
-      <div style="flex:1"></div>
-      <label class="checkbox-row" style="font-size:12px"><input type="checkbox" id="selectAllPrint" /> Select all visible for print</label>
-    </div>
-    <div class="filters" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;border-top:1px dashed var(--gray-200);padding-top:6px">
       <span style="display:inline-flex;align-items:center;gap:4px"><label style="font-size:12px;color:var(--gray-600)">Created</label>
         <input type="date" id="f-dateFrom" value="${escapeHtml(state.dateFrom||'')}" title="Created from" />
         <input type="date" id="f-dateTo" value="${escapeHtml(state.dateTo||'')}" title="Created to" /></span>
@@ -1378,6 +1374,9 @@ function renderTransfers() {
         <input type="date" id="f-shippedFrom" value="${escapeHtml(state.filterShipFrom||'')}" title="Ship date from" />
         <input type="date" id="f-shippedTo" value="${escapeHtml(state.filterShipTo||'')}" title="Ship date to" /></span>
       ${(state.dateFrom||state.dateTo||state.filterAntShipFrom||state.filterAntShipTo||state.filterShipFrom||state.filterShipTo)?'<button class="btn btn-secondary btn-sm" id="clearDateRange">Clear dates</button>':''}
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:8px;padding:4px 2px">
+      <label class="checkbox-row" style="font-size:12px"><input type="checkbox" id="selectAllPrint" /> Select all visible for print</label>
     </div>
     ${filtered.length === 0 ? `<div class="empty"><h3>No transfers match</h3><p>Try clearing filters.</p></div>` : `
     <table>
