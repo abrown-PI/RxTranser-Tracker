@@ -533,7 +533,7 @@ const nextId = () => ++_nextId;
 // they were halfway through the Shipments page. Falls back to 'transfers' if nothing saved.
 const _savedTab = (() => { try { return localStorage.getItem('lastTab') || 'transfers'; } catch { return 'transfers'; } })();
 const VALID_TABS = ['transfers','new','refill','actions','shipments','sla','stats','admin'];
-const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'transfers', filterStatus: '', showCompleted: false, filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
+const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'transfers', filterStatus: '', showCompleted: false, filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterWeightLoss: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
 
 // Default-view persistence: stores a snapshot of the transfer-list filters in
 // localStorage so a user's preferred view survives reloads + sessions on the
@@ -553,6 +553,7 @@ function saveDefaultView() {
       filterType: state.filterType,
       filterPaid: state.filterPaid,
       filterMed: state.filterMed,
+      filterWeightLoss: state.filterWeightLoss,
       filterAntShipFrom: state.filterAntShipFrom,
       filterAntShipTo: state.filterAntShipTo,
       filterShipFrom: state.filterShipFrom,
@@ -755,6 +756,25 @@ const BILLING_OPTIONS = [
 function billingLabel(value) {
   const found = BILLING_OPTIONS.find(([v]) => v === value);
   return found ? found[1] : (value || '');
+}
+// Weight-loss drug detection so techs who don't fill WL meds can hide those rows.
+// Substring match on drug name — covers generic + brand, compounded + branded.
+// If a new WL med hits the shelf and doesn't get flagged, add its keyword here.
+const WEIGHT_LOSS_KEYWORDS = [
+  'semaglutide', 'tirzepatide', 'retatrutide', 'liraglutide', 'cagrilintide',
+  'phentermine', 'topiramate', 'phen/top', 'phen-top',
+  'naltrexone/bupropion', 'bupropion/naltrexone', 'contrave',
+  'setmelanotide', 'orlistat', 'diethylpropion', 'phendimetrazine', 'benzphetamine',
+  'ozempic', 'wegovy', 'rybelsus', 'mounjaro', 'zepbound',
+  'saxenda', 'victoza', 'qsymia', 'adipex', 'lomaira', 'xenical', 'imcivree'
+];
+function isWeightLossDrug(name) {
+  if (!name) return false;
+  const s = String(name).toLowerCase();
+  return WEIGHT_LOSS_KEYWORDS.some(k => s.includes(k));
+}
+function isWeightLossTransfer(t) {
+  return (t.items || []).some(i => isWeightLossDrug(i.drug));
 }
 function docList(files) {
   if (!files || !files.length) return '<span class="item-sub">— none attached</span>';
@@ -1286,6 +1306,8 @@ function renderTransfers() {
       const hit = (t.items || []).some(i => (i.drug || '').toLowerCase().includes(q));
       if (!hit) return false;
     }
+    if (state.filterWeightLoss === 'exclude' && isWeightLossTransfer(t)) return false;
+    if (state.filterWeightLoss === 'only' && !isWeightLossTransfer(t)) return false;
     if (state.filterAntShipFrom && (!t.anticipatedShipDate || t.anticipatedShipDate < state.filterAntShipFrom)) return false;
     if (state.filterAntShipTo && (!t.anticipatedShipDate || t.anticipatedShipDate > state.filterAntShipTo)) return false;
     if (state.filterShipFrom && (!t.dateShipped || t.dateShipped.slice(0,10) < state.filterShipFrom)) return false;
@@ -1338,6 +1360,7 @@ function renderTransfers() {
       <select id="f-type"><option value="">All types</option><option value="New" ${state.filterType==='New'?'selected':''}>New only</option><option value="Refill" ${state.filterType==='Refill'?'selected':''}>Refills only</option></select>
       <select id="f-paid"><option value="">Paid: all</option><option value="Paid" ${state.filterPaid==='Paid'?'selected':''}>✓ Paid only</option><option value="NotPaid" ${state.filterPaid==='NotPaid'?'selected':''}>Not paid only</option></select>
       <select id="f-shipToType" title="Filter by where the package ships"><option value="">Ship-to: all</option><option value="Pharmacy" ${state.filterShipToType==='Pharmacy'?'selected':''}>🏪 Pharmacy only</option><option value="Patient" ${state.filterShipToType==='Patient'?'selected':''}>👤 Patient only</option><option value="Pickup" ${state.filterShipToType==='Pickup'?'selected':''}>📍 Pickup only</option><option value="Delivery-Lancaster" ${state.filterShipToType==='Delivery-Lancaster'?'selected':''}>🚚 Lancaster Delivery</option></select>
+      <select id="f-weightLoss" title="Weight-loss drug filter — auto-detected from drug name"><option value="">WL: all</option><option value="exclude" ${state.filterWeightLoss==='exclude'?'selected':''}>Hide weight-loss</option><option value="only" ${state.filterWeightLoss==='only'?'selected':''}>Weight-loss only</option></select>
       <select id="f-origin"><option value="">All origins</option>${LOCATIONS.map(l=>`<option ${l===state.filterOrigin?'selected':''}>${l}</option>`).join('')}</select>
       <select id="f-fill"><option value="">All fill locations</option>${LOCATIONS.map(l=>`<option ${l===state.filterFill?'selected':''}>${l}</option>`).join('')}</select>
       <input id="f-med" placeholder="Filter by medication…" value="${escapeHtml(state.filterMed||'')}" style="min-width:180px" />
@@ -1372,7 +1395,7 @@ function renderTransfers() {
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
             <td><code style="font-family:monospace;font-size:12px;font-weight:600;color:var(--primary-dark)">${t.id}</code></td>
-            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap"><span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.pickupAtPharmacy?'<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and ships to another pharmacy for patient pickup">📍 Non-transfer</span>':''}${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
+            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap"><span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.pickupAtPharmacy?'<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and ships to another pharmacy for patient pickup">📍 Non-transfer</span>':''}${isWeightLossTransfer(t)?'<span class="badge" style="font-size:10px;background:#ede9fe;color:#5b21b6" title="Weight-loss medication (auto-detected)">⚖ WL</span>':''}${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
             <td>${(() => {
               const drugs = (t.items || []).map(i => i.drug).filter(Boolean);
               if (t.isBulkPickup) return '<span class="item-sub">—</span>';
@@ -1442,6 +1465,7 @@ function renderTransfers() {
     state.filterType = '';
     state.filterPaid = '';
     state.filterShipToType = '';
+    state.filterWeightLoss = '';
     state.filterOrigin = '';
     state.filterFill = '';
     state.filterMed = '';
@@ -1457,6 +1481,7 @@ function renderTransfers() {
   document.getElementById('f-type').addEventListener('change', e => { state.filterType = e.target.value; renderTransfers(); });
   document.getElementById('f-paid').addEventListener('change', e => { state.filterPaid = e.target.value; renderTransfers(); });
   document.getElementById('f-shipToType').addEventListener('change', e => { state.filterShipToType = e.target.value; renderTransfers(); });
+  document.getElementById('f-weightLoss').addEventListener('change', e => { state.filterWeightLoss = e.target.value; renderTransfers(); });
   document.getElementById('f-origin').addEventListener('change', e => { state.filterOrigin = e.target.value; renderTransfers(); });
   document.getElementById('f-fill').addEventListener('change', e => { state.filterFill = e.target.value; renderTransfers(); });
   document.getElementById('f-med').addEventListener('input', e => { state.filterMed = e.target.value; renderTransfers(); });
