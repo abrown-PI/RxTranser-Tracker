@@ -282,6 +282,7 @@ if (window.pdfjsLib) {
 }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+<script src="signature_pad.min.js"></script>
 <script src="data.js"></script>
 <script>
 // =====================================================================
@@ -1396,7 +1397,7 @@ function renderTransfers() {
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
             <td><code style="font-family:monospace;font-size:12px;font-weight:600;color:var(--primary-dark)">${t.id}</code></td>
-            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap"><span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.pickupAtPharmacy?'<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and ships to another pharmacy for patient pickup">📍 Non-transfer</span>':''}${isWeightLossTransfer(t)?'<span class="badge" style="font-size:10px;background:#ede9fe;color:#5b21b6" title="Weight-loss medication (auto-detected)">⚖ Weight Loss</span>':''}${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${(t.returnToStock && !t.returnToStock.acknowledgedAt)?`<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Return-to-stock requested by ${escapeHtml(t.returnToStock.requestedFrom||'?')} — waiting on ${escapeHtml(t.fillLocation)} to reverse">⤺ RTS pending</span>`:''}${(t.returnToStock && t.returnToStock.acknowledgedAt)?'<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Reversed in PK">✓ Reversed</span>':''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
+            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap"><span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.pickupAtPharmacy?'<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and ships to another pharmacy for patient pickup">📍 Non-transfer</span>':''}${isWeightLossTransfer(t)?'<span class="badge" style="font-size:10px;background:#ede9fe;color:#5b21b6" title="Weight-loss medication (auto-detected)">⚖ Weight Loss</span>':''}${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${(t.returnToStock && !t.returnToStock.acknowledgedAt)?`<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Return-to-stock requested by ${escapeHtml(t.returnToStock.requestedFrom||'?')} — waiting on ${escapeHtml(t.fillLocation)} to reverse">⤺ RTS pending</span>`:''}${(t.returnToStock && t.returnToStock.acknowledgedAt)?'<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Reversed in PK">✓ Reversed</span>':''}${(t.pickupSignature && t.pickupSignature.blobName)?`<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Signed at pickup on ${new Date(t.pickupSignature.signedAt).toLocaleDateString()}">✍️ Signed</span>`:''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
             <td>${(() => {
               const drugs = (t.items || []).map(i => i.drug).filter(Boolean);
               if (t.isBulkPickup) return '<span class="item-sub">—</span>';
@@ -2606,6 +2607,94 @@ function returnToStockMine() {
     return isFromMyLoc && !t.returnToStock.acknowledgedAt;
   });
 }
+// Pickup signature modal. Renders a canvas via signature_pad, saves the resulting PNG
+// as a blob, and stamps t.pickupSignature with the timestamp + tech name so the row +
+// modal can show the "picked up" state everywhere.
+function openPickupSignatureModal(t) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal" style="max-width:640px">
+    <div class="modal-header"><h2>✍️ Pickup Signature</h2><button class="modal-close" id="sigClose">×</button></div>
+    <div class="modal-body">
+      <p style="margin:0 0 10px 0">Have the patient (or an authorized rep) sign below to confirm pickup for <strong>${escapeHtml(displayPatientName(t))}</strong>. Use a touchscreen or mouse.</p>
+      <div style="border:2px dashed var(--gray-400);border-radius:6px;background:#fff;position:relative">
+        <canvas id="sigCanvas" width="600" height="220" style="display:block;width:100%;height:220px;touch-action:none;cursor:crosshair"></canvas>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--gray-600)">
+        <span>Witnessed by: <strong>${escapeHtml(CURRENT_USER.name)}</strong></span>
+        <button class="btn btn-secondary btn-sm" id="sigClear" style="padding:3px 10px;font-size:11px">Clear</button>
+      </div>
+      <div class="form-group" style="margin-top:12px"><label>Optional note</label>
+        <textarea id="sig-notes" placeholder="e.g. Signed by patient's wife (rep)" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;min-height:50px"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="sigCancel">Cancel</button>
+      <button class="btn btn-primary" id="sigSave">Save signature</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#sigClose').onclick = close;
+  overlay.querySelector('#sigCancel').onclick = close;
+
+  const canvas = overlay.querySelector('#sigCanvas');
+  // High-DPI aware — the canvas backing store needs to match device pixel ratio or the
+  // captured signature is blurry when scaled up on retina/HiDPI screens.
+  const ratio = Math.max(window.devicePixelRatio || 1, 1);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * ratio;
+  canvas.height = h * ratio;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(ratio, ratio);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+
+  if (typeof SignaturePad === 'undefined') {
+    alert('Signature library failed to load — refresh and try again.');
+    close();
+    return;
+  }
+  const pad = new SignaturePad(canvas, {
+    backgroundColor: '#ffffff',
+    penColor: '#111827',
+    minWidth: 0.8,
+    maxWidth: 2.5
+  });
+
+  overlay.querySelector('#sigClear').onclick = () => pad.clear();
+
+  overlay.querySelector('#sigSave').onclick = async () => {
+    if (pad.isEmpty()) { alert('Please have the patient sign before saving.'); return; }
+    const saveBtn = overlay.querySelector('#sigSave');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    try {
+      const dataUrl = pad.toDataURL('image/png');
+      const base64 = dataUrl.split(',')[1];
+      const blobName = await uploadBlob(base64, 'image/png', 'pickup-sig');
+      if (!blobName) throw new Error('Upload failed');
+      t.pickupSignature = {
+        signedAt: new Date().toISOString(),
+        signedBy: CURRENT_USER.name,
+        location: CURRENT_USER.location,
+        blobName,
+        notes: (overlay.querySelector('#sig-notes').value || '').trim()
+      };
+      await apiUpdateTransfer(t);
+      try { logAudit('pickup_signed', 'transfer', t.id, { blobName }); } catch {}
+      close();
+      if (typeof renderModal === 'function') renderModal();
+      render();
+    } catch (e) {
+      console.error('signature save failed', e);
+      alert('Could not save signature — please try again.');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save signature';
+    }
+  };
+}
+
 function openReturnToStockPrompt(t) {
   const destLoc = t.pickupAtPharmacy ? (t.pickupLocation||CURRENT_USER.location) : (t.originLocation||CURRENT_USER.location);
   const overlay = document.createElement('div');
@@ -5005,6 +5094,20 @@ function renderModal() {
             }
             return `<button class="btn btn-secondary btn-sm" style="margin-top:10px;background:#fef3c7;border-color:#fbbf24;color:#92400e" id="rtsBtn" title="Notify the fill pharmacy that this transfer wasn't picked up and needs reversed in PK Software">⤺ Request Return to Stock</button>`;
           })()}
+          ${(() => {
+            // Pickup signature capture. Same visibility rules as the RTS button — only the
+            // destination pharmacy can capture a signature, only after the transfer arrived.
+            // Skips patient-direct ships (no in-store pickup happens).
+            if (!['Received','Delivered'].includes(t.status)) return '';
+            const destLoc = t.pickupAtPharmacy ? (t.pickupLocation||'') : (t.shipTo === 'Pharmacy' ? t.originLocation : '');
+            if (!destLoc) return '';
+            const isAtDest = CURRENT_USER.location === destLoc || (CURRENT_USER.role === 'admin' && CURRENT_USER.location === ALL_LOCATIONS);
+            if (!isAtDest) return '';
+            if (t.pickupSignature && t.pickupSignature.blobName) {
+              return `<div style="margin-top:10px;padding:8px 12px;background:#dcfce7;border:1px solid #16a34a;border-radius:6px;font-size:12px"><strong>✓ Signed at pickup</strong> by patient/rep on ${new Date(t.pickupSignature.signedAt).toLocaleString()}${t.pickupSignature.signedBy?` · witnessed by ${escapeHtml(t.pickupSignature.signedBy)}`:''} <a href="${escapeHtml(blobUrl(t.pickupSignature.blobName))}" target="_blank" style="color:var(--primary);text-decoration:underline;margin-left:8px">View signature</a></div>`;
+            }
+            return `<button class="btn btn-primary btn-sm" style="margin-top:10px;background:#16a34a;border-color:#16a34a" id="pickupSigBtn" title="Have patient sign to confirm pickup">✍️ Record pickup signature</button>`;
+          })()}
           </div>
 
           <div class="section"><div class="section-title">Attached Documents
@@ -5070,6 +5173,8 @@ function renderModal() {
   document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
   const rtsBtn = document.getElementById('rtsBtn');
   if (rtsBtn) rtsBtn.addEventListener('click', () => openReturnToStockPrompt(t));
+  const pickupSigBtn = document.getElementById('pickupSigBtn');
+  if (pickupSigBtn) pickupSigBtn.addEventListener('click', () => openPickupSignatureModal(t));
   // Mark Paid / Undo Paid buttons
   const paidBtnEl = document.getElementById('paidBtn');
   if (paidBtnEl) paidBtnEl.addEventListener('click', () => {
