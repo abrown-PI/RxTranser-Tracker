@@ -63,7 +63,7 @@ async function isAdminCaller(req) {
 }
 
 function toEntity(u) {
-  return {
+  const out = {
     partitionKey: PARTITION,
     rowKey: String(u.email).toLowerCase(),
     name: u.name || '',
@@ -71,9 +71,24 @@ function toEntity(u) {
     role: u.role || 'tech',
     lastSignInAt: u.lastSignInAt || new Date().toISOString()
   };
+  // Entra-sourced fields — only overwrite when the caller actually supplied them (sign-in
+  // includes them; admin PUTs don't touch them).
+  if (u.entraOfficeLocation !== undefined) out.entraOfficeLocation = u.entraOfficeLocation || '';
+  if (u.entraDepartment !== undefined) out.entraDepartment = u.entraDepartment || '';
+  if (u.entraJobTitle !== undefined) out.entraJobTitle = u.entraJobTitle || '';
+  return out;
 }
 function fromEntity(e) {
-  return { email: e.rowKey, name: e.name || '', location: e.location || '', role: e.role || 'tech', lastSignInAt: e.lastSignInAt || null };
+  return {
+    email: e.rowKey,
+    name: e.name || '',
+    location: e.location || '',
+    role: e.role || 'tech',
+    lastSignInAt: e.lastSignInAt || null,
+    entraOfficeLocation: e.entraOfficeLocation || '',
+    entraDepartment: e.entraDepartment || '',
+    entraJobTitle: e.entraJobTitle || ''
+  };
 }
 
 module.exports = async function (context, req) {

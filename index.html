@@ -3053,13 +3053,32 @@ function renderAdmin() {
       root.innerHTML = '<div class="item-sub" style="padding:14px;text-align:center;font-style:italic">No users yet. Add a 365 admin below, or create a local account.</div>';
       return;
     }
-    root.innerHTML = `<table style="box-shadow:none;font-size:13px"><thead><tr>
-      <th style="width:60px">Type</th><th>Name</th><th>Email / Username</th><th>Location</th><th>Role</th><th>Last Sign-in</th><th></th>
+    // Enrich each row with Entra info + a mismatch flag so admins can spot which staff
+    // need their Entra Office Location cleaned up.
+    rows.forEach(r => {
+      if (r.kind !== '365') return;
+      const u = _users365.find(x => (x.email || '').toLowerCase() === (r.key || '').toLowerCase());
+      r.entraLoc = (u && u.entraOfficeLocation) || '';
+      const normalized = r.entraLoc ? (LOCATIONS.find(l => l.toLowerCase() === r.entraLoc.toLowerCase()) || LOCATIONS.find(l => r.entraLoc.toLowerCase().includes(l.toLowerCase())) || null) : null;
+      r.entraNormalized = normalized;
+      r.entraSynced = !!normalized && normalized === r.location;
+      r.entraMismatch = !!normalized && normalized !== r.location;
+      r.entraBlank = !r.entraLoc;
+    });
+    root.innerHTML = `<p class="item-sub" style="margin-bottom:8px">Location is now synced from Entra ID's Office Location field on sign-in. Rows tagged <span class="badge" style="font-size:9px;background:#fef3c7;color:#92400e">⚠ mismatch</span> show a difference between Entra and the app — fix in Entra ID and the user's next sign-in will follow. Rows tagged <span class="badge" style="font-size:9px;background:#fee2e2;color:#991b1b">Entra blank</span> have no Office Location set in Entra and need cleanup there.</p>
+    <table style="box-shadow:none;font-size:13px"><thead><tr>
+      <th style="width:60px">Type</th><th>Name</th><th>Email / Username</th><th>Location</th><th>Entra Location</th><th>Role</th><th>Last Sign-in</th><th></th>
     </tr></thead><tbody>${rows.map((r,idx) => `<tr>
       <td><span class="badge ${r.kind==='365'?'badge-verified':'badge-progress'}" style="font-size:10px">${r.kind==='365'?'365':'Local'}</span></td>
       <td><input data-row="${idx}" data-k="name" value="${escapeHtml(r.name||'')}" style="width:100%;padding:4px 6px;border:1px solid var(--gray-300);border-radius:3px;font-weight:600" /></td>
       <td><span style="font-family:monospace;font-size:12px">${escapeHtml(r.key||'')}</span></td>
       <td><select data-row="${idx}" data-k="location">${LOCATIONS.map(l=>`<option ${l===r.location?'selected':''}>${l}</option>`).join('')}</select></td>
+      <td>${r.kind==='365' ? (
+        r.entraSynced ? `<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Entra Office Location matches — app follows Entra on next sign-in">✓ ${escapeHtml(r.entraNormalized)}</span>` :
+        r.entraMismatch ? `<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Entra says ${escapeHtml(r.entraLoc)} but app has ${escapeHtml(r.location)} — fix in Entra ID">⚠ ${escapeHtml(r.entraLoc)}</span>` :
+        r.entraBlank ? `<span class="badge" style="font-size:10px;background:#fee2e2;color:#991b1b" title="Entra Office Location is blank — user will keep the app-set location until this is filled in">Entra blank</span>` :
+        `<span class="item-sub">${escapeHtml(r.entraLoc||'—')}</span>`
+      ) : '<span class="item-sub">—</span>'}</td>
       <td><select data-row="${idx}" data-k="role"><option ${r.role==='admin'?'selected':''}>admin</option><option ${r.role==='manager'?'selected':''}>manager</option><option ${r.role==='tech'?'selected':''}>tech</option></select></td>
       <td>${r.last ? new Date(r.last).toLocaleString() : '<span class="item-sub">never</span>'}</td>
       <td style="white-space:nowrap">${r.kind==='local' ? `<button class="btn btn-secondary btn-sm" data-reset-pin="${idx}">Reset PIN</button> ` : ''}<button class="btn btn-secondary btn-sm" data-rm-row="${idx}">Remove</button></td>
@@ -7783,6 +7802,45 @@ function getMsal() {
   return _msalInstance;
 }
 
+// Fetch the signed-in user's Entra ID profile via Microsoft Graph. Requires User.Read
+// scope (already granted at MSAL loginPopup time). Returns the Entra-reported office
+// location, department, and job title — or null on any failure.
+// Used to make Entra the source of truth for pharmacy location so admins don't have to
+// double-maintain a location list in the app.
+async function fetchGraphProfile() {
+  const m = getMsal();
+  if (!m) return null;
+  const accounts = m.getAllAccounts();
+  if (!accounts.length) return null;
+  try {
+    const tok = await m.acquireTokenSilent({ account: accounts[0], scopes: ['User.Read'] });
+    const r = await fetch('https://graph.microsoft.com/v1.0/me?$select=officeLocation,department,jobTitle,displayName,mail', {
+      headers: { Authorization: 'Bearer ' + tok.accessToken }
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return {
+      officeLocation: j.officeLocation || '',
+      department: j.department || '',
+      jobTitle: j.jobTitle || '',
+      displayName: j.displayName || ''
+    };
+  } catch { return null; }
+}
+
+// Coerce whatever Entra returned as officeLocation into one of our canonical LOCATIONS.
+// Handles case differences and common suffixes ("Erie, PA" -> "Erie"). Returns null if no
+// canonical match — caller falls back to app-stored location.
+function normalizeEntraLocation(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim().toLowerCase();
+  const direct = LOCATIONS.find(l => l.toLowerCase() === s);
+  if (direct) return direct;
+  // Try substring match ("Erie, PA" contains "erie"; "PI - Jamestown NY" contains "jamestown")
+  const contained = LOCATIONS.find(l => s.includes(l.toLowerCase()));
+  return contained || null;
+}
+
 async function loadAdminEmails() {
   try {
     const r = await fetch('/api/settings');
@@ -7817,20 +7875,22 @@ async function applyMsalAccount(account) {
   const name = account.name || account.username || 'User';
   const isAdmin = _adminEmails.includes(email);
 
-  // Look up the user's assigned location from backend (source of truth)
-  let backendLocation = null;
-  try {
-    const r = await fetch('/api/users');
-    if (r.ok) {
-      const data = await r.json();
-      const backendUser = (data.users || []).find(u => (u.email || '').toLowerCase() === email);
-      if (backendUser && backendUser.location) backendLocation = backendUser.location;
-    }
-  } catch { /* network error — fall through */ }
+  // Fetch Entra profile + backend user record in parallel — Entra is the new source of truth
+  // for location; backend record is fallback if Entra doesn't have officeLocation filled in.
+  const [entraProfile, backendUser] = await Promise.all([
+    fetchGraphProfile(),
+    fetch('/api/users').then(r => r.ok ? r.json() : { users: [] })
+      .then(d => (d.users || []).find(u => (u.email || '').toLowerCase() === email) || null)
+      .catch(() => null)
+  ]);
 
-  const savedLocation = backendLocation
+  const entraLoc = normalizeEntraLocation(entraProfile ? entraProfile.officeLocation : null);
+  const backendLocation = backendUser && backendUser.location ? backendUser.location : null;
+  // Location priority: Entra officeLocation > backend > localStorage > default Erie.
+  const savedLocation = entraLoc
+    || backendLocation
     || localStorage.getItem('userLocation_' + email)
-    || 'Erie'; // last-ditch default for brand-new users with no admin-set location yet
+    || 'Erie';
 
   // Find or create the user in USERS so existing code that reads from USERS still works
   let user = USERS.find(u => (u.email || '').toLowerCase() === email);
@@ -7848,7 +7908,13 @@ async function applyMsalAccount(account) {
   try {
     fetch('/api/users', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': email },
-      body: JSON.stringify({ email, name, location: savedLocation, role: user.role, lastSignInAt: new Date().toISOString() })
+      body: JSON.stringify({
+        email, name, location: savedLocation, role: user.role,
+        lastSignInAt: new Date().toISOString(),
+        entraOfficeLocation: entraProfile ? entraProfile.officeLocation : '',
+        entraDepartment: entraProfile ? entraProfile.department : '',
+        entraJobTitle: entraProfile ? entraProfile.jobTitle : ''
+      })
     }).catch(() => {});
   } catch {}
   try { logAudit('sign_in', 'session', email, { method: 'msal' }); } catch {}
