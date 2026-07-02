@@ -3076,9 +3076,9 @@ function renderAdmin() {
           if (v === 'admin') _adminEmailsSet.add(email); else _adminEmailsSet.delete(email);
           await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminEmails: [..._adminEmailsSet] }) });
           // Also save the non-admin role choice
-          if (v !== 'admin') await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: v }) });
+          if (v !== 'admin') await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-user-email': (CURRENT_USER.email||'').toLowerCase() }, body: JSON.stringify({ role: v }) });
         } else {
-          await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [k]: v }) });
+          await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-user-email': (CURRENT_USER.email||'').toLowerCase() }, body: JSON.stringify({ [k]: v }) });
         }
       } else {
         // Local user
@@ -3090,7 +3090,7 @@ function renderAdmin() {
       const r = rows[+b.dataset.rmRow];
       if (!confirm(`Remove ${r.name || r.key}?`)) return;
       if (r.kind === '365') {
-        await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'DELETE' });
+        await fetch('/api/users/' + encodeURIComponent(r.key), { method: 'DELETE', headers: { 'x-user-email': (CURRENT_USER.email||'').toLowerCase() } });
         _adminEmailsSet.delete((r.key||'').toLowerCase());
         await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminEmails: [..._adminEmailsSet] }) });
       } else {
@@ -3133,7 +3133,7 @@ function renderAdmin() {
     result.innerHTML = '<span class="item-sub">Adding…</span>';
     try {
       // Add a placeholder user record (will get filled in on first sign-in)
-      await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, name: email, role: role === 'admin' ? 'tech' : role, location: '' }) });
+      await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': (CURRENT_USER.email||'').toLowerCase() }, body: JSON.stringify({ email, name: email, role: role === 'admin' ? 'tech' : role, location: '' }) });
       if (role === 'admin') {
         _adminEmailsSet.add(email);
         await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminEmails: [..._adminEmailsSet] }) });
@@ -7847,7 +7847,7 @@ async function applyMsalAccount(account) {
   // Best-effort persist user record + last sign-in time (non-blocking, never throws)
   try {
     fetch('/api/users', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': email },
       body: JSON.stringify({ email, name, location: savedLocation, role: user.role, lastSignInAt: new Date().toISOString() })
     }).catch(() => {});
   } catch {}
@@ -7875,7 +7875,7 @@ async function applyMsalAccount(account) {
       localStorage.setItem('userLocation_' + email, locSel.value);
       updateNextShipmentBanner();
       fetch('/api/users/' + encodeURIComponent(email), {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-user-email': email },
         body: JSON.stringify({ location: locSel.value })
       }).catch(() => {});
       applyRoleVisibility(); render();

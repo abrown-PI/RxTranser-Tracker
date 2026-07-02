@@ -11,6 +11,9 @@ const { TableClient } = require('@azure/data-tables');
 
 const TABLE = 'users';
 const PARTITION = 'pi';
+const SETTINGS_TABLE = 'settings';
+const SETTINGS_PARTITION = 'global';
+const SETTINGS_ROW = 'main';
 
 let _table = null;
 function getTable() {
@@ -22,6 +25,41 @@ function getTable() {
 }
 async function ensureTable() {
   try { await getTable().createTable(); } catch (e) { if (e.statusCode !== 409) throw e; }
+}
+
+let _settingsTable = null;
+function getSettingsTable() {
+  if (_settingsTable) return _settingsTable;
+  const conn = process.env.AZURE_STORAGE_CONNECTION;
+  if (!conn) throw Object.assign(new Error('AZURE_STORAGE_CONNECTION not set'), { statusCode: 503 });
+  _settingsTable = TableClient.fromConnectionString(conn, SETTINGS_TABLE);
+  return _settingsTable;
+}
+// Read admin emails from the shared settings table. Cached briefly per warm invocation to
+// avoid a Table read on every request. Returns lower-cased set.
+let _adminCache = { at: 0, set: new Set() };
+async function loadAdminEmails() {
+  const now = Date.now();
+  if (now - _adminCache.at < 60000) return _adminCache.set;
+  try {
+    const e = await getSettingsTable().getEntity(SETTINGS_PARTITION, SETTINGS_ROW);
+    const body = JSON.parse(e.body || '{}');
+    const list = (body.adminEmails || []).map(x => String(x).toLowerCase());
+    _adminCache = { at: now, set: new Set(list) };
+  } catch (err) {
+    if (err.statusCode !== 404) throw err;
+    _adminCache = { at: now, set: new Set() };
+  }
+  return _adminCache.set;
+}
+function callerEmail(req) {
+  return String(req.headers['x-user-email'] || '').toLowerCase().trim();
+}
+async function isAdminCaller(req) {
+  const email = callerEmail(req);
+  if (!email) return false;
+  const admins = await loadAdminEmails();
+  return admins.has(email);
 }
 
 function toEntity(u) {
@@ -55,6 +93,27 @@ module.exports = async function (context, req) {
     if (method === 'POST') {
       const u = req.body || {};
       if (!u.email) { context.res = { status: 400, body: { error: 'email required' } }; return; }
+      const targetEmail = String(u.email).toLowerCase();
+      const admin = await isAdminCaller(req);
+      const caller = callerEmail(req);
+      // Non-admin can only POST their own record (sign-in upsert). And even then, if the
+      // record already exists we ignore any location/role fields — those belong to admin.
+      if (!admin) {
+        if (caller && caller !== targetEmail) {
+          context.res = { status: 403, body: { error: 'only admins can create/update other users' } }; return;
+        }
+        let existing = null;
+        try { existing = await table.getEntity(PARTITION, targetEmail); } catch (e) { if (e.statusCode !== 404) throw e; }
+        if (existing) {
+          // Preserve existing location/role — sign-in flow shouldn't change them from the client.
+          u.location = existing.location;
+          u.role = existing.role;
+        } else {
+          // First-time user: default to tech role at Erie until admin sets otherwise.
+          if (!u.role) u.role = 'tech';
+          if (!u.location) u.location = 'Erie';
+        }
+      }
       await table.upsertEntity(toEntity(u), 'Merge');
       context.res = { status: 200, body: { ok: true } };
       return;
@@ -62,6 +121,17 @@ module.exports = async function (context, req) {
 
     if (method === 'PUT' && email) {
       const updates = req.body || {};
+      const admin = await isAdminCaller(req);
+      // Only admins can change location or role. Non-admins can still bump their own name
+      // (e.g. display name refresh from Azure AD) — but nothing else.
+      if (!admin) {
+        const caller = callerEmail(req);
+        if (caller !== String(email).toLowerCase()) {
+          context.res = { status: 403, body: { error: 'only admins can modify other users' } }; return;
+        }
+        delete updates.location;
+        delete updates.role;
+      }
       const partial = { partitionKey: PARTITION, rowKey: String(email).toLowerCase() };
       ['name','location','role'].forEach(k => { if (updates[k] !== undefined) partial[k] = updates[k]; });
       if (Object.keys(partial).length <= 2) { context.res = { status: 400, body: { error: 'nothing to update' } }; return; }
@@ -72,6 +142,9 @@ module.exports = async function (context, req) {
     }
 
     if (method === 'DELETE' && email) {
+      if (!(await isAdminCaller(req))) {
+        context.res = { status: 403, body: { error: 'only admins can delete users' } }; return;
+      }
       try { await table.deleteEntity(PARTITION, String(email).toLowerCase()); }
       catch (e) { if (e.statusCode !== 404) throw e; }
       context.res = { status: 204 };
