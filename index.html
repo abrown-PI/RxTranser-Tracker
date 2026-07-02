@@ -4336,9 +4336,9 @@ function bindDraftInputs() {
   ['coldItem','ccPaladin','offeredTabz','payInStore'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('change', () => { state.draft[f==='ccPaladin'?'ccOnFileInPaladin':f] = el.checked; }); });
   // Convenience: switching billing method to Tabz auto-checks Offered Tabz, and switching
   // to Pay In Store / Program auto-checks Pay in Store. Reduces double-entry burden.
-  const billingSel = document.getElementById('f-billing');
-  if (billingSel) billingSel.addEventListener('change', () => {
-    const val = billingSel.value;
+  const billingSelPay = document.getElementById('f-billing');
+  if (billingSelPay) billingSelPay.addEventListener('change', () => {
+    const val = billingSelPay.value;
     const otChk = document.getElementById('f-offeredTabz');
     const psChk = document.getElementById('f-payInStore');
     if (val === 'HealNow' && otChk && !otChk.checked) { otChk.checked = true; state.draft.offeredTabz = true; }
