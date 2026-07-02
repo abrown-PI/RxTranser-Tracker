@@ -1259,7 +1259,9 @@ function updateSLABadge() {
     && t.anticipatedShipDate.slice(0,10) < today
     && !['Shipped','Delivered','Received','Canceled'].includes(t.status)
   ).length;
-  const count = breaches + questions + lateShip;
+  let rts = 0;
+  try { rts = returnToStockPending().length; } catch {}
+  const count = breaches + questions + lateShip + rts;
   const b = document.getElementById('slaBadge');
   if (!b) return;
   if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; }
@@ -1394,7 +1396,7 @@ function renderTransfers() {
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
             <td><code style="font-family:monospace;font-size:12px;font-weight:600;color:var(--primary-dark)">${t.id}</code></td>
-            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap"><span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.pickupAtPharmacy?'<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and ships to another pharmacy for patient pickup">📍 Non-transfer</span>':''}${isWeightLossTransfer(t)?'<span class="badge" style="font-size:10px;background:#ede9fe;color:#5b21b6" title="Weight-loss medication (auto-detected)">⚖ Weight Loss</span>':''}${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
+            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap"><span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${t.pickupAtPharmacy?'<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and ships to another pharmacy for patient pickup">📍 Non-transfer</span>':''}${isWeightLossTransfer(t)?'<span class="badge" style="font-size:10px;background:#ede9fe;color:#5b21b6" title="Weight-loss medication (auto-detected)">⚖ Weight Loss</span>':''}${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${(t.returnToStock && !t.returnToStock.acknowledgedAt)?`<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Return-to-stock requested by ${escapeHtml(t.returnToStock.requestedFrom||'?')} — waiting on ${escapeHtml(t.fillLocation)} to reverse">⤺ RTS pending</span>`:''}${(t.returnToStock && t.returnToStock.acknowledgedAt)?'<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Reversed in PK">✓ Reversed</span>':''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
             <td>${(() => {
               const drugs = (t.items || []).map(i => i.drug).filter(Boolean);
               if (t.isBulkPickup) return '<span class="item-sub">—</span>';
@@ -2589,6 +2591,78 @@ function openQuestionsForUser() {
   return { mine, asked };
 }
 
+// Return-to-stock requests: destination pharmacy flags a Received transfer as unpicked-up,
+// filling pharmacy sees the alert and reverses the Rxs in PK Software before acknowledging.
+// A transfer's returnToStock.acknowledgedAt is set once the fill side confirms; until then
+// it stays visible on the fill pharmacy's Alerts tab.
+function returnToStockPending() {
+  // Requests targeted at the current user's location (they need to reverse in PK Software).
+  const loc = CURRENT_USER.location;
+  return visibleTransfers().filter(t => {
+    if (!t.returnToStock || t.returnToStock.acknowledgedAt) return false;
+    // Fill pharmacy is who reverses in PK — target them.
+    return t.fillLocation === loc || (CURRENT_USER.role === 'admin' && loc === ALL_LOCATIONS);
+  });
+}
+function returnToStockMine() {
+  // Requests the current user or their location made — for status tracking.
+  const loc = CURRENT_USER.location;
+  return visibleTransfers().filter(t => {
+    if (!t.returnToStock) return false;
+    // Whoever raised it is at the destination (origin or pickup); show them the pending state.
+    const isFromMyLoc = t.returnToStock.requestedFrom === loc;
+    return isFromMyLoc && !t.returnToStock.acknowledgedAt;
+  });
+}
+function openReturnToStockPrompt(t) {
+  const destLoc = t.pickupAtPharmacy ? (t.pickupLocation||CURRENT_USER.location) : (t.originLocation||CURRENT_USER.location);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal" style="max-width:520px">
+    <div class="modal-header"><h2>⤺ Request Return to Stock</h2><button class="modal-close" id="rtsClose">×</button></div>
+    <div class="modal-body">
+      <p style="margin:0 0 10px 0">This will alert <strong>${escapeHtml(t.fillLocation)}</strong> to reverse the Rx(s) in PK Software. Only submit if the patient is not picking up.</p>
+      <div class="form-group"><label>Reason</label>
+        <select id="rts-reason">
+          <option value="Patient did not pick up">Patient did not pick up</option>
+          <option value="Patient refused">Patient refused</option>
+          <option value="Expired hold">Expired hold</option>
+          <option value="Wrong pharmacy — pickup elsewhere">Wrong pharmacy — pickup elsewhere</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Notes <span class="hint" style="text-transform:none;font-weight:400">(optional)</span></label>
+        <textarea id="rts-notes" placeholder="e.g. Patient moved / provider canceled" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;min-height:70px"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="rtsCancel">Cancel</button>
+      <button class="btn btn-primary" id="rtsSubmit">Submit request</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#rtsClose').onclick = close;
+  overlay.querySelector('#rtsCancel').onclick = close;
+  overlay.querySelector('#rtsSubmit').onclick = () => {
+    const reason = overlay.querySelector('#rts-reason').value;
+    const notes = overlay.querySelector('#rts-notes').value.trim();
+    t.returnToStock = {
+      requestedBy: CURRENT_USER.name,
+      requestedFrom: destLoc,
+      requestedAt: new Date().toISOString(),
+      reason, notes,
+      acknowledgedBy: null, acknowledgedAt: null
+    };
+    apiUpdateTransfer(t);
+    logAudit('rts_requested', 'transfer', t.id, { reason });
+    close();
+    alert(`Return-to-stock request sent to ${t.fillLocation}. They'll acknowledge from their Alerts tab once reversed in PK Software.`);
+    if (typeof renderModal === 'function') renderModal();
+    render();
+  };
+}
+
 function renderSLA() {
   const root = document.getElementById('view-sla');
   const issues = visibleTransfers().map(t => ({ t, sla: slaStatus(t) })).filter(x => x.sla.state === 'breach' || x.sla.state === 'warn').sort((a,b) => (a.sla.state==='breach'?0:1) - (b.sla.state==='breach'?0:1));
@@ -2600,7 +2674,9 @@ function renderSLA() {
     && t.anticipatedShipDate.slice(0,10) < todayISO
     && !['Shipped','Delivered','Received','Canceled'].includes(t.status)
   ).sort((a,b) => (a.anticipatedShipDate||'').localeCompare(b.anticipatedShipDate||''));
-  const totalAlerts = issues.length + mine.length + lateShipping.length;
+  const rtsPending = returnToStockPending();
+  const rtsMine = returnToStockMine();
+  const totalAlerts = issues.length + mine.length + lateShipping.length + rtsPending.length;
   root.innerHTML = `
     <div class="page-header"><div class="page-title">Alerts <span style="font-weight:400;color:var(--gray-500);font-size:14px">(${totalAlerts})</span></div></div>
 
@@ -2622,6 +2698,35 @@ function renderSLA() {
         </tr>`).join('')}
       </tbody></table>`}
     </div></div>
+
+    ${rtsPending.length ? `<div class="card"><div class="card-header">⤺ Return-to-Stock Requests (${rtsPending.length}) <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— reverse in PK Software, then acknowledge</span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:8px">The destination pharmacy flagged these transfers as unpicked-up. Reverse the Rx(s) in PK Software at ${escapeHtml(CURRENT_USER.location===ALL_LOCATIONS?'the fill location':CURRENT_USER.location)}, then click Acknowledge to clear the alert.</p>
+      <table style="box-shadow:none;font-size:13px"><thead><tr>
+        <th>Patient</th><th>Requested By</th><th>From Loc</th><th>Reason</th><th>Notes</th><th>When</th><th>Rxs</th><th></th>
+      </tr></thead><tbody>
+        ${rtsPending.map(t => `<tr style="background:#fef3c7" data-open-rts="${t.id}">
+          <td><strong>${escapeHtml(displayPatientName(t))}</strong></td>
+          <td>${escapeHtml(t.returnToStock.requestedBy||'?')}</td>
+          <td>${escapeHtml(t.returnToStock.requestedFrom||'?')}</td>
+          <td>${escapeHtml(t.returnToStock.reason||'—')}</td>
+          <td>${escapeHtml((t.returnToStock.notes||'').slice(0,80))}${(t.returnToStock.notes||'').length>80?'…':''}</td>
+          <td>${new Date(t.returnToStock.requestedAt).toLocaleString()}</td>
+          <td>${escapeHtml((t.items||[]).map(i=>i.rxNumber).filter(Boolean).join(', ')||'—')}</td>
+          <td style="white-space:nowrap"><button class="btn btn-primary btn-sm" data-ack-rts="${t.id}" title="Reversed in PK Software and no further action needed">✓ Acknowledged</button></td>
+        </tr>`).join('')}
+      </tbody></table>
+    </div></div>` : ''}
+
+    ${rtsMine.length ? `<div class="card"><div class="card-header">Your Return-to-Stock Requests <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— waiting on fill pharmacy to reverse</span></div><div class="card-body">
+      <table style="box-shadow:none;font-size:13px"><thead><tr><th>Patient</th><th>Fill Loc</th><th>Reason</th><th>Requested</th></tr></thead><tbody>
+        ${rtsMine.map(t => `<tr data-open-rts="${t.id}">
+          <td><strong>${escapeHtml(displayPatientName(t))}</strong></td>
+          <td>${escapeHtml(t.fillLocation)}</td>
+          <td>${escapeHtml(t.returnToStock.reason||'—')}</td>
+          <td>${new Date(t.returnToStock.requestedAt).toLocaleString()}</td>
+        </tr>`).join('')}
+      </tbody></table>
+    </div></div>` : ''}
 
     ${asked.length ? `<div class="card"><div class="card-header">Questions You've Asked <span class="item-sub" style="font-weight:400;text-transform:none;letter-spacing:0">— waiting on a reply</span></div><div class="card-body">
       <table style="box-shadow:none;font-size:13px"><thead><tr><th>Patient</th><th>Sent To</th><th>When</th><th>Question</th><th></th></tr></thead><tbody>
@@ -2697,6 +2802,23 @@ function renderSLA() {
     c.resolvedBy = CURRENT_USER.name;
     c.resolvedAt = new Date().toISOString();
     apiUpdateTransfer(t);
+    renderSLA();
+    render();
+  });
+  root.querySelectorAll('[data-open-rts]').forEach(tr => tr.onclick = e => {
+    if (e.target.closest('[data-ack-rts]')) return;
+    openTransfer(+tr.dataset.openRts);
+  });
+  root.querySelectorAll('[data-ack-rts]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const tid = +b.dataset.ackRts;
+    const t = TRANSFERS.find(x => x.id === tid);
+    if (!t || !t.returnToStock) return;
+    if (!confirm(`Acknowledge return-to-stock for ${displayPatientName(t)} — confirms the Rx(s) have been reversed in PK Software at ${t.fillLocation}.`)) return;
+    t.returnToStock.acknowledgedBy = CURRENT_USER.name;
+    t.returnToStock.acknowledgedAt = new Date().toISOString();
+    apiUpdateTransfer(t);
+    logAudit('rts_acknowledged', 'transfer', t.id, { reason: t.returnToStock.reason });
     renderSLA();
     render();
   });
@@ -4847,6 +4969,23 @@ function renderModal() {
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" style="margin-top:10px" id="editShipBtn">Edit ship / tracking</button>
+          ${(() => {
+            // Return-to-stock button. Visible when the transfer is at Received/Delivered and the
+            // current user is at the destination pharmacy (origin for Ship-to-Pharmacy, pickup loc
+            // for non-transfer). Hidden if already requested + still open (avoids double alerts).
+            if (!['Received','Delivered'].includes(t.status)) return '';
+            const destLoc = t.pickupAtPharmacy ? (t.pickupLocation||'') : (t.shipTo === 'Pharmacy' ? t.originLocation : '');
+            if (!destLoc) return '';
+            const isAtDest = CURRENT_USER.location === destLoc || (CURRENT_USER.role === 'admin' && CURRENT_USER.location === ALL_LOCATIONS);
+            if (!isAtDest) return '';
+            if (t.returnToStock && !t.returnToStock.acknowledgedAt) {
+              return `<div style="margin-top:10px;padding:8px 12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;font-size:12px"><strong>⤺ Return-to-stock requested</strong> — waiting on ${escapeHtml(t.fillLocation)} to reverse in PK Software.<div class="item-sub">Reason: ${escapeHtml(t.returnToStock.reason||'—')} · Requested by ${escapeHtml(t.returnToStock.requestedBy)} on ${new Date(t.returnToStock.requestedAt).toLocaleString()}</div></div>`;
+            }
+            if (t.returnToStock && t.returnToStock.acknowledgedAt) {
+              return `<div style="margin-top:10px;padding:8px 12px;background:#dcfce7;border:1px solid #16a34a;border-radius:6px;font-size:12px"><strong>✓ Reversed in PK</strong> — ${escapeHtml(t.returnToStock.acknowledgedBy)} on ${new Date(t.returnToStock.acknowledgedAt).toLocaleString()}</div>`;
+            }
+            return `<button class="btn btn-secondary btn-sm" style="margin-top:10px;background:#fef3c7;border-color:#fbbf24;color:#92400e" id="rtsBtn" title="Notify the fill pharmacy that this transfer wasn't picked up and needs reversed in PK Software">⤺ Request Return to Stock</button>`;
+          })()}
           </div>
 
           <div class="section"><div class="section-title">Attached Documents
@@ -4915,6 +5054,8 @@ function renderModal() {
     renderModal(); render();
   });
   document.getElementById('editShipBtn').addEventListener('click', () => editShip(t));
+  const rtsBtn = document.getElementById('rtsBtn');
+  if (rtsBtn) rtsBtn.addEventListener('click', () => openReturnToStockPrompt(t));
   // Mark Paid / Undo Paid buttons
   const paidBtnEl = document.getElementById('paidBtn');
   if (paidBtnEl) paidBtnEl.addEventListener('click', () => {
