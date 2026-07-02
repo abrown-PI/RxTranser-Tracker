@@ -1411,15 +1411,11 @@ function renderTransfers() {
             <td onclick="event.stopPropagation()"><select class="row-status status-select" data-status-id="${t.id}" style="font-size:11px;padding:3px 4px">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
             <td>${(() => {
               const ps = paymentStatusFor(t);
-              // The Offered-Tabz gate only applies to CC / Pay-in-Store billing. Show a green
-              // "Tabz offered" pill when the check passes, or a red "Ship blocked" when it
-              // doesn't. Tabz + Program billing are silent (no gate applies).
-              let extra = '';
-              if (paymentPlanRequired(t)) {
-                extra = t.offeredTabz
-                  ? '<div class="item-sub" style="font-size:9px;color:#166534;font-weight:700;margin-top:2px" title="Tabz offered to patient — cleared to ship">✓ Tabz offered</div>'
-                  : '<div class="item-sub" style="font-size:9px;color:var(--danger);font-weight:700;margin-top:2px" title="Credit Card / Pay in Store transfer without Offered Tabz confirmation — cannot ship">⚠ Ship blocked (needs Tabz offered)</div>';
-              }
+              // Green "Tabz offered" pill shown only when a CC/PayInStore transfer has the
+              // confirmation checked — informational only, no ship blocking.
+              const extra = (paymentPlanRequired(t) && t.offeredTabz)
+                ? '<div class="item-sub" style="font-size:9px;color:#166534;font-weight:700;margin-top:2px" title="Tabz offered to patient">✓ Tabz offered</div>'
+                : '';
               return `<span title="${escapeHtml(ps.tooltip||'')}" style="display:inline-block;padding:3px 8px;font-size:11px;font-weight:700;background:${ps.bg};color:${ps.color};border-radius:4px;white-space:nowrap">${escapeHtml(ps.label)}</span>${extra}`;
             })()}</td>
             <td>${(() => {
@@ -1550,14 +1546,6 @@ function renderTransfers() {
     if (!t) return;
     const newStatus = sel.value;
     const oldStatus = t.status;
-    // Payment-plan ship gate: don't let anything move to a shipped/received state
-    // without one of the payment intent boxes checked (Offered Tabz or Pay in store).
-    // Skips bulk-pickup orders since those are settled at the destination.
-    if (!paymentPlanGatePasses(t, newStatus, oldStatus)) {
-      alert('Cannot ship yet — Credit Card / Pay in Store transfers must have "Offered Tabz" checked first. Try switching billing to Tabz, or edit ✏️ and confirm Tabz was offered.');
-      sel.value = oldStatus;
-      return;
-    }
     if (newStatus === 'Canceled' && t.status !== 'Canceled') onTransferCanceled(t);
     t.status = newStatus;
     apiUpdateTransfer(t);
@@ -5049,11 +5037,6 @@ function renderModal() {
   document.getElementById('statusSelect').addEventListener('change', e => {
     const newStatus = e.target.value;
     const oldStatus = t.status;
-    if (!paymentPlanGatePasses(t, newStatus, oldStatus)) {
-      alert('Cannot ship yet — Credit Card / Pay in Store transfers must have "Offered Tabz" checked first. Try switching billing to Tabz, or edit ✏️ and confirm Tabz was offered.');
-      e.target.value = oldStatus;
-      return;
-    }
     if (newStatus === 'Canceled' && oldStatus !== 'Canceled') {
       onTransferCanceled(t);
     }
