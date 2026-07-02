@@ -7862,23 +7862,31 @@ async function applyMsalAccount(account) {
   // Location switcher (guarded)
   const locSel = document.getElementById('locationSwitcher');
   if (!locSel) return; // navbar not present? still treat sign-in as successful
-  // Admin-only "All locations" option — restores the see-everything view (the default before
-  // the per-location filtering was added). Techs and managers don't see it.
-  const allLocOpt = (user.role === 'admin')
-    ? `<option value="${ALL_LOCATIONS}" ${user.location === ALL_LOCATIONS ? 'selected' : ''}>★ All locations (admin)</option>`
-    : '';
-  locSel.innerHTML = allLocOpt + LOCATIONS.map(l => `<option value="${l}" ${l===user.location?'selected':''}>${l}</option>`).join('');
-  locSel.onchange = () => {
-    user.location = locSel.value;
-    localStorage.setItem('userLocation_' + email, locSel.value);
-    updateNextShipmentBanner();
-    // Persist the change to backend so it survives across browsers + devices
-    fetch('/api/users/' + encodeURIComponent(email), {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ location: locSel.value })
-    }).catch(() => {});
-    applyRoleVisibility(); render();
-  };
+  // Only admins can switch across locations (or into the ★ All locations sentinel). Techs +
+  // managers are pinned to whichever location Admin set for them in Users & Access — the
+  // dropdown shows just that one location and is disabled so they can't reassign themselves.
+  if (user.role === 'admin') {
+    const allLocOpt = `<option value="${ALL_LOCATIONS}" ${user.location === ALL_LOCATIONS ? 'selected' : ''}>★ All locations (admin)</option>`;
+    locSel.innerHTML = allLocOpt + LOCATIONS.map(l => `<option value="${l}" ${l===user.location?'selected':''}>${l}</option>`).join('');
+    locSel.disabled = false;
+    locSel.title = 'Switch your location';
+    locSel.onchange = () => {
+      user.location = locSel.value;
+      localStorage.setItem('userLocation_' + email, locSel.value);
+      updateNextShipmentBanner();
+      fetch('/api/users/' + encodeURIComponent(email), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: locSel.value })
+      }).catch(() => {});
+      applyRoleVisibility(); render();
+    };
+  } else {
+    // Show only the user's assigned location and disable the dropdown.
+    locSel.innerHTML = `<option value="${user.location}" selected>${user.location}</option>`;
+    locSel.disabled = true;
+    locSel.title = 'Your location is set by an admin — contact Ashley if this is wrong';
+    locSel.onchange = null;
+  }
   applyRoleVisibility();
   render();
 }
