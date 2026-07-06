@@ -155,7 +155,7 @@ module.exports = async function (context, req) {
 const DEFAULT_LOCATION_EMAILS = {
   'Erie': 'erie@pharmacyinnovations.net',
   'Greenville': 'greenville@pharmacyinnovations.net',
-  'Houston': 'houston@pharmacyinnovations.net',
+  'Spring': 'houston@pharmacyinnovations.net',
   'Jamestown': 'jamestown@pharmacyinnovations.net',
   'Virginia Beach': 'vbeach@pharmacyinnovations.net',
   'Seminole': 'stpete@pharmacyinnovations.net'

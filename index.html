@@ -288,7 +288,7 @@ if (window.pdfjsLib) {
 // =====================================================================
 // MOCK DATA — replace with SharePoint API calls later
 // =====================================================================
-const LOCATIONS = ['Erie', 'Lancaster', 'Greenville', 'Houston', 'Tucson', 'Flower Mound', 'Denton', 'Corinth', 'Jamestown', 'Virginia Beach', 'Seminole'];
+const LOCATIONS = ['Erie', 'Lancaster', 'Greenville', 'Spring', 'Tucson', 'Flower Mound', 'Denton', 'Corinth', 'Jamestown', 'Virginia Beach', 'Seminole'];
 // Pseudo-destination label for the Packing Checklist (used in both Reports and the Shipments
 // shortcut button). Patient ship-tos group under this label since they have no pharmacy destination.
 const CHK_PATIENT = 'Patient (Direct Ship)';
@@ -296,7 +296,7 @@ const CHK_PATIENT = 'Patient (Direct Ship)';
 // Short pharmacy codes used in bulk shipment IDs (BULK-YYYYMMDD-CODE-NNN).
 // Sourced from the canonical PI pharmacy roster.
 const PHARMACY_CODES = {
-  'Erie': 'ER', 'Lancaster': 'CPL', 'Greenville': 'GV', 'Houston': 'HST',
+  'Erie': 'ER', 'Lancaster': 'CPL', 'Greenville': 'GV', 'Spring': 'SPR',
   'Tucson': 'TUC', 'Flower Mound': 'FM', 'Denton': 'DEN', 'Corinth': 'COR',
   'Jamestown': 'JMST', 'Virginia Beach': 'VB', 'Seminole': 'SEM'
 };
@@ -307,7 +307,7 @@ let PHARMACY_ADDRESSES = {
   'Erie':           { addr1: '2936 W. 17th Street',         addr2: '',           city: 'Erie',           state: 'PA', zip: '16505' },
   'Lancaster':      { addr1: '902 N. Duke Street',          addr2: '',           city: 'Lancaster',      state: 'PA', zip: '17602' },
   'Greenville':     { addr1: '640 Congaree Rd',             addr2: '',           city: 'Greenville',     state: 'SC', zip: '29607' },
-  'Houston':        { addr1: '8687 Louetta Rd',             addr2: 'Suite 150',  city: 'Spring',         state: 'TX', zip: '77379' },
+  'Spring':         { addr1: '8687 Louetta Rd',             addr2: 'Suite 150',  city: 'Spring',         state: 'TX', zip: '77379' },
   'Tucson':         { addr1: '2729 E Speedway Blvd',        addr2: '',           city: 'Tucson',         state: 'AZ', zip: '85716' },
   'Flower Mound':   { addr1: '',                            addr2: '',           city: 'Flower Mound',   state: 'TX', zip: '' },
   'Denton':         { addr1: '',                            addr2: '',           city: 'Denton',         state: 'TX', zip: '' },

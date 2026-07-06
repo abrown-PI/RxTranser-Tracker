@@ -318,7 +318,7 @@ add_bullet('show a yellow warning pill in the Transfers table and appear in Phar
 
 # ===== LOCATIONS =====
 doc.add_heading('Locations', level=2)
-add_body('Erie  \u2022  Lancaster  \u2022  Greenville  \u2022  Houston  \u2022  Tucson  \u2022  Flower Mound  \u2022  Denton  \u2022  Corinth  \u2022  Jamestown  \u2022  Virginia Beach  \u2022  Seminole')
+add_body('Erie  \u2022  Lancaster  \u2022  Greenville  \u2022  Spring  \u2022  Tucson  \u2022  Flower Mound  \u2022  Denton  \u2022  Corinth  \u2022  Jamestown  \u2022  Virginia Beach  \u2022  Seminole')
 
 # -- Footer --
 doc.add_paragraph()
