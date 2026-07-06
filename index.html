@@ -4331,16 +4331,21 @@ function renderDraftItems() {
 
 function bindDraftInputs() {
   const fields = ['patientFirstName','patientLastName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote','patientPrice'];
-  fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => {
-    state.draft[f] = el.value;
-    // Once the user has typed into the anticipated ship date field, treat it as a
-    // manual override so subsequent form changes (or reopens) don't clobber it.
-    if (f === 'anticipatedShipDate') state.draft.antShipManuallyEdited = true;
-    if (f === 'patientFirstName' || f === 'patientLastName') {
-      state.draft.patientName = formatPatientName(state.draft.patientFirstName, state.draft.patientLastName);
-      renderDrugWarningBox();
-    }
-  }); });
+  fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) {
+    // Listen to both 'input' and 'change' — Chrome's date-picker popup only fires
+    // 'change' when the user clicks a day (no 'input' event), so a plain 'input'
+    // listener would silently miss picked dates and save the stale value.
+    const sync = () => {
+      state.draft[f] = el.value;
+      if (f === 'anticipatedShipDate') state.draft.antShipManuallyEdited = true;
+      if (f === 'patientFirstName' || f === 'patientLastName') {
+        state.draft.patientName = formatPatientName(state.draft.patientFirstName, state.draft.patientLastName);
+        renderDrugWarningBox();
+      }
+    };
+    el.addEventListener('input', sync);
+    el.addEventListener('change', sync);
+  } });
 
   // Ship address auto-management. Two destinations populate from a pharmacy:
   //   1) Ship To = Pharmacy (regular transfer back to origin)
@@ -4707,6 +4712,14 @@ function submitDraft() {
   // Canonicalize drug names — turns Florida's "N. METHYLCOBALAMIN/..." and
   // injection-kit shorthand into the canonical PRELOADED_DRUGS form before save.
   (d.items || []).forEach(it => { it.drug = canonicalizeDrugName(it.drug); });
+
+  // Final DOM sync for date inputs — Chrome's date picker doesn't always fire
+  // 'input' when the user clicks a day, so whatever's currently visible in the
+  // ship-date field wins here. Same for the appointment date for consistency.
+  const antShipEl = document.getElementById('f-antShip');
+  if (antShipEl) d.anticipatedShipDate = antShipEl.value || '';
+  const apptEl = document.getElementById('f-apptDate');
+  if (apptEl && !apptEl.disabled) d.appointmentDate = apptEl.value || '';
 
   // Edit mode: update the existing transfer in place
   if (state.editingTransferId) {
