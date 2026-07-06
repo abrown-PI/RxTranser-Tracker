@@ -418,6 +418,16 @@ function canSeeTransfer(t) {
   if (t.pickupAtPharmacy && t.pickupLocation === loc) return true;
   return false;
 }
+// "Effective origin" for a transfer. For non-transfer pickup orders the team
+// treats the pickup destination as the pharmacy the order belongs to, so use
+// that in filters and in the "From → Fill" display everywhere. Real transfers
+// (no pickup) fall back to the stored originLocation as before.
+function effectiveOriginLocation(t) {
+  return (t.pickupAtPharmacy && t.pickupLocation) ? t.pickupLocation : t.originLocation;
+}
+function originFillDisplay(t) {
+  return `${escapeHtml(effectiveOriginLocation(t) || '')} → ${escapeHtml(t.fillLocation || '')}`;
+}
 function canSeeShipment(s) {
   const loc = CURRENT_USER.location;
   if (CURRENT_USER.role === 'admin' && loc === ALL_LOCATIONS) return true;
@@ -1287,13 +1297,7 @@ function renderTransfers() {
       const isPatientShip = t.shipTo === 'Patient' && !t.pickupAtPharmacy;
       const completedState = isPatientShip ? 'Delivered' : 'Received';
       if (t.status === completedState && state.filterStatus !== completedState) return false;
-    }    if (state.filterOrigin) {
-      // Effective origin — for non-transfer pickup orders the pickup destination
-      // is what the team thinks of as "the pharmacy this order belongs to", so
-      // let the origin filter match on either the real origin OR the pickup dest.
-      const effectiveOrigin = (t.pickupAtPharmacy && t.pickupLocation) ? t.pickupLocation : t.originLocation;
-      if (effectiveOrigin !== state.filterOrigin) return false;
-    }
+    }    if (state.filterOrigin && effectiveOriginLocation(t) !== state.filterOrigin) return false;
     if (state.filterFill && t.fillLocation !== state.filterFill) return false;
     if (state.filterType && (t.transferType || 'New') !== state.filterType) return false;
     if (state.filterPaid === 'Paid' && t.paid !== 'Paid') return false;
@@ -1412,7 +1416,7 @@ function renderTransfers() {
               const more = drugs.length > 1 ? `<div class="item-sub">+${drugs.length-1} more</div>` : '';
               return `<span title="${escapeHtml(drugs.join(', '))}">${escapeHtml(truncated)}</span>${more}`;
             })()}</td>
-            <td>${t.pickupAtPharmacy ? `${escapeHtml(t.pickupLocation||'?')} → ${escapeHtml(t.fillLocation)}<div style="margin-top:2px"><span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and is shipped to another pharmacy for patient pickup">📍 Non-transfer</span></div>` : `${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}`}</td>
+            <td>${originFillDisplay(t)}${t.pickupAtPharmacy ? '<div style="margin-top:2px"><span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and is shipped to another pharmacy for patient pickup">📍 Non-transfer</span></div>' : ''}</td>
             <td>${escapeHtml(t.shipTo)}${t.pickupAtPharmacy?`<div class="item-sub" style="color:var(--primary-dark);font-weight:600">${escapeHtml(t.pickupLocation||'?')}${t.isBulkPickup?' · BULK':''}</div>`:(t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:'')}</td>
             <td onclick="event.stopPropagation()"><select class="row-status status-select" data-status-id="${t.id}" style="font-size:11px;padding:3px 4px">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
             <td>${(() => {
@@ -1639,7 +1643,7 @@ function buildSummarySheetHtml(t) {
     </div>
     <div style="text-align:right">
       <div class="patient">${escapeHtml(t.patientName||'(unnamed)')}</div>
-      <div class="meta">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)} · <span class="badge-pill" style="background:#cfdbed;color:#233f76">${escapeHtml(t.transferType==='Refill'?'Refill':'New Rx')}</span>${t.coldItem?' · <span class="badge-pill" style="background:#dbeafe;color:#1e40af">Cold</span>':''}</div>
+      <div class="meta">${originFillDisplay(t)} · <span class="badge-pill" style="background:#cfdbed;color:#233f76">${escapeHtml(t.transferType==='Refill'?'Refill':'New Rx')}</span>${t.coldItem?' · <span class="badge-pill" style="background:#dbeafe;color:#1e40af">Cold</span>':''}</div>
       <div class="meta">Submitted ${fmtDate(t.createdAt)} by ${escapeHtml(t.submittedBy||'—')}</div>
     </div>
   </div>
@@ -1704,7 +1708,7 @@ function buildSummarySheetHtml(t) {
 //      transfer.pageImages (per-page PNGs in blob storage), filtered by kind
 // Each doc gets the standard transfer-ID stamp metadata for the print banner.
 function getPrintableDocsForTransfer(t) {
-  const meta = `${t.originLocation} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`;
+  const meta = `${effectiveOriginLocation(t)} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`;
   const stampCommon = { transferId: t.id, patientName: t.patientName, transferMeta: meta };
   const docs = [];
   const resolveSrc = (f) => f.dataUrl || (f.blobName ? blobUrl(f.blobName) : null);
@@ -1895,7 +1899,7 @@ function openAddToTodayPicker() {
                 return `<tr>
                   <td style="padding:6px 8px"><strong>${escapeHtml(t.patientName||'(unnamed)')}</strong> <span class="item-sub">#${t.id}</span></td>
                   <td style="padding:6px 8px">${escapeHtml(drugs||'—')}</td>
-                  <td style="padding:6px 8px">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+                  <td style="padding:6px 8px">${originFillDisplay(t)}</td>
                   <td style="padding:6px 8px"><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
                   <td style="padding:6px 8px">${fmtDate(t.anticipatedShipDate)||'—'}</td>
                   <td style="padding:6px 8px;text-align:right">
@@ -1998,7 +2002,7 @@ function renderStats() {
 
   // Apply filters
   const scope = visibleTransfers().filter(t => {
-    if (f.origin && t.originLocation !== f.origin) return false;
+    if (f.origin && effectiveOriginLocation(t) !== f.origin) return false;
     if (f.fill && t.fillLocation !== f.fill) return false;
     if (f.status && t.status !== f.status) return false;
     if (f.type && (t.transferType || 'New') !== f.type) return false;
@@ -2257,7 +2261,7 @@ function renderStats() {
                 <td style="padding:6px 8px;font-family:monospace">${t.id}</td>
                 <td style="padding:6px 8px"><strong>${escapeHtml(displayPatientName(t))}</strong>${t.coldItem?' ❄':''}</td>
                 <td style="padding:6px 8px">${escapeHtml(drugs)}</td>
-                <td style="padding:6px 8px">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+                <td style="padding:6px 8px">${originFillDisplay(t)}</td>
                 <td style="padding:6px 8px">${escapeHtml(t.shipTo)}</td>
                 <td style="padding:6px 8px"><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
                 <td style="padding:6px 8px">${(t.transferType==='Refill')?'<span class="badge badge-verified" style="font-size:10px">Refill</span>':'<span class="badge badge-new" style="font-size:10px">New</span>'}</td>
@@ -2773,7 +2777,7 @@ function renderSLA() {
       </tr></thead><tbody>
         ${mine.map(({t,q}) => `<tr style="background:var(--warning-bg)" data-open-q="${t.id}">
           <td><strong>${escapeHtml(displayPatientName(t))}</strong></td>
-          <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+          <td>${originFillDisplay(t)}</td>
           <td>${escapeHtml(q.author)}</td>
           <td>${new Date(q.ts).toLocaleString()}</td>
           <td>${escapeHtml((q.body||'').replace(/^❓\s*/,'').slice(0,120))}${(q.body||'').length>120?'…':''}</td>
@@ -2838,7 +2842,7 @@ function renderSLA() {
           const daysLate = Math.floor((Date.parse(todayISO) - Date.parse(t.anticipatedShipDate.slice(0,10))) / 86400000);
           return `<tr style="background:var(--danger-bg)">
             <td><strong>${escapeHtml(displayPatientName(t)||'(bulk pickup)')}</strong></td>
-            <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+            <td>${originFillDisplay(t)}</td>
             <td><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
             <td>${fmtDate(t.anticipatedShipDate)}</td>
             <td><strong style="color:var(--danger)">${daysLate}d</strong></td>
@@ -5016,7 +5020,7 @@ function renderModal() {
         <div class="modal-header">
           <div>
             <div class="modal-title">${escapeHtml(displayPatientName(t))}</div>
-            <div class="item-sub">${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)} · submitted ${fmtDate(t.createdAt)} by ${escapeHtml(t.submittedBy)}</div>
+            <div class="item-sub">${originFillDisplay(t)} · submitted ${fmtDate(t.createdAt)} by ${escapeHtml(t.submittedBy)}</div>
           </div>
           <button class="modal-close" id="modalClose">&times;</button>
         </div>
@@ -5238,7 +5242,7 @@ function renderModal() {
     // Resolve dataUrl OR blobName — most CC Auth uploads land as blobName-only after the
     // persistence layer strips dataUrl. Passing only t.ccForm.dataUrl was producing blanks.
     const src = t.ccForm.dataUrl || (t.ccForm.blobName ? blobUrl(t.ccForm.blobName) : null);
-    printDocs([{ transferId: t.id, patientName: t.patientName, transferMeta: `${t.originLocation} → ${t.fillLocation}`, title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: src }]);
+    printDocs([{ transferId: t.id, patientName: t.patientName, transferMeta: `${effectiveOriginLocation(t)} → ${t.fillLocation}`, title: `Credit Card Auth — ${t.patientName}`, name: t.ccForm.name, type: t.ccForm.type, dataUrl: src }]);
   });
   const printBlankCCBtn = document.getElementById('modal-printCCBlank');
   if (printBlankCCBtn) printBlankCCBtn.addEventListener('click', () => printCCAuthForm(t));
@@ -5277,7 +5281,7 @@ function renderModal() {
   if (printSummaryBtn) printSummaryBtn.addEventListener('click', () => printDocs([{
     summaryHtml: buildSummarySheetHtml(t),
     transferId: t.id, patientName: t.patientName,
-    transferMeta: `${t.originLocation} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`,
+    transferMeta: `${effectiveOriginLocation(t)} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`,
     title: 'Transfer Summary'
   }]));
   document.getElementById('editTransferBtn').addEventListener('click', () => {
@@ -7057,7 +7061,7 @@ function renderRefillTab() {
           : `<table style="box-shadow:none;font-size:13px"><thead><tr><th>Patient</th><th>Origin → Fill</th><th>Drugs</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
               ${matches.map(t => `<tr>
                 <td><strong>${escapeHtml(displayPatientName(t))}</strong>${t.transferType==='Refill'?' <span class="badge badge-verified" style="font-size:10px">Refill</span>':''}</td>
-                <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+                <td>${originFillDisplay(t)}</td>
                 <td>${escapeHtml(t.items.map(i=>i.drug).filter(Boolean).join(', ').slice(0,80) || '(no drugs listed)')}</td>
                 <td>${fmtDate(t.createdAt)}</td>
                 <td><span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span></td>
@@ -7264,7 +7268,7 @@ function renderActionItems() {
       </tr></thead><tbody>
         ${held.map(t => `<tr style="background:var(--warning-bg)">
           <td><strong>${escapeHtml(displayPatientName(t)||'(bulk pickup)')}</strong></td>
-          <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+          <td>${originFillDisplay(t)}</td>
           <td><span class="badge ${STATUS_BADGE[t.status]}" style="font-size:10px">${t.status}</span></td>
           <td>${fmtDate(t.createdAt)}</td>
           <td><button class="btn btn-primary btn-sm" data-open-held="${t.id}">Open</button></td>
@@ -7306,7 +7310,7 @@ function renderActionItems() {
       </tr></thead><tbody>
         ${canceled.map(t => `<tr style="background:var(--danger-bg)">
           <td><strong>${escapeHtml(displayPatientName(t))}</strong>${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}</td>
-          <td>${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</td>
+          <td>${originFillDisplay(t)}</td>
           <td>${escapeHtml(t.canceledBy||'—')}</td>
           <td>${t.canceledAt?new Date(t.canceledAt).toLocaleString():'—'}</td>
           <td>${t.items.length} Rx — ${escapeHtml(t.items.map(i=>i.drug).filter(Boolean).join(', ').slice(0,80))}</td>
@@ -8530,7 +8534,7 @@ function openAskQuestionModal(transferId) {
   if (t.originLocation && t.originLocation !== CURRENT_USER.location) otherSides.add(t.originLocation);
   if (t.fillLocation && t.fillLocation !== CURRENT_USER.location) otherSides.add(t.fillLocation);
   root.innerHTML = `<div class="modal-overlay" id="aqOverlay"><div class="modal" style="max-width:560px">
-    <div class="modal-header"><div><div class="modal-title">Ask a Question</div><div class="item-sub">About: ${escapeHtml(displayPatientName(t))} · ${escapeHtml(t.originLocation)} → ${escapeHtml(t.fillLocation)}</div></div><button class="modal-close" id="aqClose">&times;</button></div>
+    <div class="modal-header"><div><div class="modal-title">Ask a Question</div><div class="item-sub">About: ${escapeHtml(displayPatientName(t))} · ${originFillDisplay(t)}</div></div><button class="modal-close" id="aqClose">&times;</button></div>
     <div class="modal-body">
       <div class="form-group"><label>Your question</label><textarea id="aq-body" rows="4" placeholder="What do you need to know about this transfer?" style="width:100%;padding:9px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;min-height:90px"></textarea></div>
       <div style="margin-top:10px;padding:10px 12px;background:var(--primary-bg);border-radius:6px;font-size:12px">
