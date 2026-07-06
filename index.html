@@ -3741,8 +3741,11 @@ function renderNewForm() {
           <div class="hint">When set, the ship date works backwards from the appointment so the box arrives in time.</div>
         </div>
         <div class="form-group">
-          <label>Anticipated Ship Date <span class="hint" style="text-transform:none;font-weight:400">(auto-calculated)</span></label>
-          <input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" />
+          <label>Anticipated Ship Date <span class="hint" style="text-transform:none;font-weight:400">(auto-calculated — type to override)</span></label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="date" id="f-antShip" value="${escapeHtml(d.anticipatedShipDate)}" style="flex:1" />
+            <button type="button" id="f-antShipReset" class="btn btn-secondary" style="padding:6px 10px;font-size:12px" title="Clear your manual override and let the appointment date drive the calculation again">Recalculate</button>
+          </div>
           <div class="hint" id="f-antShipNote"></div>
         </div>
         <div class="form-group"><label>Patient Price <span class="hint" style="text-transform:none;font-weight:400">(optional)</span></label><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--gray-500)">$</span><input id="f-patientPrice" value="${escapeHtml(d.patientPrice||'')}" placeholder="0.00" inputmode="decimal" style="flex:1" /></div></div>
@@ -4330,6 +4333,9 @@ function bindDraftInputs() {
   const fields = ['patientFirstName','patientLastName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote','patientPrice'];
   fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('input', () => {
     state.draft[f] = el.value;
+    // Once the user has typed into the anticipated ship date field, treat it as a
+    // manual override so subsequent form changes (or reopens) don't clobber it.
+    if (f === 'anticipatedShipDate') state.draft.antShipManuallyEdited = true;
     if (f === 'patientFirstName' || f === 'patientLastName') {
       state.draft.patientName = formatPatientName(state.draft.patientFirstName, state.draft.patientLastName);
       renderDrugWarningBox();
@@ -4392,10 +4398,12 @@ function bindDraftInputs() {
   //   Ship-to-Pharmacy + no appt:   next destination shipping day from today
   //   Ship-to-Patient + appt date:  appt date - 2 days (typical 2-day FedEx)
   //   Ship-to-Patient + no appt:    today + 1 day
-  // Always overwrites — the field is auto-managed. User can still type a manual value
-  // but it will be replaced on the next relevant change.
+  // Auto-fills from the appointment date, but bails once the user has manually
+  // edited the field — otherwise reopening the edit form or bumping any related
+  // field would silently overwrite the ship date the team just chose.
   function recalcAntShip() {
     const d = state.draft;
+    if (d.antShipManuallyEdited) return;
     const apptISO = d.appointmentDate || '';
     const apptDate = apptISO ? new Date(apptISO + 'T12:00:00') : null;
     const noteEl = document.getElementById('f-antShipNote');
@@ -4509,6 +4517,15 @@ function bindDraftInputs() {
   });
   if (bulkCountEl) bulkCountEl.addEventListener('input', () => { state.draft.bulkScriptCount = bulkCountEl.value; });
   if (bulkDescEl) bulkDescEl.addEventListener('input', () => { state.draft.bulkDescription = bulkDescEl.value; });
+
+  // Recalculate button — clears the manual-override flag so the appointment date can
+  // drive the ship date again. Handy if the user typed something and then wanted to
+  // fall back to the auto value without reloading the form.
+  const antShipReset = document.getElementById('f-antShipReset');
+  if (antShipReset) antShipReset.addEventListener('click', () => {
+    state.draft.antShipManuallyEdited = false;
+    recalcAntShip();
+  });
 
   // Run once on form open so the date is populated on a fresh draft
   recalcAntShip();
@@ -4883,6 +4900,9 @@ function editTransferDirectly(id) {
   const t = TRANSFERS.find(x => x.id === id);
   if (!t) return;
   state.draft = JSON.parse(JSON.stringify(t));
+  // Preserve the ship date the team already saved on this transfer — otherwise
+  // recalcAntShip fires on form open and overwrites it from the appointment date.
+  if (state.draft.anticipatedShipDate) state.draft.antShipManuallyEdited = true;
   state.editingTransferId = t.id;
   closeModal();
   document.querySelector('.tab[data-tab=new]').click();
@@ -5245,6 +5265,9 @@ function renderModal() {
   document.getElementById('editTransferBtn').addEventListener('click', () => {
     // Deep-clone the transfer into the draft so user can cancel without affecting the original
     state.draft = JSON.parse(JSON.stringify(t));
+    // Same reason as editTransferDirectly — keep the saved ship date sticky so the
+    // auto-recalc doesn't wipe it when the form opens.
+    if (state.draft.anticipatedShipDate) state.draft.antShipManuallyEdited = true;
     state.editingTransferId = t.id;
     state.newMode = 'single';
     // Direct-clear (see refillBtn handler for why we don't use closeModal here).
