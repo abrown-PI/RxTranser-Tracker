@@ -433,6 +433,33 @@ function canSeeShipment(s) {
   if (CURRENT_USER.role === 'admin' && loc === ALL_LOCATIONS) return true;
   return s.fromLocation === loc || s.toLocation === loc;
 }
+// Per-viewer completion rules. A transfer disappears from the main worklist once it's
+// "complete" for the viewer's pharmacy — fill pharmacies close out at Shipped, receiving
+// pharmacies close out at Received, patient direct-ships close out at Shipped, canceled
+// close out for everyone immediately.
+const FILL_COMPLETE_STATUSES = ['Shipped', 'Delivered', 'Received', 'Canceled'];
+const RECEIVING_COMPLETE_STATUSES = ['Received', 'Canceled'];
+function receivingLocation(t) {
+  if (t.pickupAtPharmacy) return t.pickupLocation || '';
+  if (t.shipTo === 'Pharmacy') return t.originLocation || '';
+  return ''; // Patient direct-ship — no receiving pharmacy
+}
+function completionViewerLocation() {
+  const loc = CURRENT_USER && CURRENT_USER.location;
+  if (loc && loc !== ALL_LOCATIONS) return loc;
+  // Admin viewing All-locations: honor the Origin filter if set, otherwise treat as no viewer
+  return state.filterOrigin || '';
+}
+function isCompleteForViewer(t) {
+  if (t.status === 'Canceled') return true;
+  const receiving = receivingLocation(t);
+  const viewer = completionViewerLocation();
+  if (!receiving) return FILL_COMPLETE_STATUSES.includes(t.status);
+  if (!viewer) return RECEIVING_COMPLETE_STATUSES.includes(t.status);
+  if (viewer === t.fillLocation) return FILL_COMPLETE_STATUSES.includes(t.status);
+  if (viewer === receiving) return RECEIVING_COMPLETE_STATUSES.includes(t.status);
+  return RECEIVING_COMPLETE_STATUSES.includes(t.status);
+}
 // Returns a real pharmacy location for places that need a defaultable origin/from value —
 // when the admin is in "All locations" mode, fall back to the first location rather than
 // emitting "All locations" as a form value.
@@ -544,7 +571,7 @@ const nextId = () => ++_nextId;
 // they were halfway through the Shipments page. Falls back to 'transfers' if nothing saved.
 const _savedTab = (() => { try { return localStorage.getItem('lastTab') || 'transfers'; } catch { return 'transfers'; } })();
 const VALID_TABS = ['transfers','new','refill','actions','shipments','sla','stats','admin'];
-const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'transfers', filterStatus: '', showCompleted: false, filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterWeightLoss: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
+const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'transfers', filterStatus: '', completedView: 'active', filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterWeightLoss: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
 
 // Default-view persistence: stores a snapshot of the transfer-list filters in
 // localStorage so a user's preferred view survives reloads + sessions on the
@@ -558,7 +585,7 @@ function saveDefaultView() {
   try {
     const snap = {
       filterStatus: state.filterStatus,
-      showCompleted: !!state.showCompleted,
+      completedView: state.completedView || 'active',
       filterOrigin: state.filterOrigin,
       filterFill: state.filterFill,
       filterType: state.filterType,
@@ -582,6 +609,11 @@ function loadDefaultView() {
     const raw = localStorage.getItem(_defaultViewKey());
     if (!raw) return;
     const snap = JSON.parse(raw);
+    // Migrate legacy showCompleted (boolean) → completedView (string)
+    if (typeof snap.showCompleted !== 'undefined' && !snap.completedView) {
+      snap.completedView = snap.showCompleted ? 'all' : 'active';
+      delete snap.showCompleted;
+    }
     Object.assign(state, snap);
   } catch {}
 }
@@ -1287,17 +1319,16 @@ function renderTransfers() {
   if (!state.sortBy) state.sortBy = 'dateDesc';
   const filtered = visibleTransfers().filter(t => {
     if (state.filterStatus && t.status !== state.filterStatus) return false;
-    // Hide completed by default — they're done and clutter the active worklist.
-    // "Complete" depends on ship-to:
-    //   Pharmacy / pickup → Received (someone has to manually check the box in)
-    //   Patient direct    → Delivered (FedEx confirms delivery, no in-app receive step)
-    // The Show completed orders checkbox bypasses both. The status dropdown filter also bypasses
-    // so you can explicitly look at one of these states.
-    if (!state.showCompleted) {
-      const isPatientShip = t.shipTo === 'Patient' && !t.pickupAtPharmacy;
-      const completedState = isPatientShip ? 'Delivered' : 'Received';
-      if (t.status === completedState && state.filterStatus !== completedState) return false;
-    }    if (state.filterOrigin && effectiveOriginLocation(t) !== state.filterOrigin) return false;
+    // Per-viewer completion — see isCompleteForViewer for the rules. Fill pharmacies close
+    // out at Shipped; receiving pharmacies close out at Received; patient direct-ships and
+    // canceled close out for everyone. Explicit status filter bypasses the rule so a user
+    // can drill into a specific state without flipping the toggle.
+    if (state.completedView === 'complete') {
+      if (!isCompleteForViewer(t)) return false;
+    } else if (state.completedView === 'active') {
+      if (!state.filterStatus && isCompleteForViewer(t)) return false;
+    } // 'all' → no completion filter
+    if (state.filterOrigin && effectiveOriginLocation(t) !== state.filterOrigin) return false;
     if (state.filterFill && t.fillLocation !== state.filterFill) return false;
     if (state.filterType && (t.transferType || 'New') !== state.filterType) return false;
     if (state.filterPaid === 'Paid' && t.paid !== 'Paid') return false;
@@ -1365,10 +1396,11 @@ function renderTransfers() {
       </select>
       <span style="width:1px;height:24px;background:var(--gray-300);margin:0 4px"></span>
       <select id="f-status"><option value="">All statuses</option>${STATUSES.map(s=>`<option ${s===state.filterStatus?'selected':''}>${s}</option>`).join('')}</select>
-      <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-700);cursor:pointer" title="When unchecked, transfers in Received status are hidden from the list">
-        <input type="checkbox" id="f-showCompleted" ${state.showCompleted?'checked':''} />
-        Show completed
-      </label>
+      <div style="display:inline-flex;border:1px solid var(--gray-300);border-radius:4px;overflow:hidden" title="Active hides transfers that are complete for your pharmacy. Fill side closes at Shipped; receiving side closes at Received. Canceled = complete for everyone.">
+        <button type="button" class="btn ${(!state.completedView||state.completedView==='active')?'btn-primary':'btn-secondary'} btn-sm" id="f-viewActive" style="border-radius:0;border:0;font-size:11px;padding:4px 10px">Active</button>
+        <button type="button" class="btn ${state.completedView==='complete'?'btn-primary':'btn-secondary'} btn-sm" id="f-viewComplete" style="border-radius:0;border:0;font-size:11px;padding:4px 10px">Complete</button>
+        <button type="button" class="btn ${state.completedView==='all'?'btn-primary':'btn-secondary'} btn-sm" id="f-viewAll" style="border-radius:0;border:0;font-size:11px;padding:4px 10px">All</button>
+      </div>
       <select id="f-type"><option value="">All types</option><option value="New" ${state.filterType==='New'?'selected':''}>New only</option><option value="Refill" ${state.filterType==='Refill'?'selected':''}>Refills only</option></select>
       <select id="f-paid"><option value="">Paid: all</option><option value="Paid" ${state.filterPaid==='Paid'?'selected':''}>✓ Paid only</option><option value="NotPaid" ${state.filterPaid==='NotPaid'?'selected':''}>Not paid only</option></select>
       <select id="f-shipToType" title="Filter by where the package ships"><option value="">Ship-to: all</option><option value="Pharmacy" ${state.filterShipToType==='Pharmacy'?'selected':''}>🏪 Pharmacy only</option><option value="Patient" ${state.filterShipToType==='Patient'?'selected':''}>👤 Patient only</option><option value="Pickup" ${state.filterShipToType==='Pickup'?'selected':''}>📍 Pickup only</option><option value="Delivery-Lancaster" ${state.filterShipToType==='Delivery-Lancaster'?'selected':''}>🚚 Lancaster Delivery</option></select>
@@ -1463,7 +1495,10 @@ function renderTransfers() {
   `;
   document.getElementById('f-search').addEventListener('input', e => { state.search = e.target.value; renderTransfers(); });
   document.getElementById('f-status').addEventListener('change', e => { state.filterStatus = e.target.value; renderTransfers(); });
-  document.getElementById('f-showCompleted').addEventListener('change', e => { state.showCompleted = e.target.checked; renderTransfers(); });
+  const viewBtn = (id, mode) => { const el = document.getElementById(id); if (el) el.onclick = () => { state.completedView = mode; renderTransfers(); }; };
+  viewBtn('f-viewActive', 'active');
+  viewBtn('f-viewComplete', 'complete');
+  viewBtn('f-viewAll', 'all');
   // Save current filters as the default view (this browser, this user)
   const saveBtn = document.getElementById('f-saveDefault');
   if (saveBtn) saveBtn.onclick = () => {
@@ -1477,7 +1512,7 @@ function renderTransfers() {
   const resetBtn = document.getElementById('f-resetAll');
   if (resetBtn) resetBtn.onclick = () => {
     state.filterStatus = '';
-    state.showCompleted = false;
+    state.completedView = 'active';
     state.filterType = '';
     state.filterPaid = '';
     state.filterShipToType = '';
@@ -3762,9 +3797,9 @@ function renderNewForm() {
 
       <div class="section"><div class="section-title">Documents</div>
       <div class="form-grid">
-        <div class="form-group full"><label>PK Transfer Sheet(s) ${d.transferType==='Refill'?'<span class="hint" style="text-transform:none;font-weight:400">(optional for refills)</span>':'<span style="color:var(--danger)">*</span>'}</label>
+        <div class="form-group full"><label>PK Transfer Sheet(s) <span id="f-pkSheet-req">${(d.transferType==='Refill'||d.pickupAtPharmacy)?'<span class="hint" style="text-transform:none;font-weight:400">(optional)</span>':'<span style="color:var(--danger)">*</span>'}</span></label>
           <input type="file" id="f-pkSheet" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" multiple />
-          <div class="hint" id="f-pkSheet-name">${(d.pkSheets&&d.pkSheets.length)?d.pkSheets.map(f=>escapeHtml(f.name)).join(', '):(d.transferType==='Refill'?'Optional — refills inherit the original prescription, no new transfer sheet needed.':'Required — printed PK transfer form. Select multiple files to attach more than one.')}</div>
+          <div class="hint" id="f-pkSheet-name">${(d.pkSheets&&d.pkSheets.length)?d.pkSheets.map(f=>escapeHtml(f.name)).join(', '):((d.transferType==='Refill'||d.pickupAtPharmacy)?'Optional — no new transfer sheet required.':'Required — printed PK transfer form. Select multiple files to attach more than one.')}</div>
         </div>
         <div class="form-group full"><label>Hard Copy Scan(s) <span class="hint" style="text-transform:none;font-weight:400">(optional for refills)</span></label>
           <input type="file" id="f-hardCopy" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" multiple />
@@ -4519,6 +4554,18 @@ function bindDraftInputs() {
       if (bulkChk) bulkChk.checked = false;
       if (bulkFields) bulkFields.style.display = 'none';
     }
+    // Non-transfer pickup skips the PK transfer sheet requirement — update label + hint.
+    const pkReqEl = document.getElementById('f-pkSheet-req');
+    const pkHintEl = document.getElementById('f-pkSheet-name');
+    const optional = pickupChk.checked || state.draft.transferType === 'Refill';
+    if (pkReqEl) pkReqEl.innerHTML = optional
+      ? '<span class="hint" style="text-transform:none;font-weight:400">(optional)</span>'
+      : '<span style="color:var(--danger)">*</span>';
+    if (pkHintEl && !(state.draft.pkSheets && state.draft.pkSheets.length)) {
+      pkHintEl.textContent = optional
+        ? 'Optional — no new transfer sheet required.'
+        : 'Required — printed PK transfer form. Select multiple files to attach more than one.';
+    }
     fillPharmacyAddress(); // re-pull address based on new destination
   });
   if (pickupLocSel) pickupLocSel.addEventListener('change', () => {
@@ -4709,9 +4756,9 @@ function submitDraft() {
     d.patientName = formatPatientName(d.patientFirstName, d.patientLastName);
     // PK Transfer Sheet is only required on brand-new transfers — refills (whether
     // chained to an in-app original via refillOfId or entered manually as a legacy
-    // refill) inherit the paperwork from the original prescription, so the sheet is
-    // not required at submission.
-    if (d.transferType !== 'Refill' && (!d.pkSheets || !d.pkSheets.length)) {
+    // refill) inherit the paperwork from the original prescription, and non-transfer
+    // pickup orders originate at the fill pharmacy so there's no transfer paperwork.
+    if (d.transferType !== 'Refill' && !d.pickupAtPharmacy && (!d.pkSheets || !d.pkSheets.length)) {
       missing.push('At least one PK Transfer Sheet upload');
     }
   }
@@ -6380,7 +6427,12 @@ function loadBulkQueueSync() {
 function bulkDraftStatus(b) {
   if (b.parseError) return 'failed';
   const d = b.draft;
-  if (!d.patientName || !d.pkSheets.length) return 'partial';
+  // Non-transfer pickup orders originate at the fill pharmacy — no transfer sheet exists.
+  const needsPkSheet = !d.pickupAtPharmacy;
+  if (!d.patientName) return 'partial';
+  if (needsPkSheet && !d.pkSheets.length) return 'partial';
+  // Non-transfer also needs a pickup destination
+  if (d.pickupAtPharmacy && !d.pickupLocation) return 'partial';
   // Items considered "complete" if at least one row has an Rx# or drug
   if (!d.items.some(i => i.rxNumber || i.drug)) return 'partial';
   return 'ok';
@@ -6389,7 +6441,8 @@ function bulkDraftMissing(b) {
   const m = [];
   const d = b.draft;
   if (!d.patientName) m.push('patient name');
-  if (!d.pkSheets.length) m.push('PK sheet upload');
+  if (!d.pickupAtPharmacy && !d.pkSheets.length) m.push('PK sheet upload');
+  if (d.pickupAtPharmacy && !d.pickupLocation) m.push('pickup pharmacy');
   if (!d.items.some(i => i.rxNumber || i.drug)) m.push('at least one Rx');
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) m.push('CC auth form (or check on-file)');
   return m;
@@ -6434,7 +6487,17 @@ function renderBulkUpload() {
             ${LOCATIONS.map(l => `<option ${l==='Erie'?'selected':''}>${l}</option>`).join('')}
           </select>
         </div>
-        <span class="hint" style="flex-basis:100%">Applied to every draft created from this upload. You can still override per-draft.</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          <label class="checkbox-row" style="font-size:12px;color:var(--gray-700);margin:0"><input type="checkbox" id="bulk-nonTransfer" ${state.bulkDefaults?.pickupAtPharmacy?'checked':''} /> <strong>📍 Non-transfer</strong></label>
+        </div>
+        <div style="display:${state.bulkDefaults?.pickupAtPharmacy?'flex':'none'};gap:6px;align-items:center" id="bulk-pickupWrap">
+          <label style="font-size:12px;color:var(--gray-600)">Pickup pharmacy:</label>
+          <select id="bulk-pickupLocation" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+            <option value="">— pick destination —</option>
+            ${LOCATIONS.map(l => `<option ${l===state.bulkDefaults?.pickupLocation?'selected':''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <span class="hint" style="flex-basis:100%">Applied to every draft created from this upload. You can still override per-draft in the queue below or the editor. Non-transfer skips the PK sheet requirement.</span>
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
         <label class="btn btn-primary" style="cursor:pointer;margin:0">
@@ -6458,20 +6521,29 @@ function renderBulkUpload() {
     </div>
     <div class="card"><div class="card-body" style="padding:0">
       <table style="box-shadow:none;font-size:13px">
-        <thead><tr><th>Status</th><th>Patient</th><th>Rx #</th><th>Drug</th><th>From → Fill</th><th>Ship To</th><th>Source PDF</th><th></th></tr></thead>
+        <thead><tr><th>Status</th><th>Patient</th><th>Rx #</th><th>Drug</th><th>From → Fill</th><th>Ship To / Pickup</th><th>Source PDF</th><th></th></tr></thead>
         <tbody>
           ${q.map(b => {
             const s = bulkDraftStatus(b);
             const d = b.draft;
             const firstItem = d.items[0] || {};
             const badge = s === 'ok' ? '<span class="badge badge-shipped">✓ Ready</span>' : s === 'partial' ? '<span class="badge badge-progress">⚠ Needs Review</span>' : '<span class="badge badge-canceled">✗ Failed</span>';
+            const pickupCell = d.pickupAtPharmacy
+              ? `<div style="display:flex;flex-direction:column;gap:2px">
+                   <span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e;align-self:flex-start">📍 Non-transfer</span>
+                   <select data-pickup="${b.id}" style="padding:2px 4px;border:1px solid var(--gray-300);border-radius:3px;font-size:12px;max-width:140px">
+                     <option value="">— pickup pharmacy —</option>
+                     ${LOCATIONS.map(l => `<option ${l===d.pickupLocation?'selected':''}>${l}</option>`).join('')}
+                   </select>
+                 </div>`
+              : `${escapeHtml(d.shipTo)}`;
             return `<tr ${b.dupGroup?'style="background:var(--info-bg)"':''}>
               <td>${badge}</td>
               <td><strong>${escapeHtml(d.patientName||'(no name)')}</strong>${b.dupGroup?`<div class="item-sub" style="color:var(--info)">Group ${b.dupGroup} — possible same patient</div>`:''}</td>
               <td>${escapeHtml(firstItem.rxNumber||'—')}${d.items.length>1?` <span class="item-sub">+${d.items.length-1}</span>`:''}</td>
               <td>${escapeHtml(firstItem.drug||'—')}</td>
               <td>${escapeHtml(d.originLocation)} → ${escapeHtml(d.fillLocation)}</td>
-              <td>${escapeHtml(d.shipTo)}</td>
+              <td>${pickupCell}</td>
               <td><span class="item-sub" style="font-size:11px">${escapeHtml((b.sourceFile||'').slice(0,30))}${(b.sourceFile||'').length>30?'…':''}</span></td>
               <td style="white-space:nowrap">
                 <button class="btn btn-secondary btn-sm" data-edit="${b.id}">Edit</button>
@@ -6489,6 +6561,21 @@ function renderBulkUpload() {
   document.getElementById('modeBulk').onclick = () => { state.newMode = 'bulk'; renderNewForm(); };
   document.getElementById('bulk-pick').onchange = e => processBulkFiles([...e.target.files]);
 
+  // Batch-level non-transfer + pickup pharmacy defaults. Persisted on state.bulkDefaults
+  // so toggling in/out of the tab keeps the choice while the user picks files.
+  if (!state.bulkDefaults) state.bulkDefaults = { pickupAtPharmacy: false, pickupLocation: '' };
+  const bulkNonTx = document.getElementById('bulk-nonTransfer');
+  const bulkPickupWrap = document.getElementById('bulk-pickupWrap');
+  const bulkPickupSel = document.getElementById('bulk-pickupLocation');
+  if (bulkNonTx) bulkNonTx.onchange = () => {
+    state.bulkDefaults.pickupAtPharmacy = bulkNonTx.checked;
+    if (bulkPickupWrap) bulkPickupWrap.style.display = bulkNonTx.checked ? 'flex' : 'none';
+    if (!bulkNonTx.checked) state.bulkDefaults.pickupLocation = '';
+  };
+  if (bulkPickupSel) bulkPickupSel.onchange = () => {
+    state.bulkDefaults.pickupLocation = bulkPickupSel.value;
+  };
+
   root.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => { state.bulkEditingId = +b.dataset.edit; renderNewForm(); });
   root.querySelectorAll('[data-reject]').forEach(b => b.onclick = () => {
     const id = +b.dataset.reject;
@@ -6497,6 +6584,15 @@ function renderBulkUpload() {
     renderNewForm();
   });
   root.querySelectorAll('[data-approve]').forEach(b => b.onclick = () => approveBulkDraft(+b.dataset.approve));
+  // Per-row pickup location override — save inline without opening the editor
+  root.querySelectorAll('[data-pickup]').forEach(sel => sel.onchange = () => {
+    const id = +sel.dataset.pickup;
+    const draft = state.bulkQueue.find(x => x.id === id);
+    if (!draft) return;
+    draft.draft.pickupLocation = sel.value;
+    apiUpdateBulkDraft(draft);
+    renderNewForm();
+  });
   const approveAll = document.getElementById('bulk-approveAll');
   if (approveAll) approveAll.onclick = () => {
     const ready = state.bulkQueue.filter(b => bulkDraftStatus(b) === 'ok');
@@ -6602,8 +6698,14 @@ async function processBulkFiles(rawFiles) {
   const newDrafts = [];
   // Bulk-level defaults applied to every draft created in this batch
   const bulkFill = (document.getElementById('bulk-fillLocation') || {}).value || '';
+  const bulkNonTransfer = !!(state.bulkDefaults && state.bulkDefaults.pickupAtPharmacy);
+  const bulkPickupLoc = (state.bulkDefaults && state.bulkDefaults.pickupLocation) || '';
   const applyBulkDefaults = (draft) => {
     if (bulkFill) draft.fillLocation = bulkFill;
+    if (bulkNonTransfer) {
+      draft.pickupAtPharmacy = true;
+      if (bulkPickupLoc) draft.pickupLocation = bulkPickupLoc;
+    }
   };
   for (const file of rawFiles) {
     if (!/\.pdf$/i.test(file.name)) {
