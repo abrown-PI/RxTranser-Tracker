@@ -57,7 +57,7 @@ section { page-break-inside: avoid; }
 <div class="toc">
   <h3>Contents</h3>
   <ul>
-    <li><a href="#whatsnew"><strong>🆕 What's New (June 2026)</strong></a></li>
+    <li><a href="#whatsnew"><strong>🆕 What's New (July 2026)</strong></a></li>
     <li><a href="#usp-overnight"><strong>❄ USP Overnight Shipping Policy</strong></a> <em>(Tacrolimus / Cyclosporine ophth, oil-based injections, etc.)</em></li>
     <li><a href="#signin">Signing In (365 or Local Account)</a></li>
     <li><a href="#new">Creating a New Transfer</a> (Single + Bulk Upload with OCR)</li>
@@ -83,8 +83,65 @@ section { page-break-inside: avoid; }
 <hr>
 
 <section id="whatsnew">
-<h2>🆕 What's New (June 2026)</h2>
+<h2>🆕 What's New (July 2026)</h2>
 <p>Quick rundown of recent updates so the team isn't surprised by changed behavior.</p>
+
+<h3>Active / Complete / All view toggle on Transfers</h3>
+<ul>
+  <li>The old <em>Show completed</em> checkbox is gone. In its place: a three-button toggle — <strong>Active</strong>, <strong>Complete</strong>, <strong>All</strong> — right next to the status dropdown.</li>
+  <li><strong>Active</strong> (default) hides transfers that are complete <em>for your pharmacy</em>. What "complete" means depends on which side you're on:
+    <ul>
+      <li><strong>Fill pharmacy</strong> (Erie for compounds) — closes out at <em>Shipped</em>. The package left; your work is done.</li>
+      <li><strong>Receiving pharmacy</strong> (destination for pharmacy ship-tos and pickup orders) — closes out at <em>Received</em>. You still see it in Active until someone at your pharmacy checks it in.</li>
+      <li><strong>Patient direct-ships</strong> — closes out at <em>Shipped</em> for everyone. No in-pharmacy receive step.</li>
+      <li><strong>Canceled</strong> — closes out for everyone immediately.</li>
+    </ul>
+  </li>
+  <li><strong>Complete</strong> flips the view so you only see transfers that are closed out for your pharmacy.</li>
+  <li><strong>All</strong> ignores the completion rule — same behavior as the old "Show completed" checkbox on.</li>
+  <li>Admins in <em>All-locations</em> mode: set the Origin filter to a pharmacy to see that pharmacy's Active view. Without a filter, a transfer is considered complete only when both sides are done (received or canceled).</li>
+  <li>If you had saved a default view with "Show completed" set, the app migrates it automatically the first time you load — no reconfiguration needed.</li>
+</ul>
+
+<h3>Non-transfer skips the PK Transfer Sheet requirement</h3>
+<ul>
+  <li>On <strong>+ New Transfer</strong>, when you check <strong>📍 Prescriptions will be picked up at another pharmacy (Non-transfer)</strong>, the PK Transfer Sheet upload becomes optional. Same rule for the Formula Worksheet (already optional).</li>
+  <li>The label and hint text update in real time as you check/uncheck the box — no need to reload the form.</li>
+  <li>Reason: the order originates at the fill pharmacy, so there's no transfer paperwork to attach.</li>
+</ul>
+
+<h3>Bulk Upload supports non-transfers</h3>
+<ul>
+  <li>New batch-level checkbox <strong>📍 Non-transfer</strong> in the "Apply to all new drafts" bar at the top of Bulk Upload, alongside the Fill Location dropdown.</li>
+  <li>Check it and set the <strong>Pickup pharmacy</strong> dropdown before you upload — every draft created from the file inherits both settings.</li>
+  <li>In the review queue table, each row has its own <strong>Pickup pharmacy</strong> dropdown so you can override the destination on individual drafts without opening the full editor.</li>
+  <li>Drafts flagged as non-transfer skip the PK sheet requirement but need a pickup pharmacy to be marked Ready.</li>
+</ul>
+
+<h3>Origin filter now catches non-transfer pickup orders</h3>
+<ul>
+  <li>When Erie fills a non-transfer script that's being picked up at Jamestown, filtering <strong>Origin = Jamestown</strong> now finds it. The pickup pharmacy is treated as the "effective origin" so the team sees everything that belongs on their worklist.</li>
+  <li>Non-transfer rows show as <em>Jamestown → Erie</em> with a yellow <strong>📍 Non-transfer</strong> badge under the From→Fill column so you can tell at a glance that Erie is doing the compounding but Jamestown is handing it off.</li>
+</ul>
+
+<h3>Pickup signature capture</h3>
+<ul>
+  <li>The pickup signature pad now works with a <strong>mouse</strong> as well as touchscreens and styluses — sign directly in the browser on any device.</li>
+</ul>
+
+<h3>Anticipated Ship Date now saves reliably</h3>
+<ul>
+  <li>Fixed a Chrome-specific bug where changing the anticipated ship date on an existing transfer sometimes reverted on save. The field now honors whatever's in the date picker at the moment you hit Save.</li>
+  <li>New <strong>Recalculate</strong> button next to the field clears your manual override so the automatic appointment-based calculation can take over again.</li>
+</ul>
+
+<h3>Houston renamed to Spring</h3>
+<ul>
+  <li>The Texas store is <strong>Spring</strong> in the portal (matching Active Directory / Entra ID). Same location, same address, same team — just the name the app uses.</li>
+</ul>
+
+<hr style="margin-top:32px">
+<h2 style="color:var(--gray-500);font-size:16px;margin-top:24px">June 2026 (previous month)</h2>
 
 <h3><img src="tabz-logo.png" alt="Tabz" style="height:22px;vertical-align:-5px;margin-right:6px"> payment auto-sync</h3>
 <ul>
@@ -122,7 +179,7 @@ section { page-break-inside: avoid; }
 <ul>
   <li><strong>Past Anticipated Ship</strong> overdue items now live on the <strong>Alerts</strong> tab badge (not Action Items). Action Items focuses on actionable Cancel acknowledgments / Open Questions.</li>
   <li>SLA / "Past Status Time Limit" check now <strong>excludes Received</strong> — completed transfers can't be overdue.</li>
-  <li>Delivered patient-direct ships now count as complete for the "Show completed" filter (no separate Received step on those).</li>
+  <li>Delivered patient-direct ships now count as complete for the completion filter (no separate Received step on those). <em>Superseded by the July 2026 Active/Complete/All toggle — see above.</em></li>
 </ul>
 
 <h3>Receive shipment screen</h3>
@@ -254,6 +311,7 @@ section { page-break-inside: avoid; }
     <ul>
       <li><strong>Fill Location</strong> — applies to every draft</li>
       <li><strong>Anticipated Ship Date</strong> — applies to every draft</li>
+      <li><strong>📍 Non-transfer</strong> — check this if the whole stack is prepared-for-pickup orders (not real transfers). Set the <strong>Pickup pharmacy</strong> that appears next to it. Every draft inherits both. You can still override the pickup pharmacy per row from the queue table dropdown, and drafts flagged non-transfer skip the PK sheet requirement.</li>
     </ul>
   </li>
   <li>Click <strong>📁 Select PDFs to upload</strong> and pick the file(s)</li>
@@ -290,6 +348,7 @@ section { page-break-inside: avoid; }
   <li>Submit</li>
 </ol>
 <p>Both the filling pharmacy AND the pickup pharmacy will see the order on their Transfers list, so the pickup pharmacy knows they have an order coming.</p>
+<div class="tip"><strong>PK Transfer Sheet is optional on non-transfer orders.</strong> The order originates at the fill pharmacy, so there's no transfer paperwork to attach. Upload one if you have it; the app won't block you if you don't.</div>
 
 <h3>Bulk pickup orders</h3>
 <p>Some weeks you send a stack of prepared scripts to another pharmacy as a single batch (e.g., 12 scripts for the Seminole pickup window). Instead of entering each patient:</p>
