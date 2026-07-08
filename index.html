@@ -1144,8 +1144,14 @@ window.attachCCAuthFromFillWindow = async function(targetId, dataUrl) {
       blobName,
       size: Math.round(base64.length * 0.75)
     };
-    // If we have an in-progress draft for this transfer ID, attach there
-    if (state.draft && String(state.draft.id || state.editingTransferId || '') === String(targetId)) {
+    // Attach to the in-progress draft when the IDs match, OR when this is a brand-new
+    // transfer (no id yet on either side — targetId defaults to '(new transfer)' in
+    // printCCAuthForm for un-saved drafts). Without the new-transfer branch the popup's
+    // save silently failed and the CC form data was lost as soon as the user closed
+    // the fill window.
+    const currentDraftId = String((state.draft && (state.draft.id || state.editingTransferId)) || '');
+    const isNewTarget = String(targetId) === '(new transfer)';
+    if (state.draft && (currentDraftId === String(targetId) || (isNewTarget && !currentDraftId))) {
       state.draft.ccForm = ccForm;
       // Update the form UI to reflect attached file
       const lbl = document.getElementById('f-ccForm-name');
@@ -6424,6 +6430,13 @@ function loadBulkQueueSync() {
   // Returns empty; the async load is kicked off in renderBulkUpload
   return state.bulkQueue || [];
 }
+// Count pageImages entries whose blob upload failed. These still have an in-memory
+// _dataUrl during the current session; approveBulkDraft will retry the upload before
+// the transfer is committed. After a page reload the _dataUrl is lost, so the user
+// needs to catch this before closing the tab.
+function bulkDraftFailedUploads(b) {
+  return ((b && b.pageImages) || []).filter(p => !p.blobName).length;
+}
 function bulkDraftStatus(b) {
   if (b.parseError) return 'failed';
   const d = b.draft;
@@ -6435,6 +6448,7 @@ function bulkDraftStatus(b) {
   if (d.pickupAtPharmacy && !d.pickupLocation) return 'partial';
   // Items considered "complete" if at least one row has an Rx# or drug
   if (!d.items.some(i => i.rxNumber || i.drug)) return 'partial';
+  // Note: failed page uploads don't block 'ok' — approveBulkDraft retries them on click.
   return 'ok';
 }
 function bulkDraftMissing(b) {
@@ -6527,7 +6541,11 @@ function renderBulkUpload() {
             const s = bulkDraftStatus(b);
             const d = b.draft;
             const firstItem = d.items[0] || {};
-            const badge = s === 'ok' ? '<span class="badge badge-shipped">✓ Ready</span>' : s === 'partial' ? '<span class="badge badge-progress">⚠ Needs Review</span>' : '<span class="badge badge-canceled">✗ Failed</span>';
+            const failedCount = bulkDraftFailedUploads(b);
+            const uploadWarn = failedCount > 0
+              ? `<div class="item-sub" style="color:var(--warning);font-size:11px" title="These pages will be retried when you click Approve">⚠ ${failedCount} page upload${failedCount>1?'s':''} pending retry</div>`
+              : '';
+            const badge = s === 'ok' ? `<span class="badge badge-shipped">✓ Ready</span>${uploadWarn}` : s === 'partial' ? `<span class="badge badge-progress">⚠ Needs Review</span>${uploadWarn}` : '<span class="badge badge-canceled">✗ Failed</span>';
             const pickupCell = d.pickupAtPharmacy
               ? `<div style="display:flex;flex-direction:column;gap:2px">
                    <span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e;align-self:flex-start">📍 Non-transfer</span>
@@ -6834,12 +6852,17 @@ async function processBulkFiles(rawFiles) {
             // Persist only the blob name — dataUrls are too large for Azure Table Storage's
             // 64KB property limit and cause silent draft-save failures. blobUrl(blobName)
             // fetches the image on demand in the page viewer.
+            // Pages whose upload failed are still kept here with blobName=null + an
+            // in-memory dataUrl so the review viewer can show them AND approveBulkDraft
+            // can retry the upload later. The dataUrl is stripped before persistence
+            // by _stripBulkDraftForPersist (mapper only keeps pageNum, blobName, kind).
             const pagePngs = [g.transferPage, ...g.hardCopyPages]
-              .filter(p => p.blobName)
+              .filter(p => p.blobName || p._pngDataUrl)
               .map(p => ({
                 pageNum: p.pageNum,
-                blobName: p.blobName,
-                kind: p === g.transferPage ? 'transfer' : 'hardcopy'
+                blobName: p.blobName || null,
+                kind: p === g.transferPage ? 'transfer' : 'hardcopy',
+                dataUrl: p.blobName ? undefined : p._pngDataUrl
               }));
             newDrafts.push({
               id: ++_bulkId, draft,
@@ -6948,12 +6971,16 @@ async function processBulkFiles(rawFiles) {
       // Only persist blobName — dataUrls are huge (100-300KB each), Azure Table Storage caps
       // property strings at 64KB so saving them on the draft body causes silent backend failures.
       // The page viewer falls back to blobUrl(p.blobName) so visuals still render fine.
+      // Pages whose upload failed are kept with blobName=null + in-memory dataUrl so the
+      // review viewer can still show them AND approveBulkDraft can retry. The dataUrl is
+      // stripped from anything persisted by _stripBulkDraftForPersist.
       const pagePngs = [g.transferPage, ...g.hardCopyPages]
-        .filter(p => pageBlobsByNum[p.pageNum] && pageBlobsByNum[p.pageNum].blobName)
+        .filter(p => pageBlobsByNum[p.pageNum])
         .map(p => ({
           pageNum: p.pageNum,
-          blobName: pageBlobsByNum[p.pageNum].blobName,
-          kind: p === g.transferPage ? 'transfer' : 'hardcopy'
+          blobName: pageBlobsByNum[p.pageNum].blobName || null,
+          kind: p === g.transferPage ? 'transfer' : 'hardcopy',
+          dataUrl: pageBlobsByNum[p.pageNum].blobName ? undefined : pageBlobsByNum[p.pageNum].dataUrl
         }));
       newDrafts.push({
         id: ++_bulkId,
@@ -7009,10 +7036,28 @@ async function processBulkFiles(rawFiles) {
   renderNewForm();
 }
 
-function approveBulkDraft(id, skipAlert) {
+async function approveBulkDraft(id, skipAlert) {
   const b = state.bulkQueue.find(x => x.id === id);
   if (!b) return;
-  if (bulkDraftStatus(b) !== 'ok') { alert('Draft has missing required fields. Edit and complete it first.'); return; }
+  // Retry any pageImages whose blob upload silently failed during processBulkFiles.
+  // The in-memory dataUrl was preserved for exactly this — network glitches sometimes
+  // clear between the initial upload attempt and the moment the user hits Approve.
+  const failedPages = (b.pageImages || []).filter(p => !p.blobName && p.dataUrl);
+  if (failedPages.length) {
+    for (const p of failedPages) {
+      const base64 = p.dataUrl.split(',')[1];
+      const blobName = await uploadBlob(base64, 'image/png', 'pages');
+      if (blobName) { p.blobName = blobName; delete p.dataUrl; }
+    }
+  }
+  // Any pages still without blobName after the retry — warn the user before committing.
+  const stillMissing = (b.pageImages || []).filter(p => !p.blobName).length;
+  if (stillMissing) {
+    const proceed = confirm(`⚠ ${stillMissing} page image${stillMissing>1?'s':''} still could not be uploaded after a retry.\n\nApprove anyway? Those pages will show as "(no data)" on the transfer.\n\nCancel to keep the draft in the queue so you can Reject it and re-upload the PDF once the connection is back.`);
+    if (!proceed) return;
+  }
+  // Re-check status after the retry — bulkDraftStatus counts failed uploads too.
+  if (bulkDraftStatus(b) !== 'ok' && stillMissing === 0) { alert('Draft has missing required fields. Edit and complete it first.'); return; }
   const t = {
     ...b.draft,
     id: nextId(),
