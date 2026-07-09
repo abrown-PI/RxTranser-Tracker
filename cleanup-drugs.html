@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Backfill Missing Drug Names — PI Transfer Tracker</title>
+<style>
+  :root {
+    --primary: #2a6ebb; --primary-dark: #233f76; --primary-bg: #cfdbed;
+    --success: #16a34a; --success-bg: #dcfce7;
+    --warning: #d97706; --warning-bg: #fef3c7;
+    --danger: #dc2626;
+    --gray-50: #f8fafc; --gray-100: #f1f5f9; --gray-200: #e2e8f0;
+    --gray-300: #cbd5e1; --gray-500: #64748b; --gray-700: #334155; --gray-900: #0f172a;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', -apple-system, sans-serif; margin: 0; background: var(--gray-100); color: var(--gray-900); font-size: 14px; }
+  header { background: linear-gradient(135deg, var(--primary-dark), var(--primary)); color: white; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 6px rgba(0,0,0,.1); }
+  header h1 { font-size: 18px; margin: 0; }
+  header .prog { font-size: 13px; opacity: .9; }
+  .container { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
+  .card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.05); margin-bottom: 16px; }
+  .card-header { padding: 12px 18px; border-bottom: 1px solid var(--gray-200); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .card-header h2 { margin: 0; font-size: 16px; color: var(--primary-dark); }
+  .card-body { padding: 16px 18px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .badge-received { background: #dbeafe; color: #1e40af; }
+  .badge-warn { background: var(--warning-bg); color: var(--warning); }
+  .badge-success { background: var(--success-bg); color: var(--success); }
+  .meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 20px; font-size: 13px; }
+  .meta-label { color: var(--gray-500); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .meta-value { font-weight: 600; margin-top: 2px; color: var(--gray-900); word-break: break-word; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 1000px) { .split { grid-template-columns: 1fr; } }
+  .pages { display: flex; flex-direction: column; gap: 10px; max-height: 700px; overflow-y: auto; padding-right: 6px; }
+  .pages img { width: 100%; border: 1px solid var(--gray-300); border-radius: 4px; background: white; }
+  .page-thumb-empty { padding: 20px; background: var(--gray-50); border: 1px dashed var(--gray-300); border-radius: 4px; text-align: center; color: var(--gray-500); font-style: italic; }
+  .rx-row { border: 1px solid var(--gray-200); border-radius: 6px; padding: 12px; margin-bottom: 10px; background: var(--gray-50); }
+  .rx-row.needs { border-color: var(--warning); background: #fffbeb; }
+  .rx-head { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; font-size: 12px; color: var(--gray-700); flex-wrap: wrap; }
+  .rx-head strong { color: var(--gray-900); font-size: 14px; }
+  .rx-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .fld label { display: block; font-size: 10px; color: var(--gray-500); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+  .fld .val { padding: 6px 8px; background: white; border: 1px solid var(--gray-300); border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12px; min-height: 26px; }
+  .fld input { width: 100%; padding: 6px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
+  .fld input.drug-input { border-color: var(--warning); font-weight: 600; }
+  .fld input.drug-input:focus { outline: 2px solid var(--warning); border-color: var(--warning); }
+  .btn { padding: 8px 16px; border: 0; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-secondary { background: white; color: var(--primary); border: 1px solid var(--primary); }
+  .btn-secondary:hover { background: var(--primary-bg); }
+  .btn-success { background: var(--success); color: white; }
+  .btn-success:hover { opacity: .9; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .nav { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.05); flex-wrap: wrap; gap: 10px; }
+  .nav .center { display: flex; gap: 10px; }
+  .msg { margin-left: 12px; font-size: 12px; }
+  .msg.success { color: var(--success); }
+  .msg.error { color: var(--danger); }
+  .empty { text-align: center; padding: 60px 20px; color: var(--gray-500); font-size: 16px; }
+  .empty h2 { color: var(--success); font-size: 24px; margin-bottom: 8px; }
+  a.portal-link { color: var(--primary); font-size: 12px; text-decoration: none; }
+  a.portal-link:hover { text-decoration: underline; }
+  .item-list { display: flex; flex-wrap: wrap; gap: 4px; }
+  .item-list .id-chip { background: var(--gray-200); color: var(--gray-700); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-family: 'Consolas', monospace; cursor: pointer; }
+  .item-list .id-chip.done { background: var(--success-bg); color: var(--success); text-decoration: line-through; }
+  .item-list .id-chip.current { background: var(--primary); color: white; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔧 Backfill Missing Drug Names</h1>
+  <div class="prog" id="progText">Loading…</div>
+</header>
+
+<div class="container" id="root">
+  <div class="card"><div class="card-body">Loading transfers…</div></div>
+</div>
+
+<script>
+'use strict';
+
+const PORTAL_BASE = location.origin;
+const state = {
+  transfers: [],    // filtered, ordered oldest -> newest by id
+  index: 0,
+  done: new Set(),  // transfer ids that have been saved this session
+  loading: true,
+  saveStatus: '',
+  saveStatusKind: ''
+};
+
+// Small utils
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function fmtDate(iso) { if (!iso) return ''; try { return new Date(iso).toLocaleDateString(); } catch { return String(iso).slice(0, 10); } }
+function blobUrl(name) { return PORTAL_BASE + '/api/blobs/' + String(name).split('/').map(encodeURIComponent).join('/'); }
+function isPopulated(item) { return !!(item && (item.rxNumber || item.qty || item.receivingRxNumber)); }
+function hasDrug(item) { return !!(item && item.drug && String(item.drug).trim()); }
+function needsDrug(item) { return isPopulated(item) && !hasDrug(item); }
+
+async function loadAll() {
+  try {
+    const r = await fetch('/api/transfers');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const all = data.transfers || data;
+    state.transfers = all
+      .filter(t => !t.isBulkPickup && t.status !== 'Canceled')
+      .filter(t => Array.isArray(t.items) && t.items.some(needsDrug))
+      .sort((a, b) => (a.id || 0) - (b.id || 0)); // oldest first — chronological cleanup
+  } catch (e) {
+    state.saveStatus = 'Failed to load transfers: ' + e.message;
+    state.saveStatusKind = 'error';
+    state.transfers = [];
+  }
+  state.loading = false;
+  render();
+}
+
+function currentTransfer() { return state.transfers[state.index] || null; }
+
+function saveCurrent() {
+  const t = currentTransfer();
+  if (!t) return Promise.resolve();
+  // Read the drug inputs and merge back into t.items
+  document.querySelectorAll('input[data-item-id]').forEach(inp => {
+    const id = Number(inp.dataset.itemId);
+    const item = t.items.find(x => x.id === id);
+    if (item) item.drug = String(inp.value || '').trim();
+  });
+  // Only PUT if at least one blank drug got filled — otherwise the API call is
+  // wasted. (Skip advances without saving.)
+  const stillBlank = t.items.some(needsDrug);
+  const filledAny = t.items.some(hasDrug);
+  if (!filledAny) {
+    state.saveStatus = 'Nothing entered — enter drug name(s) or click Skip.';
+    state.saveStatusKind = 'error';
+    render(true);
+    return Promise.resolve(false);
+  }
+  state.saveStatus = 'Saving…';
+  state.saveStatusKind = '';
+  render(true);
+  return fetch('/api/transfers/' + encodeURIComponent(t.id), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(t)
+  }).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    state.done.add(t.id);
+    if (stillBlank) {
+      state.saveStatus = '✓ Saved (some Rx rows still blank — that\'s okay if they\'re not real Rx lines)';
+    } else {
+      state.saveStatus = '✓ Saved';
+    }
+    state.saveStatusKind = 'success';
+    render(true);
+    return true;
+  }).catch(e => {
+    state.saveStatus = 'Save failed: ' + e.message;
+    state.saveStatusKind = 'error';
+    render(true);
+    return false;
+  });
+}
+
+function goto(nextIndex) {
+  if (nextIndex < 0) nextIndex = 0;
+  if (nextIndex >= state.transfers.length) nextIndex = state.transfers.length - 1;
+  state.index = nextIndex;
+  state.saveStatus = '';
+  state.saveStatusKind = '';
+  render();
+  // Focus the first drug input on the new transfer for fast typing
+  setTimeout(() => {
+    const firstInput = document.querySelector('input.drug-input');
+    if (firstInput) firstInput.focus();
+  }, 30);
+}
+
+function saveThenNext() {
+  saveCurrent().then(ok => {
+    if (ok && state.index < state.transfers.length - 1) goto(state.index + 1);
+    else if (ok) render(); // last one — stay put but show ✓
+  });
+}
+
+function render(partial) {
+  const root = document.getElementById('root');
+  const progText = document.getElementById('progText');
+  if (state.loading) {
+    progText.textContent = 'Loading…';
+    return;
+  }
+  if (state.transfers.length === 0) {
+    progText.textContent = 'All clean';
+    root.innerHTML = `<div class="card"><div class="card-body empty">
+      <h2>🎉 Nothing to fix</h2>
+      <p>No non-cancelled transfers currently have populated Rx lines missing a drug name.</p>
+    </div></div>`;
+    return;
+  }
+  const t = currentTransfer();
+  const doneCount = state.done.size;
+  progText.textContent = `Transfer ${state.index + 1} of ${state.transfers.length} · ${doneCount} saved this session`;
+
+  if (partial) {
+    // Only re-render the nav bar + save message, keep inputs / images alive
+    const msgEl = document.getElementById('saveMsg');
+    if (msgEl) msgEl.className = 'msg ' + state.saveStatusKind;
+    if (msgEl) msgEl.textContent = state.saveStatus;
+    // Refresh the ID chip strip
+    const chips = document.getElementById('idChips');
+    if (chips) chips.innerHTML = renderChips();
+    return;
+  }
+
+  const pageImages = Array.isArray(t.pageImages) ? t.pageImages : [];
+  const pkPages = pageImages.filter(p => p.kind === 'transfer' && p.blobName);
+  const hcPages = pageImages.filter(p => p.kind === 'hardcopy' && p.blobName);
+  const pageBlocks = [
+    { label: 'PK Transfer Sheet page(s)', pages: pkPages },
+    { label: 'Hard copy page(s)', pages: hcPages }
+  ];
+
+  root.innerHTML = `
+    <div class="card"><div class="card-body">
+      <div class="item-list" id="idChips">${renderChips()}</div>
+    </div></div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Transfer ${escapeHtml(String(t.id))} · ${escapeHtml(t.patientName || '(unnamed)')}</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="badge badge-${t.status === 'Received' ? 'received' : 'warn'}">${escapeHtml(t.status || '')}</span>
+          <a class="portal-link" target="_blank" href="${PORTAL_BASE}/?transfer=${encodeURIComponent(t.id)}">↗ open in main portal</a>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="meta">
+          <div><div class="meta-label">Route</div><div class="meta-value">${escapeHtml(t.originLocation || '')} → ${escapeHtml(t.fillLocation || '')}${t.pickupAtPharmacy ? ' <span class="badge badge-warn">📍 Pickup ' + escapeHtml(t.pickupLocation || '?') + '</span>' : ''}</div></div>
+          <div><div class="meta-label">Ship To</div><div class="meta-value">${escapeHtml(t.shipTo || '')}</div></div>
+          <div><div class="meta-label">Submitted By</div><div class="meta-value">${escapeHtml(t.submittedBy || '')}</div></div>
+          <div><div class="meta-label">Created</div><div class="meta-value">${fmtDate(t.createdAt)}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="card">
+        <div class="card-header"><h2>Source Pages</h2></div>
+        <div class="card-body">
+          <div class="pages">
+            ${pageBlocks.map(b => b.pages.length
+              ? `<div><div class="meta-label" style="margin-bottom:4px">${escapeHtml(b.label)}</div>${b.pages.map(p => `<img src="${escapeHtml(blobUrl(p.blobName))}" alt="page ${p.pageNum}" loading="lazy" />`).join('')}</div>`
+              : `<div class="page-thumb-empty">${escapeHtml(b.label)} — none attached</div>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Rx Lines</h2>
+          <span class="item-sub" style="color:var(--gray-500);font-size:12px">Fill drug names in the highlighted lines</span>
+        </div>
+        <div class="card-body">
+          ${(t.items || []).map((it, idx) => `
+            <div class="rx-row ${needsDrug(it) ? 'needs' : ''}">
+              <div class="rx-head">
+                <strong>Rx ${idx + 1}</strong>
+                ${needsDrug(it) ? '<span class="badge badge-warn">Missing drug name</span>' : (hasDrug(it) ? '<span class="badge badge-success">Has drug</span>' : '<span class="item-sub" style="color:var(--gray-500)">Empty row</span>')}
+              </div>
+              <div class="rx-fields">
+                <div class="fld"><label>Origin Rx #</label><div class="val">${escapeHtml(it.rxNumber || '—')}</div></div>
+                <div class="fld"><label>Receiving Rx #</label><div class="val">${escapeHtml(it.receivingRxNumber || '—')}</div></div>
+                <div class="fld"><label>Qty / Days</label><div class="val">${escapeHtml(it.qty || '—')}</div></div>
+              </div>
+              <div class="fld">
+                <label>Drug / Strength ${needsDrug(it) ? '<span style="color:var(--warning)">*</span>' : ''}</label>
+                <input type="text" data-item-id="${it.id}" value="${escapeHtml(it.drug || '')}" class="${needsDrug(it) ? 'drug-input' : ''}" placeholder="${needsDrug(it) ? 'Type the drug name here' : ''}" autocomplete="off" spellcheck="false" />
+              </div>
+              ${it.notes ? `<div style="font-size:12px;color:var(--gray-500);margin-top:4px"><strong>Notes:</strong> ${escapeHtml(it.notes)}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="nav">
+      <div>
+        <button class="btn btn-secondary" id="btnPrev" ${state.index === 0 ? 'disabled' : ''}>← Prev</button>
+      </div>
+      <div class="center">
+        <button class="btn btn-secondary" id="btnSkip">Skip →</button>
+        <button class="btn btn-primary" id="btnSaveNext">Save & Next →</button>
+        <button class="btn btn-success" id="btnSave">Save (stay)</button>
+        <span class="msg ${state.saveStatusKind}" id="saveMsg">${escapeHtml(state.saveStatus)}</span>
+      </div>
+      <div>
+        <button class="btn btn-secondary" id="btnNext" ${state.index >= state.transfers.length - 1 ? 'disabled' : ''}>Next →</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('btnPrev').onclick = () => goto(state.index - 1);
+  document.getElementById('btnNext').onclick = () => goto(state.index + 1);
+  document.getElementById('btnSkip').onclick = () => {
+    if (state.index < state.transfers.length - 1) goto(state.index + 1);
+  };
+  document.getElementById('btnSave').onclick = () => { saveCurrent(); };
+  document.getElementById('btnSaveNext').onclick = () => { saveThenNext(); };
+
+  // Click a chip to jump to that transfer
+  document.querySelectorAll('.id-chip').forEach(chip => chip.onclick = () => {
+    const targetId = Number(chip.dataset.id);
+    const idx = state.transfers.findIndex(x => x.id === targetId);
+    if (idx >= 0) goto(idx);
+  });
+
+  // Focus first drug field
+  const firstInput = document.querySelector('input.drug-input');
+  if (firstInput) firstInput.focus();
+}
+
+function renderChips() {
+  return state.transfers.map((t, i) => {
+    const cls = state.done.has(t.id) ? 'done' : (i === state.index ? 'current' : '');
+    return `<span class="id-chip ${cls}" data-id="${t.id}" title="${escapeHtml(t.patientName || '')}">${escapeHtml(String(t.id))}</span>`;
+  }).join('');
+}
+
+// Keyboard shortcuts: Ctrl+Enter = Save & Next, Ctrl+ArrowRight = Next, Ctrl+ArrowLeft = Prev
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); saveThenNext(); }
+  else if (e.ctrlKey && e.key === 'ArrowRight') { e.preventDefault(); goto(state.index + 1); }
+  else if (e.ctrlKey && e.key === 'ArrowLeft') { e.preventDefault(); goto(state.index - 1); }
+});
+
+loadAll();
+</script>
+
+</body>
+</html>
