@@ -4367,11 +4367,18 @@ function renderDraftItems() {
     </div>
   `).join('');
   wrap.querySelectorAll('[data-k]').forEach(el => {
-    el.addEventListener('input', e => {
+    // Listen to BOTH input and change. The Drug field is a <input list=…> datalist —
+    // when the user picks an option by clicking or hits Tab/Enter to accept the
+    // autocomplete suggestion, Chrome sometimes fires only 'change' (not 'input'),
+    // so a single 'input' listener could miss the final value and the drug would
+    // land in the transfer as blank. Same fix pattern as the date-picker sync.
+    const sync = () => {
       const idx = +el.dataset.idx, k = el.dataset.k;
       state.draft.items[idx][k] = el.type === 'checkbox' ? el.checked : el.value;
       if (k === 'drug') renderDrugWarningBox();
-    });
+    };
+    el.addEventListener('input', sync);
+    el.addEventListener('change', sync);
   });
   wrap.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => {
     state.draft.items.splice(+b.dataset.rm, 1); renderDraftItems();
@@ -4750,6 +4757,14 @@ function bindDraftInputs() {
 
 function submitDraft() {
   const d = state.draft;
+  // Belt-and-suspenders DOM re-read for every item field. Same reason as the date
+  // picker sync below — if the drug datalist picked a value but the 'input' event
+  // didn't fire, whatever is visible in the input box wins here. Blocks the "Rx has
+  // no drug name after submit" bug Ruben/Elijah hit in Teams.
+  document.querySelectorAll('#itemsList [data-k]').forEach(el => {
+    const idx = +el.dataset.idx, k = el.dataset.k;
+    if (d.items && d.items[idx]) d.items[idx][k] = el.type === 'checkbox' ? el.checked : el.value;
+  });
   const missing = [];
   if (d.isBulkPickup) {
     // Bulk pickup orders skip per-patient detail. Only require count + destination.
@@ -4766,6 +4781,20 @@ function submitDraft() {
     // pickup orders originate at the fill pharmacy so there's no transfer paperwork.
     if (d.transferType !== 'Refill' && !d.pickupAtPharmacy && (!d.pkSheets || !d.pkSheets.length)) {
       missing.push('At least one PK Transfer Sheet upload');
+    }
+    // Every Rx line that has any content (Rx#, qty, receiving Rx#) must also carry
+    // a drug name. Without this the receiving pharmacy sees a blank Drug column and
+    // can miss the transfer when filtering by medication.
+    const emptyDrugRows = (d.items || [])
+      .map((it, idx) => ({ it, idx }))
+      .filter(({ it }) => (it.rxNumber || it.qty || it.receivingRxNumber) && !(it.drug && it.drug.trim()))
+      .map(({ idx }) => `Rx ${idx + 1}`);
+    if (emptyDrugRows.length) {
+      missing.push(`Drug / Strength missing on ${emptyDrugRows.join(', ')}`);
+    }
+    // At least one Rx line must have a drug name.
+    if (!(d.items || []).some(i => i.drug && i.drug.trim())) {
+      missing.push('At least one drug / medication name');
     }
   }
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "Credit card on file")');
@@ -6446,8 +6475,11 @@ function bulkDraftStatus(b) {
   if (needsPkSheet && !d.pkSheets.length) return 'partial';
   // Non-transfer also needs a pickup destination
   if (d.pickupAtPharmacy && !d.pickupLocation) return 'partial';
-  // Items considered "complete" if at least one row has an Rx# or drug
-  if (!d.items.some(i => i.rxNumber || i.drug)) return 'partial';
+  // Every Rx line with any content must have a drug name — otherwise the transfer
+  // lands with a blank Drug column and gets missed when techs filter by medication.
+  if (d.items.some(i => (i.rxNumber || i.qty) && !(i.drug && i.drug.trim()))) return 'partial';
+  // At least one row must have a drug name (not just an Rx#)
+  if (!d.items.some(i => i.drug && i.drug.trim())) return 'partial';
   // Note: failed page uploads don't block 'ok' — approveBulkDraft retries them on click.
   return 'ok';
 }
@@ -6457,7 +6489,12 @@ function bulkDraftMissing(b) {
   if (!d.patientName) m.push('patient name');
   if (!d.pickupAtPharmacy && !d.pkSheets.length) m.push('PK sheet upload');
   if (d.pickupAtPharmacy && !d.pickupLocation) m.push('pickup pharmacy');
-  if (!d.items.some(i => i.rxNumber || i.drug)) m.push('at least one Rx');
+  const emptyDrug = (d.items || [])
+    .map((it, idx) => ({ it, idx }))
+    .filter(({ it }) => (it.rxNumber || it.qty) && !(it.drug && it.drug.trim()))
+    .map(({ idx }) => `Rx ${idx + 1}`);
+  if (emptyDrug.length) m.push(`drug name on ${emptyDrug.join(', ')}`);
+  if (!(d.items || []).some(i => i.drug && i.drug.trim())) m.push('at least one drug name');
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) m.push('CC auth form (or check on-file)');
   return m;
 }
