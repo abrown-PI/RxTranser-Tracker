@@ -3129,8 +3129,8 @@ function renderAdmin() {
       <table style="box-shadow:none;font-size:13px"><thead><tr><th style="width:160px">Location</th><th>Webhook URL</th><th style="width:120px">Status</th></tr></thead><tbody>
         ${LOCATIONS.map(l => `<tr>
           <td><strong>${escapeHtml(l)}</strong></td>
-          <td><input id="tw-${escapeHtml(l).replace(/\s+/g,'_')}" data-loc="${escapeHtml(l)}" type="password" placeholder="https://...webhook.office.com/... (paste full URL)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:12px" autocomplete="off" /></td>
-          <td><span class="item-sub tw-state" data-loc-state="${escapeHtml(l)}"></span></td>
+          <td><input id="tw-${escapeHtml(l).replace(/\s+/g,'_')}" data-loc="${escapeHtml(l)}" type="text" placeholder="https://...webhook.office.com/... (paste full URL)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:12px" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore="true" spellcheck="false" /></td>
+          <td><span class="item-sub tw-state" data-loc-state="${escapeHtml(l)}"></span> <button type="button" class="btn btn-secondary btn-sm" data-loc-clear="${escapeHtml(l)}" style="padding:2px 8px;font-size:11px;margin-left:6px" title="Clear stored webhook URL for ${escapeHtml(l)}">Clear</button></td>
         </tr>`).join('')}
       </tbody></table>
       <div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="tw-save">Save webhook URLs</button> <span class="item-sub" id="tw-saveResult" style="margin-left:10px"></span></div>
@@ -3587,6 +3587,25 @@ function renderAdmin() {
       result.innerHTML = `<span style="color:var(--success)">✓ Sent to ${data.recipients.join(', ')}</span>`;
     } catch (e) { result.innerHTML = `<span style="color:var(--danger)">${escapeHtml(e.message)}</span>`; }
   };
+  // Per-row Clear button: sends '' for that location so the backend deletes it,
+  // then refreshes the status badge in place.
+  root.querySelectorAll('[data-loc-clear]').forEach(btn => btn.onclick = async () => {
+    const loc = btn.dataset.locClear;
+    if (!confirm(`Clear the stored Teams webhook URL for ${loc}? Notifications routed to this location will stop until you paste a new URL and save.`)) return;
+    try {
+      const r = await fetch('/api/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamsWebhooks: { [loc]: '' } })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const cfg = data.teamsWebhooksConfigured || {};
+      const stateEl = root.querySelector(`[data-loc-state="${loc}"]`);
+      if (stateEl) stateEl.innerHTML = cfg[loc] ? '<span style="color:var(--success)">● configured</span>' : '<span style="color:var(--gray-400)">○ not set</span>';
+      const inpEl = root.querySelector(`[data-loc="${loc}"]`);
+      if (inpEl) inpEl.value = '';
+    } catch (e) { alert('Clear failed: ' + e.message); }
+  });
   document.getElementById('tw-save').onclick = async () => {
     const teamsWebhooks = {};
     root.querySelectorAll('[data-loc]').forEach(el => {
