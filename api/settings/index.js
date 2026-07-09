@@ -14,6 +14,21 @@ const TABLE = 'settings';
 const PARTITION = 'global';
 const ROW = 'main';
 
+// Admin identity check — matches the pattern in /api/users. The x-user-email header
+// is set by the frontend for signed-in users. Callers listed in settings.adminEmails
+// are treated as admins. Cached briefly to avoid a table read per request.
+let _adminCache = { at: 0, set: new Set() };
+async function isAdminCaller(req, settings) {
+  const email = String(req.headers['x-user-email'] || '').toLowerCase().trim();
+  if (!email) return false;
+  const now = Date.now();
+  if (now - _adminCache.at > 60000) {
+    const list = ((settings && settings.adminEmails) || []).map(x => String(x).toLowerCase());
+    _adminCache = { at: now, set: new Set(list) };
+  }
+  return _adminCache.set.has(email);
+}
+
 let _table = null;
 function getTable() {
   if (_table) return _table;
@@ -71,6 +86,17 @@ module.exports = async function (context, req) {
     await ensureTable();
     if (req.method === 'GET') {
       const settings = await readSettings();
+      // Admins may request the raw webhook URLs via ?includeSecrets=true so they can
+      // audit and edit them without having to hunt through Azure Storage Explorer.
+      // Any non-admin caller (or an anonymous one) still gets the redacted response.
+      const includeSecrets = String((req.query && req.query.includeSecrets) || '').toLowerCase() === 'true';
+      if (includeSecrets && await isAdminCaller(req, settings)) {
+        context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: {
+          ...redactWebhooks(settings),
+          teamsWebhooks: settings.teamsWebhooks || {}
+        }};
+        return;
+      }
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: redactWebhooks(settings) };
       return;
     }

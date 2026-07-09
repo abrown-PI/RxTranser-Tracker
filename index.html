@@ -3517,17 +3517,29 @@ function renderAdmin() {
   };
   loadAudit();
 
-  // Teams webhooks + email notifications — populate fields from settings
+  // Teams webhooks + email notifications — populate fields from settings.
+  // Admins get raw webhook URLs pre-filled so they can review + fix bad ones without
+  // having to hunt through Azure Storage. Non-admins hitting /api/settings still see
+  // the redacted { configured } response.
   (async () => {
     try {
-      const r = await fetch('/api/settings');
+      const email = (CURRENT_USER && CURRENT_USER.email) || '';
+      const r = await fetch('/api/settings?includeSecrets=true', {
+        headers: email ? { 'x-user-email': email } : {}
+      });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       document.getElementById('tw-status').textContent = '— loaded';
       const cfg = data.teamsWebhooksConfigured || {};
+      const urls = data.teamsWebhooks || {};
       root.querySelectorAll('[data-loc-state]').forEach(el => {
         const loc = el.dataset.locState;
         el.innerHTML = cfg[loc] ? '<span style="color:var(--success)">● configured</span>' : '<span style="color:var(--gray-400)">○ not set</span>';
+      });
+      // Pre-fill the URL boxes with the stored values so admins can audit + edit in place
+      root.querySelectorAll('[data-loc]').forEach(el => {
+        const url = urls[el.dataset.loc];
+        if (url) el.value = url;
       });
       // Daily summary always-CC recipients
       const dsBox = document.getElementById('dsRecipients');
@@ -3627,8 +3639,8 @@ function renderAdmin() {
         const loc = el.dataset.locState;
         el.innerHTML = cfg[loc] ? '<span style="color:var(--success)">● configured</span>' : '<span style="color:var(--gray-400)">○ not set</span>';
       });
-      // Clear the password fields so the URLs aren't kept in the DOM after save
-      root.querySelectorAll('[data-loc]').forEach(el => { el.value = ''; });
+      // URL fields are pre-populated with the stored values for admins, so leave
+      // whatever they typed in place (it just got saved).
     } catch (e) { result.innerHTML = '<span style="color:var(--danger)">Save failed: ' + escapeHtml(e.message) + '</span>'; }
   };
 
