@@ -8593,20 +8593,31 @@ initAuth();
   // pharmacy address from PHARMACY_ADDRESSES on form open (see bindDraftInputs).
 })();
 
+// Every Teams webhook is a shared chat between Erie (the compounding hub) and one
+// satellite pharmacy. The webhook URL is keyed by the satellite name. Whichever
+// pharmacy asks — Erie OR the satellite — the notification goes to that same shared
+// chat, so the routing only needs to identify the satellite involved in the transfer.
+const HUB_LOCATION = 'Erie';
+function chatWebhookKey(transfer) {
+  const candidates = [];
+  if (transfer.originLocation && transfer.originLocation !== HUB_LOCATION) candidates.push(transfer.originLocation);
+  if (transfer.fillLocation && transfer.fillLocation !== HUB_LOCATION) candidates.push(transfer.fillLocation);
+  if (transfer.pickupAtPharmacy && transfer.pickupLocation && transfer.pickupLocation !== HUB_LOCATION) candidates.push(transfer.pickupLocation);
+  return [...new Set(candidates)][0] || null;
+}
+
 // Teams notification: status changed to Pending Clarification or Needs Formula.
-// Pings the origin pharmacy so they know their order is held up. For non-transfer
-// pickups where the "origin" is really the fill pharmacy, effectiveOriginLocation
-// resolves to the pickup pharmacy — the team that actually needs to know.
+// Posts into the satellite-Erie chat so both sides see it (via chatWebhookKey).
 async function notifyTeamsStatusDelay(transfer, oldStatus, newStatus) {
-  const target = effectiveOriginLocation(transfer);
-  if (!target || target === CURRENT_USER.location) return;
+  const chatLoc = chatWebhookKey(transfer);
+  if (!chatLoc) return;
   const portalUrl = window.location.origin + window.location.pathname + '?transfer=' + encodeURIComponent(transfer.id);
   try {
     await fetch('/api/notify-teams', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         kind: 'status_delay',
-        locations: [target],
+        locations: [chatLoc],
         transferId: transfer.id,
         patientName: transfer.patientName,
         drug: (transfer.items[0] && transfer.items[0].drug) || '',
@@ -8619,11 +8630,11 @@ async function notifyTeamsStatusDelay(transfer, oldStatus, newStatus) {
   } catch (e) { console.warn('Teams status notification failed', e); }
 }
 
-// Teams notification: anticipated ship date was changed by someone NOT at the
-// originating pharmacy. Pings origin so they know shipping plans shifted.
+// Teams notification: anticipated ship date was changed. Posts into the satellite-Erie
+// chat so both sides see it.
 async function notifyTeamsAntShipChange(transfer, oldDate, newDate) {
-  const target = effectiveOriginLocation(transfer);
-  if (!target || target === CURRENT_USER.location) return;
+  const chatLoc = chatWebhookKey(transfer);
+  if (!chatLoc) return;
   if (!oldDate && !newDate) return;
   const portalUrl = window.location.origin + window.location.pathname + '?transfer=' + encodeURIComponent(transfer.id);
   try {
@@ -8631,7 +8642,7 @@ async function notifyTeamsAntShipChange(transfer, oldDate, newDate) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         kind: 'ant_ship_change',
-        locations: [target],
+        locations: [chatLoc],
         transferId: transfer.id,
         patientName: transfer.patientName,
         drug: (transfer.items[0] && transfer.items[0].drug) || '',
@@ -8644,19 +8655,16 @@ async function notifyTeamsAntShipChange(transfer, oldDate, newDate) {
   } catch (e) { console.warn('Teams ant-ship-change notification failed', e); }
 }
 
-// Teams notification: routes a question to the OTHER side(s) of the transfer.
-// For non-transfer pickups the pickup pharmacy is the "other side" even though
-// originLocation on paper is the fill pharmacy — effectiveOriginLocation resolves
-// that correctly.
+// Teams notification: routes a question into the satellite-Erie chat. Both Erie and
+// the satellite are in that chat so either side asking notifies the same channel.
 async function notifyTeamsAboutQuestion(transfer, question) {
   const locations = new Set();
-  const effOrigin = effectiveOriginLocation(transfer);
-  // Notify the side(s) the asker is NOT at
-  if (effOrigin && effOrigin !== CURRENT_USER.location) locations.add(effOrigin);
-  if (transfer.fillLocation && transfer.fillLocation !== CURRENT_USER.location) locations.add(transfer.fillLocation);
+  const chatLoc = chatWebhookKey(transfer);
+  if (chatLoc) locations.add(chatLoc);
   if (locations.size === 0) {
-    // Asker is at both origin and fill (rare) — notify both anyway
-    if (effOrigin) locations.add(effOrigin);
+    // Transfer doesn't touch Erie at all (both sides are satellites) — fall back to
+    // the raw origin/fill so at least one side gets notified if a chat exists there.
+    if (transfer.originLocation) locations.add(transfer.originLocation);
     if (transfer.fillLocation) locations.add(transfer.fillLocation);
   }
   const portalUrl = window.location.origin + window.location.pathname + '?transfer=' + encodeURIComponent(transfer.id);
@@ -8686,9 +8694,13 @@ function openAskQuestionModal(transferId) {
   if (!t) return;
   const root = document.getElementById('modalRoot');
   const otherSides = new Set();
-  const effOrigin = effectiveOriginLocation(t);
-  if (effOrigin && effOrigin !== CURRENT_USER.location) otherSides.add(effOrigin);
-  if (t.fillLocation && t.fillLocation !== CURRENT_USER.location) otherSides.add(t.fillLocation);
+  const chatLoc = chatWebhookKey(t);
+  if (chatLoc) otherSides.add(chatLoc);
+  if (otherSides.size === 0) {
+    // No Erie involvement — fall back to raw origin/fill for the preview
+    if (t.originLocation) otherSides.add(t.originLocation);
+    if (t.fillLocation) otherSides.add(t.fillLocation);
+  }
   root.innerHTML = `<div class="modal-overlay" id="aqOverlay"><div class="modal" style="max-width:560px">
     <div class="modal-header"><div><div class="modal-title">Ask a Question</div><div class="item-sub">About: ${escapeHtml(displayPatientName(t))} · ${originFillDisplay(t)}</div></div><button class="modal-close" id="aqClose">&times;</button></div>
     <div class="modal-body">
