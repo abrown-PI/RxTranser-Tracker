@@ -844,6 +844,7 @@ function docListForTransfer(t, kind) {
   if (!files.length) return '<span class="item-sub">— none attached</span>';
   const pageImageKind = kind === 'pkSheets' ? 'transfer' : 'hardcopy';
   const fallbackPages = (t.pageImages || []).filter(p => p.kind === pageImageKind && p.blobName);
+  const label = kind === 'pkSheets' ? 'PK sheet' : 'hardcopy';
   return files.map(f => {
     const url = f.dataUrl || (f.blobName ? blobUrl(f.blobName) : null);
     if (url) return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--primary)">${escapeHtml(f.name)}</a>`;
@@ -851,7 +852,9 @@ function docListForTransfer(t, kind) {
       const links = fallbackPages.map(p => `<a href="${escapeHtml(blobUrl(p.blobName))}" target="_blank" rel="noopener" style="color:var(--primary)">page ${p.pageNum}</a>`).join(' · ');
       return `<span class="item-sub">${escapeHtml(f.name)}</span> → ${links}`;
     }
-    return `<span class="item-sub" style="color:var(--gray-500)">${escapeHtml(f.name)} <em>(no data)</em></span>`;
+    // No blob and no fallback page = the upload silently failed at submit time.
+    // Make this LOUD so it doesn't hide in gray text — Rx techs need to re-scan.
+    return `<span style="display:inline-block;padding:3px 8px;background:var(--danger-bg,#fee2e2);border:1px solid var(--danger,#dc2626);color:var(--danger,#dc2626);border-radius:4px;font-weight:600">⚠ ${escapeHtml(f.name)} — ${label} scan was not saved (re-upload needed)</span>`;
   }).join(', ');
 }
 // Build a bulk shipment ID like BULK-20260529-CPL-001.
@@ -4831,6 +4834,23 @@ function submitDraft() {
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "Credit card on file")');
   if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
 
+  // Block submit if any attached document file failed to upload — otherwise the transfer
+  // saves with metadata (name/size) but no actual blob, and the receiving pharmacy sees
+  // a "no data" placeholder. Previously silent; now forces the tech to re-upload the file
+  // before the transfer can be submitted. Also blocks any bulk-carried pageImage without a blob.
+  const brokenFileNames = [];
+  ['pkSheets','hardCopies'].forEach(k => {
+    (d[k] || []).forEach(f => { if (!f.blobName && !f.dataUrl) brokenFileNames.push(`${k === 'pkSheets' ? 'PK Sheet' : 'Hard Copy'}: ${f.name}`); });
+  });
+  const brokenPageCount = (d.pageImages || []).filter(p => !p.blobName).length;
+  if (brokenFileNames.length || brokenPageCount) {
+    const parts = [];
+    if (brokenFileNames.length) parts.push('These uploads failed and will not be saved:\n  • ' + brokenFileNames.join('\n  • '));
+    if (brokenPageCount) parts.push(`${brokenPageCount} bulk page image${brokenPageCount>1?'s':''} could not be uploaded to blob storage.`);
+    alert('⚠ Cannot submit — one or more attachments did not upload:\n\n' + parts.join('\n\n') + '\n\nRe-select the file(s) and wait for the ✓ upload confirmation before submitting.');
+    return;
+  }
+
   // Canonicalize drug names — turns Florida's "N. METHYLCOBALAMIN/..." and
   // injection-kit shorthand into the canonical PRELOADED_DRUGS form before save.
   (d.items || []).forEach(it => { it.drug = canonicalizeDrugName(it.drug); });
@@ -7118,14 +7138,18 @@ async function approveBulkDraft(id, skipAlert) {
       if (blobName) { p.blobName = blobName; delete p.dataUrl; }
     }
   }
-  // Any pages still without blobName after the retry — warn the user before committing.
+  // Any pages still without blobName after the retry — HARD BLOCK. Previously this was a
+  // confirm dialog with an "Approve anyway" option; users were clicking through and shipping
+  // transfers with silently-missing hardcopy scans (Melissa/Seminole batch on 2026-07-14 —
+  // TRAN, CHAPDELAINE, MILLS all lost their hardcopy blobs this way). Force the user to Reject
+  // the draft and re-scan rather than commit an incomplete transfer.
   const stillMissing = (b.pageImages || []).filter(p => !p.blobName).length;
   if (stillMissing) {
-    const proceed = confirm(`⚠ ${stillMissing} page image${stillMissing>1?'s':''} still could not be uploaded after a retry.\n\nApprove anyway? Those pages will show as "(no data)" on the transfer.\n\nCancel to keep the draft in the queue so you can Reject it and re-upload the PDF once the connection is back.`);
-    if (!proceed) return;
+    alert(`⚠ Cannot approve — ${stillMissing} page image${stillMissing>1?'s'+' (including hardcopy)':''} could not be uploaded after retry.\n\nReject this draft from the queue and re-upload the PDF. Approving now would save the transfer WITHOUT the scan.`);
+    return;
   }
   // Re-check status after the retry — bulkDraftStatus counts failed uploads too.
-  if (bulkDraftStatus(b) !== 'ok' && stillMissing === 0) { alert('Draft has missing required fields. Edit and complete it first.'); return; }
+  if (bulkDraftStatus(b) !== 'ok') { alert('Draft has missing required fields. Edit and complete it first.'); return; }
   const t = {
     ...b.draft,
     id: nextId(),
