@@ -1,0 +1,28 @@
+name: Keep-warm ping (business hours)
+
+# SWA managed Functions cold-start after ~20 min idle. GitHub Actions cron
+# is the right lever here (managed Functions don't support TimerTriggers).
+# Pings a cheap anonymous endpoint every ~5 min during ET business hours so
+# staff don't hit the 1-4s spin-up on the first page load of the morning.
+
+on:
+  schedule:
+    # Every 5 min, 11:00-23:59 UTC = 7am-7:59pm ET (EDT) / 6am-6:59pm ET (EST).
+    # GH cron skips runs under load; effective cadence is more like 5-15 min,
+    # which is still well inside the 20-min idle window.
+    - cron: '*/5 11-23 * * 1-6'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/settings
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://red-island-0bb34e510.7.azurestaticapps.net/api/settings")
+          echo "HTTP $status"
+          # Non-2xx is a soft warning — we don't want a flaky ping to page anyone.
+          if [ "$status" -lt 200 ] || [ "$status" -ge 400 ]; then
+            echo "::warning::Warmup ping returned $status"
+          fi
