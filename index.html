@@ -1368,7 +1368,7 @@ function renderTransfers() {
     if (state.dateTo) { if (!t.createdAt || t.createdAt.slice(0,10) > state.dateTo) return false; }
     if (state.search) {
       const q = state.search.toLowerCase();
-      const hay = (t.patientName + ' ' + (t.patientFirstName||'') + ' ' + (t.patientLastName||'') + ' ' + (t.patientFirstName||'') + ' ' + (t.patientLastName||'') + ' ' + t.trackingNumber + ' ' + t.items.map(i=>i.drug+' '+i.rxNumber+' '+(i.receivingRxNumber||'')).join(' ')).toLowerCase();
+      const hay = (String(t.id) + ' ' + t.patientName + ' ' + (t.patientFirstName||'') + ' ' + (t.patientLastName||'') + ' ' + t.trackingNumber + ' ' + t.items.map(i=>i.drug+' '+i.rxNumber+' '+(i.receivingRxNumber||'')).join(' ')).toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -1395,7 +1395,7 @@ function renderTransfers() {
       <button class="btn btn-secondary btn-sm" id="f-saveDefault" title="Save current filters as your default view (this browser, your account)" style="padding:3px 9px;font-size:11px">💾 Save as default</button>
       <button class="btn btn-secondary btn-sm" id="f-resetAll" title="Clear every filter and reset to all transfers" style="padding:3px 9px;font-size:11px">↺ Reset</button>
       <span style="width:1px;height:24px;background:var(--gray-300);margin:0 4px"></span>
-      <input placeholder="Search patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:200px;flex:0 1 220px" />
+      <input placeholder="Search ID / patient / Rx / tracking" id="f-search" value="${escapeHtml(state.search)}" style="min-width:220px;flex:0 1 240px" />
       <label style="font-size:12px;color:var(--gray-600)">Sort</label>
       <select id="f-sortBy">
         <option value="dateDesc" ${state.sortBy==='dateDesc'?'selected':''}>Transfer date (newest)</option>
