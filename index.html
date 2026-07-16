@@ -4869,6 +4869,12 @@ function submitDraft() {
     if (!existing) { alert('Original transfer not found.'); return; }
     // Capture the prior anticipated ship date so we can notify origin if it shifted
     const oldAntShipDate = existing.anticipatedShipDate || '';
+    // Snapshot the fields we want to diff for the audit trail. Keeping this
+    // list explicit so audit entries stay meaningful (e.g. we don't spam the
+    // history with pageImages / pkSheets churn on every re-scan).
+    const AUDIT_FIELDS = ['transferType','patientName','patientFirstName','patientLastName','patientDOB','originLocation','fillLocation','shipTo','billing','anticipatedShipDate','appointmentDate','pickupAtPharmacy','pickupLocation','coldItem','shipAddr1','shipCity','shipState','shipZip','deliveryCharge','patientPrice','tempAddress','tempThroughDate'];
+    const _before = {};
+    AUDIT_FIELDS.forEach(k => { _before[k] = existing[k]; });
     // Merge: preserve fields we don't edit in this form (status, tracking, dates, comments)
     Object.assign(existing, {
       transferType: d.transferType, refillOfId: d.refillOfId, legacyRefill: !!d.legacyRefill,
@@ -4892,7 +4898,13 @@ function submitDraft() {
       lastEditedBy: CURRENT_USER.name, lastEditedAt: new Date().toISOString()
     });
     apiUpdateTransfer(existing);
-    logAudit('edit_transfer', 'transfer', existing.id);
+    const _changes = [];
+    AUDIT_FIELDS.forEach(k => {
+      const a = _before[k], b = existing[k];
+      const norm = v => (v === undefined || v === null) ? '' : (typeof v === 'boolean' ? String(v) : String(v));
+      if (norm(a) !== norm(b)) _changes.push({ field: k, from: norm(a), to: norm(b) });
+    });
+    logAudit('edit_transfer', 'transfer', existing.id, _changes.length ? { changes: _changes } : null);
     // If the anticipated ship date changed AND the editor is not at the originating
     // pharmacy, the fill location is shifting the schedule — notify origin.
     if (oldAntShipDate !== existing.anticipatedShipDate) {
@@ -5317,6 +5329,12 @@ function renderModal() {
             </div>
           </div>
           </div>
+
+          <div class="section"><div class="section-title" style="display:flex;align-items:center;gap:8px">History <button class="btn btn-secondary btn-sm" id="refreshHistoryBtn" style="padding:2px 8px;font-size:11px">↻</button></div>
+          <div id="historyList" style="font-size:12px;line-height:1.6;max-height:260px;overflow:auto">
+            <div class="item-sub" style="padding:6px 2px">Loading history…</div>
+          </div>
+          </div>
         </div>
         <div class="modal-footer">
           ${(CURRENT_USER.role === 'admin' || CURRENT_USER.location === t.originLocation) ? `<button class="btn btn-danger btn-sm" id="deleteTransferBtn" title="Permanently delete this transfer">🗑 Delete</button>` : ''}
@@ -5328,6 +5346,9 @@ function renderModal() {
   `;
   renderItems(t);
   renderComments(t);
+  renderHistory(t);
+  const refreshHistBtn = document.getElementById('refreshHistoryBtn');
+  if (refreshHistBtn) refreshHistBtn.addEventListener('click', () => renderHistory(t));
   document.getElementById('modalOverlay').addEventListener('click', e => { if (e.target.id === 'modalOverlay') closeModal(); });
   document.getElementById('modalClose').addEventListener('click', closeModal);
   document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
@@ -5530,6 +5551,86 @@ function renderItems(t) {
       }
     });
   });
+}
+
+// Fetch and render the audit trail for one transfer inside the detail modal.
+// Data lives in the /api/audit table; entries are appended by logAudit() calls
+// throughout the app. Fetching per-modal (not per-render) keeps chatter low
+// while still letting a user pull latest with the ↻ button.
+async function renderHistory(t) {
+  const wrap = document.getElementById('historyList');
+  if (!wrap) return;
+  try {
+    const r = await fetch(`/api/audit?entityType=transfer&entityId=${encodeURIComponent(t.id)}&limit=200`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    // Drop view-only entries — every modal-open logs one, so keeping them here
+    // would bury the actual change events. The raw audit table still has them.
+    const entries = (data.entries || [])
+      .filter(e => e.action !== 'view_transfer')
+      .slice().sort((a,b) => (a.ts||'').localeCompare(b.ts||''));
+    if (!entries.length) {
+      wrap.innerHTML = '<div class="item-sub" style="padding:6px 2px">No recorded changes yet. (History captures actions from this point forward.)</div>';
+      return;
+    }
+    wrap.innerHTML = entries.map(e => {
+      const when = e.ts ? new Date(e.ts).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }) : '';
+      let details = null;
+      try { details = e.details ? JSON.parse(e.details) : null; } catch {}
+      const label = describeAuditAction(e.action, details);
+      const who = e.actor || e.actorEmail || 'unknown';
+      return `<div style="padding:5px 2px;border-bottom:1px solid var(--gray-100,#eee)">
+        <span style="color:var(--gray-600,#666);font-variant-numeric:tabular-nums">${escapeHtml(when)}</span>
+        &middot; <strong>${escapeHtml(who)}</strong>
+        &middot; ${label}
+      </div>`;
+    }).join('');
+  } catch (err) {
+    wrap.innerHTML = `<div class="item-sub" style="padding:6px 2px;color:var(--danger,#c00)">Could not load history: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Turn an audit row into a human-readable line. Keep this dumb + additive:
+// unknown actions render as-is so we never lose data, and details show inline
+// only when they carry useful context (from/to values, reasons, etc).
+function describeAuditAction(action, details) {
+  const d = details || {};
+  switch (action) {
+    case 'create_transfer':
+      return `created transfer${d.transferType ? ` <span class="item-sub">(${escapeHtml(d.transferType)}${d.originLocation?`, ${escapeHtml(d.originLocation)}→${escapeHtml(d.fillLocation||'?')}`:''})</span>` : ''}`;
+    case 'edit_transfer': {
+      if (Array.isArray(d.changes) && d.changes.length) {
+        const parts = d.changes.map(c => {
+          const label = ({
+            transferType:'Type', patientName:'Patient', patientFirstName:'First Name', patientLastName:'Last Name',
+            patientDOB:'DOB', originLocation:'Origin', fillLocation:'Fill Location', shipTo:'Ship To',
+            billing:'Billing', anticipatedShipDate:'Ant. Ship', appointmentDate:'Appt Date',
+            pickupAtPharmacy:'Pickup?', pickupLocation:'Pickup Loc', coldItem:'Cold?',
+            shipAddr1:'Address', shipCity:'City', shipState:'State', shipZip:'Zip',
+            deliveryCharge:'Delivery $', patientPrice:'Patient $',
+            tempAddress:'Temp Addr?', tempThroughDate:'Temp Thru'
+          })[c.field] || c.field;
+          return `<strong>${escapeHtml(label)}</strong>: ${escapeHtml(c.from||'∅')} → ${escapeHtml(c.to||'∅')}`;
+        });
+        return `edited transfer <span class="item-sub">— ${parts.join('; ')}</span>`;
+      }
+      return 'edited transfer';
+    }
+    case 'status_change':
+      return `changed status: <strong>${escapeHtml(d.from||'?')}</strong> → <strong>${escapeHtml(d.to||'?')}</strong>`;
+    case 'mark_paid':      return 'marked <strong>Paid</strong>';
+    case 'undo_paid':      return 'undid Paid status';
+    case 'mark_received':  return 'marked Received';
+    case 'delete_transfer':return '<span style="color:var(--danger,#c00)">deleted transfer</span>';
+    case 'view_transfer':  return '<span class="item-sub">viewed transfer</span>';
+    case 'pickup_signed':  return 'captured pickup signature';
+    case 'rts_requested':  return `requested return-to-stock${d.reason?` <span class="item-sub">— ${escapeHtml(d.reason)}</span>`:''}`;
+    case 'rts_acknowledged': return `acknowledged return-to-stock${d.reason?` <span class="item-sub">— ${escapeHtml(d.reason)}</span>`:''}`;
+    default: {
+      const dstr = details ? ` <span class="item-sub">(${escapeHtml(JSON.stringify(details))})</span>` : '';
+      return `${escapeHtml(action)}${dstr}`;
+    }
+  }
 }
 
 function renderComments(t) {
