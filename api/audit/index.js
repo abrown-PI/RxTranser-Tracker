@@ -61,15 +61,23 @@ module.exports = async function (context, req) {
     if (method === 'GET') {
       const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
       const since = req.query.since;
-      // Scan newest partition first (current month) — most queries are recent
+      const entityType = req.query.entityType ? String(req.query.entityType) : null;
+      const entityId = req.query.entityId ? String(req.query.entityId) : null;
+      // When scoped to a single entity, widen the month window so we can surface
+      // the full lifecycle even if the transfer was created many months ago.
+      const monthsToScan = entityId ? 24 : 6;
       const out = [];
       const now = new Date();
-      // Iterate up to 6 most recent months
-      for (let i = 0; i < 6 && out.length < limit; i++) {
+      for (let i = 0; i < monthsToScan && out.length < limit; i++) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const pk = d.toISOString().slice(0, 7);
+        const filters = [`PartitionKey eq '${pk}'`];
+        // Server-side filter on entityType/entityId keeps us from streaming a
+        // full month's rows just to find the ~dozen that belong to one transfer.
+        if (entityType) filters.push(`entityType eq '${entityType.replace(/'/g, "''")}'`);
+        if (entityId) filters.push(`entityId eq '${entityId.replace(/'/g, "''")}'`);
         try {
-          for await (const e of table.listEntities({ queryOptions: { filter: `PartitionKey eq '${pk}'` } })) {
+          for await (const e of table.listEntities({ queryOptions: { filter: filters.join(' and ') } })) {
             if (since && e.ts && e.ts < since) continue;
             out.push({
               ts: e.ts, actor: e.actor, actorEmail: e.actorEmail,
