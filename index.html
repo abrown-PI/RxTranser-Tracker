@@ -4137,9 +4137,11 @@ function draftFromRefill(source) {
     coldItem: !!source.coldItem,
     anticipatedShipDate: '',
     // Carry over docs from the source transfer — same prescription, same paperwork.
-    // User can replace/remove on the form if anything changed.
-    pkSheets: (source.pkSheets || []).slice(),
-    hardCopies: (source.hardCopies || []).slice(),
+    // Only inherit files that actually have a blob pointer we can retrieve; ghost
+    // entries (name/size only, no blobName + no dataUrl) would otherwise trip the
+    // "failed upload" guard on submit and block the refill entirely.
+    pkSheets: (source.pkSheets || []).filter(f => f && (f.blobName || f.dataUrl)),
+    hardCopies: (source.hardCopies || []).filter(f => f && (f.blobName || f.dataUrl)),
     formula: source.formula || null,
     // Same prescription = same Rx numbers. User can override on the form if needed.
     items: source.items.map(i => ({
