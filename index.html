@@ -1860,32 +1860,19 @@ function askAntShipDateBeforePrint(transfers, onProceed) {
 }
 
 // Batch-print PK transfer sheets + hard copies for selected transfers.
-// After the print window opens, auto-advance any 'New' transfers to 'In Progress'.
-// All mutations (anticipated ship date + status auto-advance) are combined
-// into a single PUT per transfer to avoid the race where two back-to-back
-// fire-and-forget PUTs can arrive out of order and revert the status.
+// Status is NOT auto-advanced on print — techs asked to control status changes
+// themselves (printing the paperwork doesn't mean the Rx has been filled).
 function batchPrintTransfers(ids) {
   if (!ids.length) return;
   const transfers = ids.map(id => TRANSFERS.find(t => t.id === id)).filter(Boolean);
   askAntShipDateBeforePrint(transfers, (newDate) => {
-    // Mutate locally first, then fire ONE PUT per transfer.
-    let advanced = 0;
     transfers.forEach(t => {
-      if (newDate) t.anticipatedShipDate = newDate;
-      if (t.status === 'New') { t.status = 'In Progress'; advanced++; }
-      apiUpdateTransfer(t);
+      if (newDate) { t.anticipatedShipDate = newDate; apiUpdateTransfer(t); }
     });
     const docs = transfers.flatMap(getPrintableDocsForTransfer);
     printDocs(docs);
     state.printSelection.clear();
-    if (advanced) {
-      setTimeout(() => {
-        alert(`Print queue opened. ${advanced} transfer(s) auto-advanced to "In Progress".`);
-        render();
-      }, 300);
-    } else {
-      render();
-    }
+    render();
   });
 }
 
@@ -5421,13 +5408,8 @@ function renderModal() {
   const printAttachBtn = document.getElementById('printAttachmentsBtn');
   if (printAttachBtn) printAttachBtn.addEventListener('click', () => {
     askAntShipDateBeforePrint([t], (newDate) => {
-      // Combine ship-date set + status auto-advance (New → In Progress) into a single PUT to
-      // mirror batchPrintTransfers. Previously this path skipped the advance — printing from
-      // the modal left the status in "New" even though the docs went out the door.
-      let changed = false;
-      if (newDate) { t.anticipatedShipDate = newDate; changed = true; }
-      if (t.status === 'New') { t.status = 'In Progress'; changed = true; }
-      if (changed) apiUpdateTransfer(t);
+      // Status stays as-is on print — the tech decides when to advance it.
+      if (newDate) { t.anticipatedShipDate = newDate; apiUpdateTransfer(t); }
       printDocs(getPrintableDocsForTransfer(t));
     });
   });
