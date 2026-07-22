@@ -1373,7 +1373,14 @@ function renderTransfers() {
     }
     return true;
   });
+  // Urgent transfers pin to the top of the queue regardless of the chosen sort — but
+  // only while still actionable (once shipped/delivered/received/canceled they fall
+  // back into the normal chronological order so they don't clog the top forever).
+  const URGENT_ACTIVE = new Set(['New','In Progress','Pending Clarification','Needs Formula']);
+  const isPinned = t => !!t.isUrgent && URGENT_ACTIVE.has(t.status);
   filtered.sort((a,b) => {
+    const pa = isPinned(a), pb = isPinned(b);
+    if (pa !== pb) return pa ? -1 : 1;
     if (state.sortBy === 'patient') return (a.patientName||'').localeCompare(b.patientName||'');
     if (state.sortBy === 'patientDesc') return (b.patientName||'').localeCompare(a.patientName||'');
     if (state.sortBy === 'dateAsc') return new Date(a.createdAt) - new Date(b.createdAt);
@@ -1447,7 +1454,7 @@ function renderTransfers() {
           return `<tr class="${rowClass}" data-id="${t.id}">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="print-pick" data-pick="${t.id}" ${state.printSelection.has(t.id)?'checked':''} /></td>
             <td><code style="font-family:monospace;font-size:12px;font-weight:600;color:var(--primary-dark)">${t.id}</code></td>
-            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap"><span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${isWeightLossTransfer(t)?'<span class="badge" style="font-size:10px;background:#ede9fe;color:#5b21b6" title="Weight-loss medication (auto-detected)">⚖ Weight Loss</span>':''}${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${(t.returnToStock && !t.returnToStock.acknowledgedAt)?`<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Return-to-stock requested by ${escapeHtml(t.returnToStock.requestedFrom||'?')} — waiting on ${escapeHtml(t.fillLocation)} to reverse">⤺ RTS pending</span>`:''}${(t.returnToStock && t.returnToStock.acknowledgedAt)?'<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Reversed in PK">✓ Reversed</span>':''}${(t.pickupSignature && t.pickupSignature.blobName)?`<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Signed at pickup on ${new Date(t.pickupSignature.signedAt).toLocaleDateString()}">✍️ Signed</span>`:''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
+            <td>${t.isBulkPickup ? `<strong style="color:var(--primary-dark)">📦 BULK PICKUP</strong> <span class="badge badge-verified" style="font-size:10px">${escapeHtml(String(t.bulkScriptCount||'?'))} scripts</span>${t.isUrgent?' <span class="badge" style="font-size:10px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Marked urgent / high priority">🚨 URGENT</span>':''}${cancelWarn}${t.bulkDescription?`<div class="item-sub">${escapeHtml(t.bulkDescription.slice(0,60))}</div>`:''}` : `<div style="font-weight:700;line-height:1.2">${displayPatientNameTwoLine(t)}</div><div style="margin-top:2px;display:flex;gap:3px;flex-wrap:wrap">${t.isUrgent?'<span class="badge" style="font-size:10px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Marked urgent / high priority">🚨 URGENT</span>':''}<span class="badge ${t.transferType==='Refill'?'badge-verified':'badge-new'}" style="font-size:10px">${t.transferType==='Refill'?'Refill':'New'}</span>${isWeightLossTransfer(t)?'<span class="badge" style="font-size:10px;background:#ede9fe;color:#5b21b6" title="Weight-loss medication (auto-detected)">⚖ Weight Loss</span>':''}${t.coldItem?'<span class="badge badge-cold">Cold</span>':''}${(t.returnToStock && !t.returnToStock.acknowledgedAt)?`<span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Return-to-stock requested by ${escapeHtml(t.returnToStock.requestedFrom||'?')} — waiting on ${escapeHtml(t.fillLocation)} to reverse">⤺ RTS pending</span>`:''}${(t.returnToStock && t.returnToStock.acknowledgedAt)?'<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Reversed in PK">✓ Reversed</span>':''}${(t.pickupSignature && t.pickupSignature.blobName)?`<span class="badge" style="font-size:10px;background:#dcfce7;color:#166534" title="Signed at pickup on ${new Date(t.pickupSignature.signedAt).toLocaleDateString()}">✍️ Signed</span>`:''}${cancelWarn}</div><div class="item-sub">DOB ${fmtDate(t.patientDOB)}</div>`}</td>
             <td>${(() => {
               const drugs = (t.items || []).map(i => i.drug).filter(Boolean);
               if (t.isBulkPickup) return '<span class="item-sub">—</span>';
@@ -3760,6 +3767,7 @@ function renderNewForm() {
       <div class="form-grid">
         <div class="form-group"><label>Origin Location</label><select id="f-originLocation">${LOCATIONS.map(l=>`<option ${l===d.originLocation?'selected':''}>${l}</option>`).join('')}</select></div>
         <div class="form-group"><label>Fill Location</label><select id="f-fillLocation">${LOCATIONS.map(l=>`<option ${l===d.fillLocation?'selected':''}>${l}</option>`).join('')}</select><div class="hint">Erie handles sterile compounds</div></div>
+        <div class="form-group full"><div class="checkbox-row"><input type="checkbox" id="f-isUrgent" ${d.isUrgent?'checked':''} /><label for="f-isUrgent"><strong style="color:var(--danger)">🚨 Mark as Urgent / High Priority</strong> <span class="hint" style="text-transform:none;font-weight:400">— pins the transfer to the top of the queue with a red badge</span></label></div></div>
       </div></div>
 
       <div class="section"><div class="section-title">Shipping</div>
@@ -4525,7 +4533,7 @@ function bindDraftInputs() {
   if (shipToSel) shipToSel.addEventListener('change', fillPharmacyAddress);
   const originSel2 = document.getElementById('f-originLocation');
   if (originSel2) originSel2.addEventListener('change', fillPharmacyAddress);
-  ['coldItem','ccPaladin','offeredTabz'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('change', () => { state.draft[f==='ccPaladin'?'ccOnFileInPaladin':f] = el.checked; }); });
+  ['coldItem','ccPaladin','offeredTabz','isUrgent'].forEach(f => { const el = document.getElementById('f-'+f); if (el) el.addEventListener('change', () => { state.draft[f==='ccPaladin'?'ccOnFileInPaladin':f] = el.checked; }); });
   // Only show the "Offered Tabz?" gate when billing is Credit Card or Pay in Store — Tabz
   // itself and Program are inherently paid-first, so no confirmation needed.
   const billingSelPay = document.getElementById('f-billing');
@@ -4823,6 +4831,20 @@ function submitDraft() {
   if (d.billing === 'CreditCard' && !d.ccOnFileInPaladin && !d.ccForm) missing.push('Signed Credit Card Authorization Form (or check "Credit card on file")');
   if (missing.length) { alert('Required fields missing:\n\n• ' + missing.join('\n• ')); return; }
 
+  // Same-store guard: Erie→Erie, Jamestown→Jamestown, etc. get missed when techs
+  // filter the queue by store because "Origin OR Fill matches Erie" naturally puts
+  // the transfer under Erie for both sides — but if the queue is filtered to "only
+  // outgoing from Erie" or "only incoming to Erie" logic downstream, the row can
+  // fall through. Feven/Amanda flagged this after a Waltz refill went un-noticed.
+  // Bulk pickups + pickup-at-pharmacy legitimately have same source/dest, so skip
+  // those. Also skip if the user already confirmed once (so they don't re-see it
+  // after fixing other validation errors).
+  if (!d.isBulkPickup && !d.pickupAtPharmacy && d.originLocation && d.originLocation === d.fillLocation && !d._sameStoreConfirmed) {
+    const ok = confirm(`⚠ You've selected "${d.originLocation}" as BOTH the Origin and the Fill Location.\n\nSame-store transfers can be missed when the queue is filtered by store. Please double-check that this is correct.\n\nClick OK to submit anyway, or Cancel to fix the Routing section.`);
+    if (!ok) return;
+    d._sameStoreConfirmed = true;
+  }
+
   // Block submit if any attached document file failed to upload — otherwise the transfer
   // saves with metadata (name/size) but no actual blob, and the receiving pharmacy sees
   // a "no data" placeholder. Previously silent; now forces the tech to re-upload the file
@@ -4861,7 +4883,7 @@ function submitDraft() {
     // Snapshot the fields we want to diff for the audit trail. Keeping this
     // list explicit so audit entries stay meaningful (e.g. we don't spam the
     // history with pageImages / pkSheets churn on every re-scan).
-    const AUDIT_FIELDS = ['transferType','patientName','patientFirstName','patientLastName','patientDOB','originLocation','fillLocation','shipTo','billing','anticipatedShipDate','appointmentDate','pickupAtPharmacy','pickupLocation','coldItem','shipAddr1','shipCity','shipState','shipZip','deliveryCharge','patientPrice','tempAddress','tempThroughDate'];
+    const AUDIT_FIELDS = ['transferType','patientName','patientFirstName','patientLastName','patientDOB','originLocation','fillLocation','shipTo','billing','anticipatedShipDate','appointmentDate','pickupAtPharmacy','pickupLocation','coldItem','shipAddr1','shipCity','shipState','shipZip','deliveryCharge','patientPrice','tempAddress','tempThroughDate','isUrgent'];
     const _before = {};
     AUDIT_FIELDS.forEach(k => { _before[k] = existing[k]; });
     // Merge: preserve fields we don't edit in this form (status, tracking, dates, comments)
@@ -4876,6 +4898,7 @@ function submitDraft() {
       billing: d.billing, ccOnFileInPaladin: d.ccOnFileInPaladin, ccForm: d.ccForm,
       patientPrice: d.patientPrice || '',
       offeredTabz: !!d.offeredTabz,
+      isUrgent: !!d.isUrgent,
       coldItem: d.coldItem, anticipatedShipDate: d.anticipatedShipDate,
       tempAddress: !!d.tempAddress, tempThroughDate: d.tempThroughDate || '',
       appointmentDate: d.appointmentDate || '',
@@ -5168,6 +5191,8 @@ function renderModal() {
             <span class="badge ${STATUS_BADGE[t.status]}">${t.status}</span>
             ${t.transferType==='Refill'?'<span class="badge badge-verified">Refill</span>':'<span class="badge badge-new">New Rx</span>'}
             ${t.coldItem?'<span class="badge badge-cold">Cold item</span>':''}
+            ${t.isUrgent?'<span class="badge" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Marked urgent">🚨 URGENT</span>':''}
+            <button class="btn btn-secondary btn-sm" id="toggleUrgentBtn" title="${t.isUrgent?'Remove urgent flag':'Flag this transfer as urgent — pins it to the top of the queue'}">${t.isUrgent?'🚨 Clear Urgent':'🚨 Mark Urgent'}</button>
             <button class="btn btn-secondary btn-sm" id="editTransferBtn" title="Edit patient, routing, shipping, billing, documents">✏️ Edit Transfer</button>
             <button class="btn btn-secondary btn-sm" id="askQBtn" title="Ask the other team a question about this transfer">❓ Ask Question</button>
             <button class="btn btn-primary btn-sm" id="refillBtn" title="Start a new transfer pre-filled from this one">📋 Refill this Rx</button>
@@ -5422,6 +5447,16 @@ function renderModal() {
     transferMeta: `${effectiveOriginLocation(t)} → ${t.fillLocation}${t.transferType==='Refill'?' · Refill':''}`,
     title: 'Transfer Summary'
   }]));
+  const urgBtn = document.getElementById('toggleUrgentBtn');
+  if (urgBtn) urgBtn.addEventListener('click', () => {
+    const nowUrgent = !t.isUrgent;
+    t.isUrgent = nowUrgent;
+    t.lastEditedBy = CURRENT_USER.name;
+    t.lastEditedAt = new Date().toISOString();
+    apiUpdateTransfer(t);
+    logAudit(nowUrgent ? 'mark_urgent' : 'clear_urgent', 'transfer', t.id, null);
+    openTransfer(t.id);
+  });
   document.getElementById('editTransferBtn').addEventListener('click', () => {
     // Deep-clone the transfer into the draft so user can cancel without affecting the original
     state.draft = JSON.parse(JSON.stringify(t));
@@ -5592,7 +5627,8 @@ function describeAuditAction(action, details) {
             pickupAtPharmacy:'Pickup?', pickupLocation:'Pickup Loc', coldItem:'Cold?',
             shipAddr1:'Address', shipCity:'City', shipState:'State', shipZip:'Zip',
             deliveryCharge:'Delivery $', patientPrice:'Patient $',
-            tempAddress:'Temp Addr?', tempThroughDate:'Temp Thru'
+            tempAddress:'Temp Addr?', tempThroughDate:'Temp Thru',
+            isUrgent:'Urgent?'
           })[c.field] || c.field;
           return `<strong>${escapeHtml(label)}</strong>: ${escapeHtml(c.from||'∅')} → ${escapeHtml(c.to||'∅')}`;
         });
@@ -5602,6 +5638,8 @@ function describeAuditAction(action, details) {
     }
     case 'status_change':
       return `changed status: <strong>${escapeHtml(d.from||'?')}</strong> → <strong>${escapeHtml(d.to||'?')}</strong>`;
+    case 'mark_urgent':    return 'flagged transfer <strong style="color:#991b1b">🚨 Urgent</strong>';
+    case 'clear_urgent':   return 'cleared urgent flag';
     case 'mark_paid':      return 'marked <strong>Paid</strong>';
     case 'undo_paid':      return 'undid Paid status';
     case 'mark_received':  return 'marked Received';
