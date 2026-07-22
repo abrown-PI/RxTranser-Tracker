@@ -5182,6 +5182,27 @@ function renderModal() {
           <button class="modal-close" id="modalClose">&times;</button>
         </div>
         <div class="modal-body">
+          ${(() => {
+            const master = t.duplicateOfId ? TRANSFERS.find(x => x.id === t.duplicateOfId) : null;
+            const dupsOfThis = TRANSFERS.filter(x => x.duplicateOfId === t.id);
+            let h = '';
+            if (master) {
+              h += `<div style="background:#fef3c7;border:1px solid #d97706;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <span>🔗</span>
+                <div style="flex:1"><strong style="color:#92400e">This is a duplicate of #${master.id}</strong> — ${escapeHtml(displayPatientName(master))}. New activity should happen there.</div>
+                <button class="btn btn-secondary btn-sm" data-open-transfer="${master.id}">Go to master →</button>
+                <button class="btn btn-secondary btn-sm" id="unmarkDuplicateBtn" title="Undo the duplicate link (does not un-cancel the transfer)">Unmark</button>
+              </div>`;
+            }
+            if (dupsOfThis.length) {
+              h += `<div style="background:#fef3c7;border:1px solid #d97706;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px">
+                <strong style="color:#92400e">🔗 Linked duplicates of this transfer:</strong>
+                ${dupsOfThis.map(d => `<a href="#" data-open-transfer="${d.id}" style="margin-left:6px;color:#92400e;text-decoration:underline">#${d.id} (${escapeHtml(displayPatientName(d))})</a>`).join(', ')}
+                <div class="hint" style="margin-top:4px">These transfers are canceled and were marked as duplicates of this one. Their comments stay on their own records.</div>
+              </div>`;
+            }
+            return h;
+          })()}
           <div style="background:var(--primary-bg);padding:8px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <strong style="color:var(--primary-dark);text-transform:uppercase;letter-spacing:.03em;font-size:11px">WorldShip Reference:</strong>
             <code style="background:white;padding:4px 10px;border-radius:4px;font-size:14px;font-weight:600;color:var(--primary-dark);border:1px solid var(--primary-light)">${t.id}</code>
@@ -5193,6 +5214,7 @@ function renderModal() {
             ${t.coldItem?'<span class="badge badge-cold">Cold item</span>':''}
             ${t.isUrgent?'<span class="badge" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Marked urgent">🚨 URGENT</span>':''}
             <button class="btn btn-secondary btn-sm" id="toggleUrgentBtn" title="${t.isUrgent?'Remove urgent flag':'Flag this transfer as urgent — pins it to the top of the queue'}">${t.isUrgent?'🚨 Clear Urgent':'🚨 Mark Urgent'}</button>
+            ${!t.duplicateOfId ? '<button class="btn btn-secondary btn-sm" id="markDuplicateBtn" title="Link this as a duplicate of another transfer and cancel it">🔗 Mark as Duplicate</button>' : ''}
             <button class="btn btn-secondary btn-sm" id="editTransferBtn" title="Edit patient, routing, shipping, billing, documents">✏️ Edit Transfer</button>
             <button class="btn btn-secondary btn-sm" id="askQBtn" title="Ask the other team a question about this transfer">❓ Ask Question</button>
             <button class="btn btn-primary btn-sm" id="refillBtn" title="Start a new transfer pre-filled from this one">📋 Refill this Rx</button>
@@ -5457,6 +5479,68 @@ function renderModal() {
     logAudit(nowUrgent ? 'mark_urgent' : 'clear_urgent', 'transfer', t.id, null);
     openTransfer(t.id);
   });
+  const dupBtn = document.getElementById('markDuplicateBtn');
+  if (dupBtn) dupBtn.addEventListener('click', () => {
+    const raw = prompt(`Mark #${t.id} as a duplicate of another transfer.\n\nEnter the ID of the MASTER transfer (the one to keep):`);
+    if (!raw) return;
+    const masterId = parseInt(String(raw).replace(/[^0-9]/g, ''), 10);
+    if (!masterId) { alert('Invalid ID.'); return; }
+    if (masterId === t.id) { alert('A transfer cannot be a duplicate of itself.'); return; }
+    const master = TRANSFERS.find(x => x.id === masterId);
+    if (!master) { alert(`Transfer #${masterId} not found.`); return; }
+    if (master.duplicateOfId) { alert(`#${masterId} is itself marked as a duplicate of #${master.duplicateOfId}. Use that ID as the master instead.`); return; }
+    const msg = `Mark this transfer as a duplicate of #${masterId}?\n\n  Duplicate: #${t.id} — ${displayPatientName(t)}\n  Master:    #${masterId} — ${displayPatientName(master)}\n\n• This transfer will be set to Canceled.\n• A cross-linked comment is added to both records.\n• You can undo this from the banner at the top of the modal.`;
+    if (!confirm(msg)) return;
+    const now = new Date().toISOString();
+    const author = CURRENT_USER.name;
+    t.duplicateOfId = masterId;
+    const oldStatus = t.status;
+    if (t.status !== 'Canceled') {
+      t.status = 'Canceled';
+      onTransferCanceled(t);
+      logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: 'Canceled', reason: `duplicate of #${masterId}` });
+    }
+    t.comments = t.comments || [];
+    t.comments.push({ id: nextId(), itemId: null, author, ts: now, body: `🔗 Marked as duplicate of #${masterId} (${displayPatientName(master)}).` });
+    t.lastEditedBy = author; t.lastEditedAt = now;
+    master.comments = master.comments || [];
+    master.comments.push({ id: nextId(), itemId: null, author, ts: now, body: `🔗 Transfer #${t.id} (${displayPatientName(t)}) was marked as a duplicate of this one.` });
+    master.lastEditedBy = author; master.lastEditedAt = now;
+    apiUpdateTransfer(t);
+    apiUpdateTransfer(master);
+    logAudit('mark_duplicate', 'transfer', t.id, { masterId });
+    logAudit('duplicate_linked', 'transfer', masterId, { duplicateId: t.id });
+    openTransfer(t.id);
+  });
+  const unmarkBtn = document.getElementById('unmarkDuplicateBtn');
+  if (unmarkBtn) unmarkBtn.addEventListener('click', () => {
+    if (!t.duplicateOfId) return;
+    if (!confirm(`Remove the duplicate link between #${t.id} and #${t.duplicateOfId}?\n\nThis leaves the status as-is (still Canceled). Change the status manually if you also want to re-open the transfer.`)) return;
+    const oldMaster = t.duplicateOfId;
+    const author = CURRENT_USER.name;
+    const now = new Date().toISOString();
+    t.duplicateOfId = null;
+    t.comments = t.comments || [];
+    t.comments.push({ id: nextId(), itemId: null, author, ts: now, body: `🔗 Duplicate link to #${oldMaster} was removed.` });
+    t.lastEditedBy = author; t.lastEditedAt = now;
+    apiUpdateTransfer(t);
+    const master = TRANSFERS.find(x => x.id === oldMaster);
+    if (master) {
+      master.comments = master.comments || [];
+      master.comments.push({ id: nextId(), itemId: null, author, ts: now, body: `🔗 Duplicate link from #${t.id} was removed.` });
+      master.lastEditedBy = author; master.lastEditedAt = now;
+      apiUpdateTransfer(master);
+    }
+    logAudit('unmark_duplicate', 'transfer', t.id, { masterId: oldMaster });
+    openTransfer(t.id);
+  });
+  document.querySelectorAll('[data-open-transfer]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetId = parseInt(el.dataset.openTransfer, 10);
+      if (targetId && TRANSFERS.find(x => x.id === targetId)) openTransfer(targetId);
+    });
+  });
   document.getElementById('editTransferBtn').addEventListener('click', () => {
     // Deep-clone the transfer into the draft so user can cancel without affecting the original
     state.draft = JSON.parse(JSON.stringify(t));
@@ -5640,6 +5724,9 @@ function describeAuditAction(action, details) {
       return `changed status: <strong>${escapeHtml(d.from||'?')}</strong> → <strong>${escapeHtml(d.to||'?')}</strong>`;
     case 'mark_urgent':    return 'flagged transfer <strong style="color:#991b1b">🚨 Urgent</strong>';
     case 'clear_urgent':   return 'cleared urgent flag';
+    case 'mark_duplicate': return `<strong>🔗 marked as duplicate</strong> of #${escapeHtml(String(d.masterId||'?'))}`;
+    case 'unmark_duplicate': return `removed duplicate link to #${escapeHtml(String(d.masterId||'?'))}`;
+    case 'duplicate_linked': return `<strong>🔗 duplicate #${escapeHtml(String(d.duplicateId||'?'))} was linked to this transfer</strong>`;
     case 'mark_paid':      return 'marked <strong>Paid</strong>';
     case 'undo_paid':      return 'undid Paid status';
     case 'mark_received':  return 'marked Received';
