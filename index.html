@@ -415,6 +415,11 @@ function canSeeTransfer(t) {
   if (CURRENT_USER.role === 'admin' && loc === ALL_LOCATIONS) return true;
   if (t.originLocation === loc) return true;
   if (t.fillLocation === loc) return true;
+  // Intake pharmacy = the store where the call/paperwork came in. When Bellingar's
+  // Rx lives at Erie but a Seminole tech takes the refill call, Seminole needs to
+  // see the transfer in their queue even though Origin=Fill=Erie. Existing rows
+  // without intakeLocation fall through to the origin/fill checks above.
+  if (t.intakeLocation && t.intakeLocation === loc) return true;
   if (t.pickupAtPharmacy && t.pickupLocation === loc) return true;
   return false;
 }
@@ -1464,7 +1469,7 @@ function renderTransfers() {
               const more = drugs.length > 1 ? `<div class="item-sub">+${drugs.length-1} more</div>` : '';
               return `<span title="${escapeHtml(drugs.join(', '))}">${escapeHtml(truncated)}</span>${more}`;
             })()}</td>
-            <td>${originFillDisplay(t)}${t.pickupAtPharmacy ? '<div style="margin-top:2px"><span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and is shipped to another pharmacy for patient pickup">📍 Non-transfer</span></div>' : ''}</td>
+            <td>${originFillDisplay(t)}${t.pickupAtPharmacy ? '<div style="margin-top:2px"><span class="badge" style="font-size:10px;background:#fef3c7;color:#92400e" title="Non-transfer — Rx originates at fill pharmacy and is shipped to another pharmacy for patient pickup">📍 Non-transfer</span></div>' : ''}${(t.intakeLocation && t.intakeLocation !== t.originLocation && t.intakeLocation !== t.fillLocation) ? `<div style="margin-top:2px"><span class="badge" style="font-size:10px;background:#dbeafe;color:#1e40af" title="Call/paperwork came in at ${escapeHtml(t.intakeLocation)}">📞 Called in by ${escapeHtml(t.intakeLocation)}</span></div>` : ''}</td>
             <td>${escapeHtml(t.shipTo)}${t.pickupAtPharmacy?`<div class="item-sub" style="color:var(--primary-dark);font-weight:600">${escapeHtml(t.pickupLocation||'?')}${t.isBulkPickup?' · BULK':''}</div>`:(t.shipCity?`<div class="item-sub">${escapeHtml(t.shipCity)}, ${escapeHtml(t.shipState)}</div>`:'')}</td>
             <td onclick="event.stopPropagation()"><select class="row-status status-select" data-status-id="${t.id}" style="font-size:11px;padding:3px 4px">${STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
             <td>${(() => {
@@ -3765,7 +3770,8 @@ function renderNewForm() {
 
       <div class="section"><div class="section-title">Routing</div>
       <div class="form-grid">
-        <div class="form-group"><label>Origin Location</label><select id="f-originLocation">${LOCATIONS.map(l=>`<option ${l===d.originLocation?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div class="form-group"><label>📞 Intake Location <span class="hint" style="text-transform:none;font-weight:400">(where the call/paperwork came in)</span></label><select id="f-intakeLocation">${LOCATIONS.map(l=>`<option ${l===(d.intakeLocation||d.originLocation)?'selected':''}>${l}</option>`).join('')}</select><div class="hint">Defaults to your pharmacy. If someone else took the call, set it here — that pharmacy will see the transfer in their queue.</div></div>
+        <div class="form-group"><label>Origin Location <span class="hint" style="text-transform:none;font-weight:400">(where the Rx lives)</span></label><select id="f-originLocation">${LOCATIONS.map(l=>`<option ${l===d.originLocation?'selected':''}>${l}</option>`).join('')}</select></div>
         <div class="form-group"><label>Fill Location</label><select id="f-fillLocation">${LOCATIONS.map(l=>`<option ${l===d.fillLocation?'selected':''}>${l}</option>`).join('')}</select><div class="hint">Erie handles sterile compounds</div></div>
         <div class="form-group full"><div class="checkbox-row"><input type="checkbox" id="f-isUrgent" ${d.isUrgent?'checked':''} /><label for="f-isUrgent"><strong style="color:var(--danger)">🚨 Mark as Urgent / High Priority</strong> <span class="hint" style="text-transform:none;font-weight:400">— pins the transfer to the top of the queue with a red badge</span></label></div></div>
       </div></div>
@@ -4054,6 +4060,7 @@ function freshDraft() {
   return {
     transferType: 'New', refillOfId: null,
     patientName: '', patientFirstName: '', patientLastName: '', patientDOB: '', patientAllergies: '',
+    intakeLocation: activeRealLocation(),
     originLocation: activeRealLocation(), fillLocation: 'Erie',
     shipTo: 'Pharmacy', deliveryCharge: '',
     shipAddr1: '', shipAddr2: '', shipCity: '', shipState: '', shipZip: '',
@@ -4130,6 +4137,10 @@ function draftFromRefill(source) {
     patientLastName: source.patientLastName || splitPatientName(source.patientName).lastName,
     patientDOB: source.patientDOB || '',
     patientAllergies: source.patientAllergies || 'NKA',
+    // Intake defaults to whoever's taking THIS refill call (not the original
+    // source's intake) — that's the whole point of the field for the Bellingar
+    // case: the call may come in at a different store than the original.
+    intakeLocation: activeRealLocation(),
     originLocation: source.originLocation,
     fillLocation: source.fillLocation,
     shipTo: source.shipTo,
@@ -4418,7 +4429,7 @@ function renderDraftItems() {
 }
 
 function bindDraftInputs() {
-  const fields = ['patientFirstName','patientLastName','patientDOB','patientAllergies','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote','patientPrice'];
+  const fields = ['patientFirstName','patientLastName','patientDOB','patientAllergies','intakeLocation','originLocation','fillLocation','shipTo','deliveryCharge','shipAddr1','shipAddr2','shipCity','shipState','shipZip','billing','anticipatedShipDate','transferNotes','priorPharmacy','priorRxNumber','priorTransferDate','priorTransferNote','patientPrice'];
   fields.forEach(f => { const el = document.getElementById('f-'+f); if (el) {
     // Listen to both 'input' and 'change' — Chrome's date-picker popup only fires
     // 'change' when the user clicks a day (no 'input' event), so a plain 'input'
@@ -4883,7 +4894,7 @@ function submitDraft() {
     // Snapshot the fields we want to diff for the audit trail. Keeping this
     // list explicit so audit entries stay meaningful (e.g. we don't spam the
     // history with pageImages / pkSheets churn on every re-scan).
-    const AUDIT_FIELDS = ['transferType','patientName','patientFirstName','patientLastName','patientDOB','originLocation','fillLocation','shipTo','billing','anticipatedShipDate','appointmentDate','pickupAtPharmacy','pickupLocation','coldItem','shipAddr1','shipCity','shipState','shipZip','deliveryCharge','patientPrice','tempAddress','tempThroughDate','isUrgent'];
+    const AUDIT_FIELDS = ['transferType','patientName','patientFirstName','patientLastName','patientDOB','intakeLocation','originLocation','fillLocation','shipTo','billing','anticipatedShipDate','appointmentDate','pickupAtPharmacy','pickupLocation','coldItem','shipAddr1','shipCity','shipState','shipZip','deliveryCharge','patientPrice','tempAddress','tempThroughDate','isUrgent'];
     const _before = {};
     AUDIT_FIELDS.forEach(k => { _before[k] = existing[k]; });
     // Merge: preserve fields we don't edit in this form (status, tracking, dates, comments)
@@ -4892,6 +4903,7 @@ function submitDraft() {
       priorPharmacy: d.priorPharmacy || '', priorRxNumber: d.priorRxNumber || '',
       priorTransferDate: d.priorTransferDate || '', priorTransferNote: d.priorTransferNote || '',
       patientName: d.patientName, patientFirstName: d.patientFirstName, patientLastName: d.patientLastName, patientDOB: d.patientDOB, patientAllergies: d.patientAllergies,
+      intakeLocation: d.intakeLocation || d.originLocation,
       originLocation: d.originLocation, fillLocation: d.fillLocation,
       shipTo: d.shipTo, deliveryCharge: d.deliveryCharge,
       shipAddr1: d.shipAddr1, shipAddr2: d.shipAddr2, shipCity: d.shipCity, shipState: d.shipState, shipZip: d.shipZip,
@@ -5213,6 +5225,7 @@ function renderModal() {
             ${t.transferType==='Refill'?'<span class="badge badge-verified">Refill</span>':'<span class="badge badge-new">New Rx</span>'}
             ${t.coldItem?'<span class="badge badge-cold">Cold item</span>':''}
             ${t.isUrgent?'<span class="badge" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Marked urgent">🚨 URGENT</span>':''}
+            ${(t.intakeLocation && t.intakeLocation !== t.originLocation && t.intakeLocation !== t.fillLocation)?`<span class="badge" style="background:#dbeafe;color:#1e40af" title="Call/paperwork came in at ${escapeHtml(t.intakeLocation)}">📞 Called in by ${escapeHtml(t.intakeLocation)}</span>`:''}
             <button class="btn btn-secondary btn-sm" id="toggleUrgentBtn" title="${t.isUrgent?'Remove urgent flag':'Flag this transfer as urgent — pins it to the top of the queue'}">${t.isUrgent?'🚨 Clear Urgent':'🚨 Mark Urgent'}</button>
             ${!t.duplicateOfId ? '<button class="btn btn-secondary btn-sm" id="markDuplicateBtn" title="Link this as a duplicate of another transfer and cancel it">🔗 Mark as Duplicate</button>' : ''}
             <button class="btn btn-secondary btn-sm" id="editTransferBtn" title="Edit patient, routing, shipping, billing, documents">✏️ Edit Transfer</button>
@@ -5706,7 +5719,7 @@ function describeAuditAction(action, details) {
         const parts = d.changes.map(c => {
           const label = ({
             transferType:'Type', patientName:'Patient', patientFirstName:'First Name', patientLastName:'Last Name',
-            patientDOB:'DOB', originLocation:'Origin', fillLocation:'Fill Location', shipTo:'Ship To',
+            patientDOB:'DOB', intakeLocation:'Intake', originLocation:'Origin', fillLocation:'Fill Location', shipTo:'Ship To',
             billing:'Billing', anticipatedShipDate:'Ant. Ship', appointmentDate:'Appt Date',
             pickupAtPharmacy:'Pickup?', pickupLocation:'Pickup Loc', coldItem:'Cold?',
             shipAddr1:'Address', shipCity:'City', shipState:'State', shipZip:'Zip',
