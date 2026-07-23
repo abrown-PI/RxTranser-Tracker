@@ -5743,6 +5743,12 @@ function describeAuditAction(action, details) {
     case 'mark_paid':      return 'marked <strong>Paid</strong>';
     case 'undo_paid':      return 'undid Paid status';
     case 'mark_received':  return 'marked Received';
+    case 'mark_missing_from_bulk': {
+      const miss = Array.isArray(d.missing) ? d.missing.join(', ') : '';
+      const src = d.from ? ` from <strong>${escapeHtml(d.from)}</strong>` : '';
+      const at  = d.at   ? ` at <strong>${escapeHtml(d.at)}</strong>`   : '';
+      return `<span style="color:#991b1b"><strong>🚨 flagged MISSING from bulk box</strong>${src}${at}${miss?` — ${escapeHtml(miss)}`:''}</span>`;
+    }
     case 'delete_transfer':return '<span style="color:var(--danger,#c00)">deleted transfer</span>';
     case 'view_transfer':  return '<span class="item-sub">viewed transfer</span>';
     case 'pickup_signed':  return 'captured pickup signature';
@@ -5962,7 +5968,7 @@ function renderShipments() {
         <td style="font-family:monospace;font-size:12px">${s.bulkShipmentId?`<span style="color:var(--primary-dark);font-weight:600">${escapeHtml(s.bulkShipmentId)}</span>`:'<span class="item-sub">—</span>'}</td>
         <td style="font-family:monospace;font-size:12px" onclick="event.stopPropagation()">${fedexTrackLink(s.trackingNumber)}</td>
         <td><span style="font-weight:600">${txCount}</span> <span class="item-sub" style="font-size:11px">${txCount===1?'transfer':'transfers'}</span></td>
-        <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span></td>
+        <td><span class="badge ${SHIP_STATUS_BADGE[s.status]}">${s.status}</span>${s.hadMissing?' <span class="badge" style="background:#fef3c7;color:#92400e;font-size:10px" title="Received short — some Rx were not in the box; the fill pharmacy has been alerted">⚠ Missing</span>':''}</td>
         <td>${fmtDate(s.shipDate)}</td>
         <td>${fmtDate(s.deliveredDate)}</td>
         <td>${
@@ -6375,7 +6381,13 @@ function openShipment(id) {
       ${canEditPending ? '<button class="btn btn-secondary" id="sm-cancel" style="color:var(--danger);border-color:var(--danger)">🗑 Cancel Shipment</button>' : ''}
       <div style="flex:1"></div>
       <button class="btn btn-secondary" id="smCloseBtn">Close</button>
-      ${isReceiver && s.status === 'Delivered'?`<button class="btn ${allUnpacked?'btn-primary':'btn-secondary'}" id="sm-receive" ${!allUnpacked?'disabled style="opacity:.5;cursor:not-allowed"':''}>Mark Package Received (all Rx checked)</button>`:''}
+      ${isReceiver && s.status === 'Delivered' && allItems.length > 0
+        ? (unpackedCount === 0
+            ? `<button class="btn btn-secondary" id="sm-receive" disabled style="opacity:.5;cursor:not-allowed" title="Check off at least one Rx (or scan a barcode) before receiving">📦 Mark Package Received</button>`
+            : allUnpacked
+              ? `<button class="btn btn-primary" id="sm-receive">📦 Mark Package Received</button>`
+              : `<button class="btn" id="sm-receive" style="background:#d97706;color:#fff;border-color:#b45309;font-weight:600" title="Receive the ${unpackedCount} Rx you checked and alert ${escapeHtml(s.fromLocation)} that ${allItems.length - unpackedCount} are missing">📦 Receive Partial (${unpackedCount} received · ${allItems.length - unpackedCount} missing)</button>`)
+        : ''}
     </div>
   </div></div>`;
 
@@ -6505,31 +6517,94 @@ function openShipment(id) {
   };
   const rec = document.getElementById('sm-receive');
   if (rec) rec.onclick = async () => {
-    s.status = 'Received'; s.receivedDate = todayLocal(); s.receivedBy = CURRENT_USER.name;
+    // Split the manifest per-transfer into received items vs missing items so a partially-
+    // packed box can still be checked in — the receiver gets what actually arrived, and the
+    // fill pharmacy is alerted (URGENT flag + comment) about what needs to be replaced.
+    const perTransfer = new Map();
+    for (const {t, i} of allItems) {
+      if (!perTransfer.has(t.id)) perTransfer.set(t.id, { t, received: [], missing: [] });
+      (s.unpacked[i.id] ? perTransfer.get(t.id).received : perTransfer.get(t.id).missing).push(i);
+    }
+    const missingItems = allItems.filter(({i}) => !s.unpacked[i.id]);
+    const isPartial = missingItems.length > 0;
+
+    if (isPartial) {
+      const affected = [...perTransfer.values()].filter(g => g.missing.length > 0);
+      const summary = affected.map(g => `  • #${g.t.id} ${displayPatientName(g.t)} — ${g.missing.map(i => i.drug).join(', ')}`).join('\n');
+      const ok = confirm(
+        `⚠ ${missingItems.length} Rx not checked off (${affected.length} patient${affected.length===1?'':'s'} affected):\n\n${summary}\n\n` +
+        `Click OK to:\n` +
+        `  · Mark the ${allItems.length - missingItems.length} Rx you DID check as Received\n` +
+        `  · Flag the missing ones as 🚨 URGENT for ${s.fromLocation}\n` +
+        `  · Post a comment on each so ${s.fromLocation} sees exactly what wasn't in the box\n\n` +
+        `Cancel to keep unpacking.`
+      );
+      if (!ok) return;
+    }
+
+    s.status = 'Received';
+    s.receivedDate = todayLocal();
+    s.receivedBy = CURRENT_USER.name;
+    if (isPartial) s.hadMissing = true;
     await apiUpdateShipment(s);
-    // Cascade Received status + receipt info to every transfer in the package. Awaited so
-    // a backend failure surfaces rather than silently leaving transfers in In Progress.
+
     const failed = [];
-    let updated = 0;
-    for (const id of s.transferIds) {
-      const t = TRANSFERS.find(x => x.id === id);
-      if (!t) { failed.push(id + ' (not loaded)'); continue; }
-      t.status = 'Received';
-      t.dateReceivedByPatient = s.receivedDate;
-      t.receivedBy = CURRENT_USER.name;
+    let receivedCount = 0;
+    let missingCount = 0;
+    const now = new Date().toISOString();
+    const author = CURRENT_USER.name;
+    const bulkLabel = s.bulkShipmentId || ('bulk #' + s.id);
+
+    for (const { t, received, missing } of perTransfer.values()) {
       try {
-        await apiUpdateTransfer(t);
-        updated++;
-        logAudit('mark_received', 'transfer', t.id, { shipmentId: s.id });
+        if (missing.length === 0) {
+          t.status = 'Received';
+          t.dateReceivedByPatient = s.receivedDate;
+          t.receivedBy = CURRENT_USER.name;
+          await apiUpdateTransfer(t);
+          logAudit('mark_received', 'transfer', t.id, { shipmentId: s.id });
+          receivedCount++;
+        } else {
+          // Missing (fully or partially) — flag urgent, keep status as-is so the fill pharmacy still owns it.
+          t.isUrgent = true;
+          t.missingFromBulk = true;
+          t.comments = t.comments || [];
+          const drugList = missing.map(i => `${i.drug} (Rx ${i.rxNumber||'—'})`).join(', ');
+          const whole = received.length === 0 ? 'Whole order' : 'Item(s)';
+          t.comments.push({
+            id: nextId(), itemId: null, author, ts: now,
+            body: `🚨 MISSING FROM BULK BOX ${bulkLabel} at ${CURRENT_USER.location}. ${whole} not in the box: ${drugList}. Needs replacement / follow-up from ${s.fromLocation}.`
+          });
+          if (received.length > 0) {
+            t.comments.push({
+              id: nextId(), itemId: null, author, ts: now,
+              body: `✅ What DID arrive in that same box: ${received.map(i => `${i.drug} (Rx ${i.rxNumber||'—'})`).join(', ')}.`
+            });
+          }
+          await apiUpdateTransfer(t);
+          logAudit('mark_missing_from_bulk', 'transfer', t.id, {
+            shipmentId: s.id,
+            bulkId: s.bulkShipmentId || null,
+            missing: missing.map(i => i.drug),
+            received: received.map(i => i.drug),
+            from: s.fromLocation,
+            at: CURRENT_USER.location
+          });
+          missingCount++;
+        }
       } catch (e) {
         failed.push(t.id + ' (' + (e.message||e) + ')');
       }
     }
+
     close();
+    const msg = isPartial
+      ? `Received ${receivedCount} full order${receivedCount===1?'':'s'} · Flagged ${missingCount} as MISSING.\n\n${s.fromLocation} will now see the missing orders pinned at the top of their queue as 🚨 Urgent, with a comment naming exactly what wasn't in the box.`
+      : `Marked received — ${receivedCount} transfer${receivedCount===1?'':'s'} updated.`;
     if (failed.length) {
-      alert('Marked received — ' + updated + '/' + s.transferIds.length + ' transfers updated.\n\nThe following did NOT update (they may still show as In Progress and need to be manually updated):\n' + failed.join('\n'));
+      alert(msg + '\n\nThe following did NOT update and may need to be redone manually:\n' + failed.join('\n'));
     } else {
-      alert('Marked received — ' + updated + ' transfer' + (updated===1?'':'s') + ' updated.');
+      alert(msg);
     }
     render();
   };
