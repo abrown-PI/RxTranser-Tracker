@@ -4860,9 +4860,21 @@ function submitDraft() {
   // saves with metadata (name/size) but no actual blob, and the receiving pharmacy sees
   // a "no data" placeholder. Previously silent; now forces the tech to re-upload the file
   // before the transfer can be submitted. Also blocks any bulk-carried pageImage without a blob.
+  //
+  // Fallback for bulk-imported drafts: the bulk PDF splitter creates metadata-only pkSheets/
+  // hardCopies entries (name like "scan_0001.pdf [page 2]") and stores the actual page in
+  // pageImages with a blobName. Treat those as valid — docListForTransfer already renders
+  // page-image links when the pkSheet/hardCopy itself has no blob (see docListForTransfer).
+  const hasTransferPage = (d.pageImages || []).some(p => p.kind === 'transfer' && p.blobName);
+  const hasHardcopyPage = (d.pageImages || []).some(p => p.kind === 'hardcopy' && p.blobName);
   const brokenFileNames = [];
   ['pkSheets','hardCopies'].forEach(k => {
-    (d[k] || []).forEach(f => { if (!f.blobName && !f.dataUrl) brokenFileNames.push(`${k === 'pkSheets' ? 'PK Sheet' : 'Hard Copy'}: ${f.name}`); });
+    const pageFallback = k === 'pkSheets' ? hasTransferPage : hasHardcopyPage;
+    (d[k] || []).forEach(f => {
+      if (f.blobName || f.dataUrl) return;
+      if (pageFallback) return; // metadata-only stub is backed by a real page image in blob
+      brokenFileNames.push(`${k === 'pkSheets' ? 'PK Sheet' : 'Hard Copy'}: ${f.name}`);
+    });
   });
   const brokenPageCount = (d.pageImages || []).filter(p => !p.blobName).length;
   if (brokenFileNames.length || brokenPageCount) {
