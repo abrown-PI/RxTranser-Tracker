@@ -6607,12 +6607,18 @@ function openShipment(id) {
 
     if (isPartial) {
       const affected = [...perTransfer.values()].filter(g => g.missing.length > 0);
-      const summary = affected.map(g => `  • #${g.t.id} ${displayPatientName(g.t)} — ${g.missing.map(i => i.drug).join(', ')}`).join('\n');
+      const fullyMissing = affected.filter(g => g.received.length === 0);
+      const partiallyMissing = affected.filter(g => g.received.length > 0);
+      const summary = affected.map(g => {
+        const tag = g.received.length === 0 ? '[whole order missing]' : '[partial]';
+        return `  • #${g.t.id} ${displayPatientName(g.t)} ${tag} — ${g.missing.map(i => i.drug).join(', ')}`;
+      }).join('\n');
       const ok = confirm(
         `⚠ ${missingItems.length} Rx not checked off (${affected.length} patient${affected.length===1?'':'s'} affected):\n\n${summary}\n\n` +
         `Click OK to:\n` +
         `  · Mark the ${allItems.length - missingItems.length} Rx you DID check as Received\n` +
-        `  · Flag the missing ones as 🚨 URGENT for ${s.fromLocation}\n` +
+        (fullyMissing.length ? `  · Pull the ${fullyMissing.length} fully-missing order${fullyMissing.length===1?'':'s'} OFF this shipment (reverts to In Progress on ${s.fromLocation}'s fill queue, ready to re-ship)\n` : '') +
+        (partiallyMissing.length ? `  · Keep the ${partiallyMissing.length} partial order${partiallyMissing.length===1?'':'s'} on this shipment (some items did arrive), flag them 🚨 URGENT\n` : '') +
         `  · Post a comment on each so ${s.fromLocation} sees exactly what wasn't in the box\n\n` +
         `Cancel to keep unpacking.`
       );
@@ -6642,12 +6648,17 @@ function openShipment(id) {
           logAudit('mark_received', 'transfer', t.id, { shipmentId: s.id });
           receivedCount++;
         } else {
-          // Missing (fully or partially) — flag urgent, keep status as-is so the fill pharmacy still owns it.
+          // Missing (fully or partially).
+          // - Fully missing (received.length === 0): pull off the shipment, revert to In Progress,
+          //   clear tracking/dateShipped so it lands back on the fill queue as ready to re-ship.
+          // - Partially missing: keep on shipment (some items did arrive under this bulk),
+          //   just flag urgent and let the fill pharmacy work the follow-up manually.
+          const wholeMissing = received.length === 0;
           t.isUrgent = true;
           t.missingFromBulk = true;
           t.comments = t.comments || [];
           const drugList = missing.map(i => `${i.drug} (Rx ${i.rxNumber||'—'})`).join(', ');
-          const whole = received.length === 0 ? 'Whole order' : 'Item(s)';
+          const whole = wholeMissing ? 'Whole order' : 'Item(s)';
           t.comments.push({
             id: nextId(), itemId: null, author, ts: now,
             body: `🚨 MISSING FROM BULK BOX ${bulkLabel} at ${CURRENT_USER.location}. ${whole} not in the box: ${drugList}. Needs replacement / follow-up from ${s.fromLocation}.`
@@ -6658,6 +6669,17 @@ function openShipment(id) {
               body: `✅ What DID arrive in that same box: ${received.map(i => `${i.drug} (Rx ${i.rxNumber||'—'})`).join(', ')}.`
             });
           }
+          if (wholeMissing) {
+            s.transferIds = s.transferIds.filter(id => id !== t.id);
+            t.status = 'In Progress';
+            t.trackingNumber = '';
+            t.dateShipped = '';
+            t.dateReceivedByPatient = '';
+            t.comments.push({
+              id: nextId(), itemId: null, author, ts: now,
+              body: `↩️ Pulled off bulk box ${bulkLabel} — reverted to In Progress and back on the ${s.fromLocation} fill queue for re-shipping.`
+            });
+          }
           await apiUpdateTransfer(t);
           logAudit('mark_missing_from_bulk', 'transfer', t.id, {
             shipmentId: s.id,
@@ -6665,7 +6687,8 @@ function openShipment(id) {
             missing: missing.map(i => i.drug),
             received: received.map(i => i.drug),
             from: s.fromLocation,
-            at: CURRENT_USER.location
+            at: CURRENT_USER.location,
+            pulledFromShipment: wholeMissing
           });
           missingCount++;
         }
@@ -6674,9 +6697,14 @@ function openShipment(id) {
       }
     }
 
+    // Re-persist the shipment: fully-missing transfers may have been pulled off transferIds
+    // inside the loop, and hadMissing was set. Without this the removals wouldn't survive reload.
+    if (isPartial) await apiUpdateShipment(s);
+
     close();
     const msg = isPartial
-      ? `Received ${receivedCount} full order${receivedCount===1?'':'s'} · Flagged ${missingCount} as MISSING.\n\n${s.fromLocation} will now see the missing orders pinned at the top of their queue as 🚨 Urgent, with a comment naming exactly what wasn't in the box.`
+      ? `Received ${receivedCount} full order${receivedCount===1?'':'s'} · Flagged ${missingCount} as MISSING.\n\n` +
+        `Fully-missing orders were pulled off this shipment and reverted to In Progress on ${s.fromLocation}'s fill queue (ready to re-ship on the next box). Partial orders stay on the shipment with a 🚨 Urgent flag.`
       : `Marked received — ${receivedCount} transfer${receivedCount===1?'':'s'} updated.`;
     if (failed.length) {
       alert(msg + '\n\nThe following did NOT update and may need to be redone manually:\n' + failed.join('\n'));
