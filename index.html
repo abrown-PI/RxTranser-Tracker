@@ -6314,16 +6314,17 @@ function openShipment(id) {
   // pharmacy can add/remove transfers throughout the day and print the packing slip at EOD.
   const isPendingBulk = s.isBulk && s.status === 'Pending';
   const canEditPending = isPendingBulk && (s.fromLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin');
-  // Remove-from-manifest: fill pharmacy (or admin) can pull a transfer off a bulk at any point,
-  // even after Received. Three variants of the button appear depending on state:
-  //   Pending           → "× Remove"            just detach, no status changes
-  //   In Transit/Deliv. → "× Not in box"        detach + revert status/tracking
-  //   Received+missing  → "× Reship missing"    detach + revert (was already flagged as short)
-  //   Received (clean)  → "× Wasn't shipped"    detach + revert + UNDO the Received status
-  // Only visible to the fill pharmacy (fromLocation) or admin, so receivers can't undo their own check-in.
+  // Remove-from-manifest: fill pharmacy (or admin) can pull a transfer off a bulk at any point
+  // before it's Received. Covers the "picker included it on the packing slip but it never made
+  // the box" case — pulling it here reverts the transfer to a pre-ship state so it lands back
+  // on the fill queue as available to ship on the next box.
+  //
+  // Post-Received exception: transfers flagged missingFromBulk (partial receipts) can still be
+  // pulled off after receipt, so the fill pharmacy can revert them to In Progress and re-ship.
+  // A cleanly-received transfer CANNOT be pulled off — un-receiving is not a fill-side action.
   const canOriginateRemoval = s.isBulk && (s.fromLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin');
   const canRemoveFromManifest = canOriginateRemoval && s.status !== 'Received';
-  const canRemoveTransfer = (t) => canOriginateRemoval;
+  const canRemoveTransfer = (t) => canOriginateRemoval && (s.status !== 'Received' || t.missingFromBulk);
   // Manual tracking override: visible to originator/admin on a bulk that doesn't yet have tracking.
   // Used when FedEx auto-match misses (e.g., reference indexing delay) and someone has the actual
   // FedEx tracking number from WorldShip — entering it triggers an immediate FedEx status pull.
@@ -6380,14 +6381,7 @@ function openShipment(id) {
           <div><strong>${escapeHtml(displayPatientName(t))}</strong> <span class="item-sub">· DOB ${fmtDate(t.patientDOB)}</span></div>
           <div style="display:flex;gap:6px">
             <button class="btn btn-secondary btn-sm" data-open-t="${t.id}">Open transfer</button>
-            ${canRemoveTransfer(t) ? (() => {
-              let label, title;
-              if (isPendingBulk) { label = 'Remove'; title = 'Remove from this shipment'; }
-              else if (s.status !== 'Received') { label = 'Not in box'; title = 'Not actually in the box — pull off this shipment and put it back on the fill queue'; }
-              else if (t.missingFromBulk) { label = 'Reship missing'; title = 'Pull this missing-flagged order off the shipment and revert to In Progress for re-shipping'; }
-              else { label = "Wasn't shipped"; title = 'This transfer was on the packing slip but never actually shipped — pull off, revert Received status, drop back on fill queue'; }
-              return `<button class="btn btn-secondary btn-sm" data-rm-t="${t.id}" title="${title}" style="color:var(--danger)">× ${label}</button>`;
-            })() : ''}
+            ${canRemoveTransfer(t) ? `<button class="btn btn-secondary btn-sm" data-rm-t="${t.id}" title="${isPendingBulk ? 'Remove from this shipment' : (s.status === 'Received' ? 'Pull this missing-flagged order off the shipment and revert to In Progress for re-shipping' : 'Not actually in the box — pull off this shipment and put it back on the fill queue')}" style="color:var(--danger)">× ${isPendingBulk ? 'Remove' : (s.status === 'Received' ? 'Reship missing' : 'Not in box')}</button>` : ''}
           </div>
         </div>
         ${t.items.map(i => isReceiver && s.status === 'Delivered'
@@ -6448,15 +6442,13 @@ function openShipment(id) {
     const bulkLabel = s.bulkShipmentId || ('Shipment ' + s.id);
     const wasBumpedByBulk = ['Shipped','In Transit','Delivered','Received'].includes(t.status);
     const isReceivedShipment = s.status === 'Received';
-    const isReshipMissing = isReceivedShipment && t.missingFromBulk;
-    const isWasntShipped  = isReceivedShipment && !t.missingFromBulk;
     // Only auto-cancel the shipment on last-transfer removal when it's still in-flight; a Received
     // shipment stays as the historical record even if the last problem transfer is pulled off.
     const isLast = s.transferIds.length === 1 && !isReceivedShipment;
     let msg;
     if (isPendingBulk) {
       msg = `Remove ${displayPatientName(t)} from ${bulkLabel}?\n\nIt can be added back later.`;
-    } else if (isReshipMissing) {
+    } else if (isReceivedShipment) {
       const receivedItems = (t.items || []).filter(i => s.unpacked?.[i.id]);
       const receivedNote = receivedItems.length > 0
         ? `\n\n⚠ Heads up: ${receivedItems.length} Rx on this order (${receivedItems.map(i => i.drug).join(', ')}) were already checked as received in this box. Pulling the transfer off will clear those too — only do this if the received items also need to be re-handled, or add a follow-up comment to keep the record straight.`
@@ -6468,15 +6460,6 @@ function openShipment(id) {
             `  · Status reverts to In Progress; tracking # and ship date are cleared\n` +
             `  · Lands back on the ${s.fromLocation} fill queue, still flagged 🚨 Urgent\n` +
             `  · A comment is posted noting the re-ship path` + receivedNote;
-    } else if (isWasntShipped) {
-      msg = `⚠ Pull ${displayPatientName(t)} off ${bulkLabel}?\n\n` +
-            `Use this ONLY when this transfer was on the packing slip but never actually made the box, AND ${s.toLocation} already marked the shipment Received without noticing.\n\n` +
-            `What happens:\n` +
-            `  · Transfer is pulled off this shipment\n` +
-            `  · The Received status on this transfer is UNDONE (received date, received-by, tracking cleared)\n` +
-            `  · Status reverts to In Progress; back on ${s.fromLocation}'s fill queue\n` +
-            `  · A comment is posted explaining the correction\n\n` +
-            `The bulk shipment itself stays marked Received (correct — the box did arrive; this one just wasn't in it).`;
     } else {
       msg = `Pull ${displayPatientName(t)} off ${bulkLabel}?\n\n` +
             `Use this when the Rx was on the packing slip but never actually made the box.\n\n` +
@@ -6499,31 +6482,22 @@ function openShipment(id) {
       const priorStatus = t.status;
       const priorTracking = t.trackingNumber || '';
       const priorShipDate = t.dateShipped || '';
-      const priorReceivedBy = t.receivedBy || '';
-      const priorReceivedDate = t.dateReceivedByPatient || '';
       if (wasBumpedByBulk) {
         t.status = 'In Progress';
         t.trackingNumber = '';
         t.dateShipped = '';
         t.dateReceivedByPatient = '';
-        t.receivedBy = '';
       }
       t.comments = t.comments || [];
-      let body;
-      if (isWasntShipped) {
-        body = `⚠ Correction by ${author}: ${displayPatientName(t)} was on the packing slip for bulk box ${bulkLabel} but was NOT actually in the box. ${s.toLocation} had marked the shipment Received; the Received status on this transfer has been undone and it's back on ${s.fromLocation}'s fill queue for shipping on the next box.`;
-      } else if (isReshipMissing) {
-        body = `↩️ Pulled off bulk box ${bulkLabel} by ${author} for re-ship — items were flagged missing on the box that arrived. Back on the ${s.fromLocation} fill queue as 🚨 Urgent.`;
-      } else {
-        body = `↩️ Pulled off bulk box ${bulkLabel} by ${author} — this Rx was on the packing slip but was not actually in the box. Back on the ${s.fromLocation} fill queue.`;
-      }
+      const body = isReceivedShipment
+        ? `↩️ Pulled off bulk box ${bulkLabel} by ${author} for re-ship — items were flagged missing on the box that arrived. Back on the ${s.fromLocation} fill queue as 🚨 Urgent.`
+        : `↩️ Pulled off bulk box ${bulkLabel} by ${author} — this Rx was on the packing slip but was not actually in the box. Back on the ${s.fromLocation} fill queue.`;
       t.comments.push({ id: nextId(), itemId: null, author, ts: now, body });
       logAudit('remove_from_shipment_after_ship', 'transfer', t.id, {
         shipmentId: s.id, bulkId: s.bulkShipmentId || null,
-        priorStatus, priorTracking, priorShipDate, priorReceivedBy, priorReceivedDate,
+        priorStatus, priorTracking, priorShipDate,
         from: s.fromLocation, to: s.toLocation,
-        afterReceived: isReceivedShipment,
-        wasntShipped: isWasntShipped
+        afterReceived: isReceivedShipment
       });
       await apiUpdateTransfer(t);
     }
