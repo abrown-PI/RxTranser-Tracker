@@ -5761,6 +5761,11 @@ function describeAuditAction(action, details) {
       const at  = d.at   ? ` at <strong>${escapeHtml(d.at)}</strong>`   : '';
       return `<span style="color:#991b1b"><strong>🚨 flagged MISSING from bulk box</strong>${src}${at}${miss?` — ${escapeHtml(miss)}`:''}</span>`;
     }
+    case 'remove_from_shipment_after_ship': {
+      const bulk = d.bulkId ? ` <strong>${escapeHtml(d.bulkId)}</strong>` : '';
+      const prior = d.priorStatus ? ` <span class="item-sub">(was ${escapeHtml(d.priorStatus)}${d.priorTracking?`, tracking ${escapeHtml(d.priorTracking)}`:''})</span>` : '';
+      return `<span style="color:#92400e"><strong>↩️ pulled off bulk box${bulk}</strong> — not actually in the box; reverted to In Progress</span>${prior}`;
+    }
     case 'delete_transfer':return '<span style="color:var(--danger,#c00)">deleted transfer</span>';
     case 'view_transfer':  return '<span class="item-sub">viewed transfer</span>';
     case 'pickup_signed':  return 'captured pickup signature';
@@ -6309,6 +6314,11 @@ function openShipment(id) {
   // pharmacy can add/remove transfers throughout the day and print the packing slip at EOD.
   const isPendingBulk = s.isBulk && s.status === 'Pending';
   const canEditPending = isPendingBulk && (s.fromLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin');
+  // Remove-from-manifest: fill pharmacy (or admin) can pull a transfer off a bulk at any point
+  // before it's Received. Covers the "picker included it on the packing slip but it never made
+  // the box" case — pulling it here reverts the transfer to a pre-ship state so it lands back
+  // on the fill queue as available to ship on the next box.
+  const canRemoveFromManifest = s.isBulk && s.status !== 'Received' && (s.fromLocation === CURRENT_USER.location || CURRENT_USER.role === 'admin');
   // Manual tracking override: visible to originator/admin on a bulk that doesn't yet have tracking.
   // Used when FedEx auto-match misses (e.g., reference indexing delay) and someone has the actual
   // FedEx tracking number from WorldShip — entering it triggers an immediate FedEx status pull.
@@ -6365,7 +6375,7 @@ function openShipment(id) {
           <div><strong>${escapeHtml(displayPatientName(t))}</strong> <span class="item-sub">· DOB ${fmtDate(t.patientDOB)}</span></div>
           <div style="display:flex;gap:6px">
             <button class="btn btn-secondary btn-sm" data-open-t="${t.id}">Open transfer</button>
-            ${canEditPending ? `<button class="btn btn-secondary btn-sm" data-rm-t="${t.id}" title="Remove from this shipment" style="color:var(--danger)">× Remove</button>` : ''}
+            ${canRemoveFromManifest ? `<button class="btn btn-secondary btn-sm" data-rm-t="${t.id}" title="${isPendingBulk ? 'Remove from this shipment' : 'Not actually in the box — pull off this shipment and put it back on the fill queue'}" style="color:var(--danger)">× ${isPendingBulk ? 'Remove' : 'Not in box'}</button>` : ''}
           </div>
         </div>
         ${t.items.map(i => isReceiver && s.status === 'Delivered'
@@ -6419,11 +6429,66 @@ function openShipment(id) {
   if (reprintBtn) reprintBtn.onclick = () => printPackingSlip(s);
   document.getElementById('smOverlay').onclick = e => { if (e.target.id === 'smOverlay') close(); };
   root.querySelectorAll('[data-open-t]').forEach(b => b.onclick = () => { close(); openTransfer(+b.dataset['openT']); });
-  root.querySelectorAll('[data-rm-t]').forEach(b => b.onclick = () => {
+  root.querySelectorAll('[data-rm-t]').forEach(b => b.onclick = async () => {
     const tid = +b.dataset['rmT'];
-    if (!confirm('Remove this transfer from the shipment? It can be added back later.')) return;
+    const t = TRANSFERS.find(x => x.id === tid);
+    if (!t) return;
+    const bulkLabel = s.bulkShipmentId || ('Shipment ' + s.id);
+    const wasBumpedByBulk = ['Shipped','In Transit','Delivered'].includes(t.status);
+    const isLast = s.transferIds.length === 1;
+    let msg;
+    if (isPendingBulk) {
+      msg = `Remove ${displayPatientName(t)} from ${bulkLabel}?\n\nIt can be added back later.`;
+    } else {
+      msg = `Pull ${displayPatientName(t)} off ${bulkLabel}?\n\n` +
+            `Use this when the Rx was on the packing slip but never actually made the box.\n\n` +
+            `What happens:\n` +
+            (wasBumpedByBulk ? `  · Transfer status reverts to In Progress\n  · Tracking # and ship date are cleared\n` : '') +
+            `  · Transfer drops back onto the ${s.fromLocation} fill queue as available to ship\n` +
+            `  · A comment is posted so anyone reviewing knows what happened` +
+            (isLast ? `\n\nThis is the last transfer on this shipment — the shipment will be canceled.` : '');
+    }
+    if (!confirm(msg)) return;
+
+    const now = new Date().toISOString();
+    const author = CURRENT_USER.name;
+
     s.transferIds = s.transferIds.filter(id => id !== tid);
-    apiUpdateShipment(s);
+    delete s.unpacked?.[tid];
+
+    if (!isPendingBulk) {
+      const priorStatus = t.status;
+      const priorTracking = t.trackingNumber || '';
+      const priorShipDate = t.dateShipped || '';
+      if (wasBumpedByBulk) {
+        t.status = 'In Progress';
+        t.trackingNumber = '';
+        t.dateShipped = '';
+        t.dateReceivedByPatient = '';
+      }
+      t.comments = t.comments || [];
+      t.comments.push({
+        id: nextId(), itemId: null, author, ts: now,
+        body: `↩️ Pulled off bulk box ${bulkLabel} by ${author} — this Rx was on the packing slip but was not actually in the box. Back on the ${s.fromLocation} fill queue.`
+      });
+      logAudit('remove_from_shipment_after_ship', 'transfer', t.id, {
+        shipmentId: s.id, bulkId: s.bulkShipmentId || null,
+        priorStatus, priorTracking, priorShipDate,
+        from: s.fromLocation, to: s.toLocation
+      });
+      await apiUpdateTransfer(t);
+    }
+
+    if (isLast) {
+      apiDeleteShipment(s.id);
+      const idx = SHIPMENTS.indexOf(s);
+      if (idx !== -1) SHIPMENTS.splice(idx, 1);
+      root.innerHTML = '';
+      render();
+      return;
+    }
+
+    await apiUpdateShipment(s);
     openShipment(s.id);
   });
   const addBtn = document.getElementById('sm-addTransfers');
