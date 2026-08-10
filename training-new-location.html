@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PI Transfer Tracker — Getting Started</title>
+<title>PI Transfer Tracker — Getting Started (Receiving Pharmacy)</title>
 <style>
 @page { size: letter; margin: 0.6in; }
 :root {
@@ -42,9 +42,9 @@ section { page-break-inside: avoid; }
 <body>
 
 <h1>PI Transfer Tracker — Getting Started</h1>
-<p>A day-one guide for your new pharmacy location.</p>
+<p>A day-one guide for [LOCATION] as a receiving pharmacy.</p>
 
-<p><strong>Welcome to the PI Transfer Tracker!</strong> This is the portal we use across all 11 PI pharmacies to send prescriptions from one pharmacy to another (or ship compounds from Erie to a patient or a satellite location). It replaces the emails, spreadsheets, and paper packing slips we used to juggle.</p>
+<p><strong>Welcome to the PI Transfer Tracker!</strong> This is the portal we use across all PI pharmacies to move prescriptions between stores. For [LOCATION], you'll mostly use it to <strong>receive shipments</strong> from Erie (compounds) or other PI stores, <strong>process refills</strong> on transfers that were originally set up by another location, and <strong>hand off prepared prescriptions</strong> to patients who come in for pickup.</p>
 
 <p><strong>Website:</strong> <span class="url">https://red-island-0bb34e510.7.azurestaticapps.net</span><br>
 <strong>Full help:</strong> click <strong>📖 Help</strong> in the top navbar</p>
@@ -64,102 +64,172 @@ section { page-break-inside: avoid; }
 
 <hr>
 
-<h2>The Three Things You'll Do Most Often</h2>
-
 <section>
-<h3>1. Create a new transfer <em>(sending an Rx to another pharmacy for them to fill/dispense)</em></h3>
-<ol>
-  <li>Click <strong>+ New Transfer</strong></li>
-  <li>Fill in:
-    <ul>
-      <li><strong>Patient Name</strong> (required)</li>
-      <li><strong>Origin Location</strong> — where the Rx originated (usually your pharmacy)</li>
-      <li><strong>Fill Location</strong> — the pharmacy that will actually compound/dispense (Erie for compounds, another PI store for commercial products)</li>
-      <li><strong>Ship To</strong> — Pharmacy (defaults to origin address) or Patient</li>
-      <li><strong>PK Transfer Sheet</strong> — drop the PDF; the app auto-fills patient/DOB/drug/Rx# from the sheet</li>
-      <li><strong>Items</strong> — one row per Rx: Origin Rx#, Drug, Qty (Receiving Rx# gets filled in later by the fill pharmacy)</li>
-    </ul>
-  </li>
-  <li>Click <strong>Submit transfer</strong></li>
-</ol>
-<div class="tip"><strong>Bulk stack of transfers?</strong> Click <strong>+ New Transfer</strong> → toggle to <strong>Bulk Upload</strong> → drop a multi-page PDF. The app splits each PK sheet into its own draft, OCRs scanned pages, and lets you approve them in one shot.</div>
-<div class="tip"><strong>Prepared script coming for pickup at your pharmacy (not a real transfer)?</strong> Check the blue <strong>📍 Prescriptions will be picked up at another pharmacy (Non-transfer)</strong> box at the top of the form. Skips the PK sheet requirement.</div>
+<h2>What You'll See When You Sign In</h2>
+<p>Two tabs matter most for a receiving pharmacy:</p>
+<ul>
+  <li><strong>Transfers</strong> — every prescription heading TO [LOCATION] (from any origin, any fill pharmacy). This is your inbound queue.</li>
+  <li><strong>Shipments</strong> — the physical boxes coming to you. Green <strong>← Incoming</strong> chip means "on its way here."</li>
+</ul>
+<p>The blue banner just under the navbar tells you <strong>when your next shipment is expected</strong> — computed from [LOCATION]'s configured receiving day(s).</p>
+<p>The <strong>Alerts</strong> tab shows questions other locations have asked you, and any transfer of yours that's stuck in one status too long.</p>
 </section>
 
+<hr>
+
+<h2>The Four Things You'll Do Most Often</h2>
+
 <section>
-<h3>2. Receive a shipment <em>(a box arrives from another pharmacy)</em></h3>
+<h3>1. Receive a shipment — the normal case (everything in the box)</h3>
 <ol>
   <li>Go to the <strong>Shipments</strong> tab</li>
   <li>Focus the <strong>📷 Scan tracking barcode</strong> field at the top of the page</li>
-  <li>Scan either the FedEx barcode OR the barcode on the bulk packing slip inside the box</li>
+  <li>Scan either the FedEx barcode on the box OR the barcode on the bulk packing slip inside</li>
   <li>The shipment opens → click <strong>📦 Arrived at my pharmacy</strong></li>
-  <li>Check off each Rx as you unpack it</li>
+  <li>Check off each Rx as you unpack it (or click <strong>Select all</strong> if the whole manifest checks out)</li>
+  <li>Take a photo with the camera button if you see any damage</li>
   <li>Click <strong>Mark Package Received</strong></li>
 </ol>
-<div class="note"><strong>Some scripts didn't make the box?</strong> Click <strong>Receive Partial</strong> instead of Mark Received, check off ONLY what you actually have, and leave the missing ones unchecked. Anything unchecked gets flagged as missing and the fill pharmacy is notified. If a whole patient's shipment is missing, that transfer is automatically pulled off the box and put back on the fill queue for next shipment.</div>
+<p>Every transfer in the box automatically flips to <strong>Received</strong>. Done.</p>
 </section>
 
 <section>
-<h3>3. Ask a question about a transfer <em>(need info from another pharmacy)</em></h3>
+<h3>2. Receive a shipment — some scripts are missing (partial receive)</h3>
+<p>This happens more often than you'd think — a script gets added to the packing slip but doesn't physically make it into the box. <strong>Do not check every box and mark it fully received.</strong> Use partial receive so the fill pharmacy knows to look.</p>
+<ol>
+  <li>Open the shipment like normal (scan the barcode or click into it from Shipments)</li>
+  <li>Click <strong>📦 Arrived at my pharmacy</strong></li>
+  <li>Check off <strong>ONLY the Rx you actually have in front of you</strong></li>
+  <li>Leave the missing ones <strong>unchecked</strong></li>
+  <li>Click <strong>Receive Partial</strong> (this button appears once at least one item is checked and at least one is not)</li>
+  <li>Confirm — the checked items flip to Received, the unchecked ones get flagged as missing on the transfer</li>
+</ol>
+<p>What happens next:</p>
+<ul>
+  <li>The <strong>fill pharmacy sees the missing items highlighted</strong> on the shipment and gets a Teams notification</li>
+  <li>If a whole patient's shipment was missing (all their Rx unchecked), that transfer is <strong>automatically pulled off the box</strong>, reverted to <strong>In Progress</strong>, and put back on the fill queue for the next shipment — no action needed from you</li>
+  <li>For partial patient shipments (some Rx received, some missing), the fill pharmacy will click <strong>× Reship missing</strong> on their end to pull the missing script off and reship it in the next box</li>
+</ul>
+<div class="warn"><strong>Do not "check everything" if something is missing.</strong> If you mark the whole box as received, the missing scripts get lost in the shuffle — the app thinks they arrived. Use Receive Partial every time there's a discrepancy, no matter how small.</div>
+</section>
+
+<section>
+<h3>3. Refill an existing transfer <em>(the patient is due for a refill)</em></h3>
+<div class="warn"><strong>Always use +Refill for a refill. Never use +New Transfer.</strong> The original transfer already has the PK sheet, the Rx numbers, the shipping preferences, and the payment info. Using +Refill keeps the new fill chained to the original so the whole Rx history stays connected.</div>
+
+<h4>From the +Refill tab</h4>
+<ol>
+  <li>Click <strong>+ Refill</strong> at the top (next to + New Transfer)</li>
+  <li>Search by patient name, Origin Rx#, or Receiving Rx#</li>
+  <li>Click <strong>Refill this →</strong> on the right transfer</li>
+  <li>Review the <strong>Shipping &amp; Payment Defaults</strong> (auto-pulled from the original). Click <strong>Edit</strong> if anything changed (new address, different billing).</li>
+  <li>If the patient has multiple Rx on the original, <strong>check the boxes</strong> for which Rx to include in this refill (they may only need one refilled, not all of them)</li>
+  <li>Click <strong>Continue to refill form →</strong></li>
+  <li>The form opens pre-filled — PK sheet, hard copies, formula, and Rx numbers all carry over. Review, replace any doc if something changed, then click <strong>Submit</strong>.</li>
+</ol>
+
+<h4>From the transfer detail (one-click)</h4>
+<p>Open any transfer for that patient → click <strong>📋 Refill this Rx</strong> at the top. Same carry-over behavior, one fewer click.</p>
+
+<h4>What if the original transfer isn't in the app?</h4>
+<p>For legacy patients whose first fill pre-dates the portal:</p>
+<ol>
+  <li>Click <strong>+ Refill</strong> → scroll past the search results</li>
+  <li>Click <strong>+ Enter Refill Manually</strong> in the dashed box at the bottom</li>
+  <li>Fill in whatever you have for the original (prior pharmacy, prior Rx #, notes — all optional)</li>
+  <li>Then fill out the rest like a new transfer and submit</li>
+</ol>
+<p>The Prior Transfer Info shows up on the detail modal so context is preserved. This option goes away naturally as your patients cycle through their first fill in the portal.</p>
+</section>
+
+<section>
+<h3>4. Non-transfer pickup — a prepared script is coming for a patient to pick up at [LOCATION]</h3>
+<p>This is when another pharmacy (usually Erie, for compounds) prepares a script and ships it to [LOCATION] so the patient can pick it up in person here. It's NOT a real transfer — you don't put anything in your dispensing system, you just hand off the prepared scripts when the patient walks in.</p>
+<p><strong>You'll see these in your Transfers tab</strong> with a yellow <strong>📍 Non-transfer</strong> badge under the From→Fill column. Erie is doing the compounding but [LOCATION] is doing the pickup, so it shows up on your worklist.</p>
+<p>When the box arrives, receive it the same way as a normal bulk shipment (steps 1 or 2 above). When the patient walks in for pickup:</p>
+<ol>
+  <li>Open the transfer from the Transfers tab (or search by patient name)</li>
+  <li>Click <strong>Mark Picked Up</strong> and have the patient sign on-screen (works with mouse, touchscreen, or stylus)</li>
+</ol>
+</section>
+
+<hr>
+
+<section>
+<h2>Asking &amp; Answering Questions</h2>
+
+<h3>Asking another pharmacy a question</h3>
+<p>You need info from the fill pharmacy or the origin pharmacy about a specific transfer:</p>
 <ol>
   <li>From the Transfers list, find the patient → click <strong>❓ Ask question</strong></li>
   <li>Type your question → <strong>Send Question</strong></li>
   <li>A card lands in that pharmacy's Teams chat. They reply in the transfer's Discussion section.</li>
-  <li>Your unanswered questions show on the <strong>Alerts</strong> tab</li>
+  <li>You'll see their reply on your <strong>Alerts</strong> tab → "Questions You've Asked"</li>
 </ol>
+
+<h3>Answering a question another pharmacy asked you</h3>
+<ol>
+  <li>Open the <strong>Alerts</strong> tab</li>
+  <li>Under <strong>Open Questions</strong> you'll see anything waiting on you</li>
+  <li>Click <strong>Answer →</strong> to open the transfer</li>
+  <li>Type your reply in the Discussion section</li>
+</ol>
+<p>The number badge on the Alerts tab = open questions for you + overdue transfers combined.</p>
 </section>
 
 <hr>
 
 <section>
-<h2>Statuses You'll See</h2>
+<h2>Statuses You'll See on Your Inbound Transfers</h2>
 <table>
-<thead><tr><th>Status</th><th>What it means</th></tr></thead>
+<thead><tr><th>Status</th><th>What it means for [LOCATION]</th></tr></thead>
 <tbody>
-<tr><td><strong>New</strong></td><td>Just created, hasn't been worked yet</td></tr>
-<tr><td><strong>In Progress</strong></td><td>Fill pharmacy is working on it (compounding, gathering docs, etc.)</td></tr>
-<tr><td><strong>Pending Clarification</strong></td><td>Waiting on info — check the Discussion tab</td></tr>
-<tr><td><strong>Needs Formula</strong></td><td>Compound formula not on file yet</td></tr>
-<tr><td><strong>Shipped</strong></td><td>Left the fill pharmacy</td></tr>
-<tr><td><strong>Delivered</strong></td><td>FedEx marked it delivered (patient direct ships)</td></tr>
-<tr><td><strong>Received</strong></td><td>Receiving pharmacy checked it in</td></tr>
+<tr><td><strong>New</strong></td><td>Origin pharmacy just created it — the fill pharmacy hasn't started yet</td></tr>
+<tr><td><strong>In Progress</strong></td><td>Fill pharmacy is working on it (compounding, gathering docs)</td></tr>
+<tr><td><strong>Pending Clarification</strong></td><td>Fill pharmacy is waiting on info — check the Discussion tab</td></tr>
+<tr><td><strong>Needs Formula</strong></td><td>Compound formula not on file at the fill pharmacy yet</td></tr>
+<tr><td><strong>Shipped</strong></td><td>Left the fill pharmacy — should arrive at [LOCATION] on your next scheduled receiving day</td></tr>
+<tr><td><strong>Received</strong></td><td>Your team already checked this into [LOCATION]</td></tr>
 <tr><td><strong>Canceled</strong></td><td>Killed before it was completed</td></tr>
 </tbody>
 </table>
-<p>The <strong>Active</strong> view (default) hides anything that's complete for YOUR pharmacy. Flip to <strong>Complete</strong> or <strong>All</strong> if you're hunting for something you thought closed out.</p>
+<p>The <strong>Active</strong> view (default) hides anything that's already Received or Canceled — so your list stays focused on what's actually inbound. Flip to <strong>Complete</strong> or <strong>All</strong> if you're hunting for a specific transfer you already received.</p>
 </section>
 
 <hr>
 
 <section>
-<h2>Shipping Basics</h2>
+<h2>Payment Status (Tabz auto-sync + Paid in Store)</h2>
+<p>Most payment activity updates automatically when the patient pays through Tabz — you don't have to do anything. The <strong>Payment</strong> column on the Transfers table shows the rolled-up status for each transfer:</p>
 <ul>
-  <li><strong>You do NOT type FedEx tracking numbers into the app.</strong> Instead: when you generate the FedEx label in WorldShip, type either the <strong>Transfer ID</strong> (patient direct ship) or the <strong>BULK Shipment ID</strong> (pharmacy-to-pharmacy box) into WorldShip's <strong>Customer Reference</strong> field. A daily cron matches FedEx shipments to transfers by reference — the tracking, ship date, and status update automatically.</li>
-  <li><strong>Patient-direct ship:</strong> use the Transfer ID (shown at the top of the transfer detail modal)</li>
-  <li><strong>Bulk pharmacy shipment:</strong> create the shipment in the app first (Shipments → + Create Shipment), then use the BULK ID it generates (e.g., <code>BULK-2026-0142</code>) as the WorldShip reference</li>
+  <li><strong>Pending</strong> — no payment activity yet</li>
+  <li><strong>🛒 Tabz Cart Created</strong> — Tabz has built a cart for the patient (text/email sent). Waiting on payment.</li>
+  <li><strong>Partial</strong> — some Rx paid, some pending</li>
+  <li><strong>✓ Paid (Tabz)</strong> — patient paid through Tabz</li>
+  <li><strong>✓ Paid in Store</strong> — someone at a pharmacy manually marked it paid</li>
 </ul>
+<p>When a patient walks in and pays at the counter (not through Tabz), click the small <strong>💲</strong> icon in the Actions column on that transfer and mark it <strong>Paid in Store</strong>.</p>
 </section>
 
 <hr>
 
 <section>
-<h2>The Packing Checklist (shipping team)</h2>
-<p>If you're on the shipping side, this is your daily worksheet.</p>
-<ol>
-  <li><strong>Shipments</strong> tab → click <strong>📋 Packing Checklist</strong> (top-right)</li>
-  <li>All destinations for today's ship are listed, grouped by pharmacy</li>
-  <li>Check each Rx as you pack — teammates see your checks live</li>
-  <li>When a destination's box is fully packed, click <strong>📦 Create Shipment &amp; Print Slip (N)</strong> on that group's header — the packing slip prints automatically with a barcode you can scan into WorldShip</li>
-</ol>
+<h2>Ship-To Address Reminders</h2>
+<p>Two flavors of receiving:</p>
+<ul>
+  <li><strong>Ship To = Pharmacy</strong> — box comes to [LOCATION]. Patient picks up (or is delivered from your store). Most common for compounds and refills.</li>
+  <li><strong>Ship To = Patient</strong> — box goes directly to the patient's home. [LOCATION] doesn't receive anything for these; they show up in your Transfers list for visibility but there's no receive step.</li>
+</ul>
+<div class="tip"><strong>Temporary address on a Patient ship-to?</strong> If the patient set a temporary address (vacation, snowbird), you'll see a warning banner on the transfer telling you NOT to update the patient's permanent record. Just fulfill this one at the temp address and leave the permanent record alone.</div>
 </section>
 
 <hr>
 
 <section>
 <h2>Things NOT To Do</h2>
-<div class="warn"><strong>Do not enter a refill as a new transfer.</strong> If you're refilling something already in the app, click <strong>+ Refill</strong> and search for the original — this keeps the Rx History chained together. Only use + New Transfer for brand-new orders.</div>
-<div class="warn"><strong>Do not skip the WorldShip Customer Reference.</strong> If you forget to type the Transfer or BULK ID into WorldShip, the tracking won't auto-match and someone has to hunt it down manually.</div>
-<div class="warn"><strong>Do not "check everything" on a bulk receive if some scripts are missing.</strong> Use Receive Partial and only check what you actually have — otherwise the missing ones get lost in the shuffle.</div>
+<div class="warn"><strong>❌ Do not enter a refill as a new transfer.</strong> Always use <strong>+ Refill</strong> and search for the original. Entering it as +New Transfer breaks the Rx History chain and creates a duplicate patient record for the fill pharmacy to clean up.</div>
+<div class="warn"><strong>❌ Do not mark a bulk shipment fully received if any scripts are missing.</strong> Use <strong>Receive Partial</strong> and only check what you actually have. Otherwise the missing ones are lost — the app thinks they arrived and the fill pharmacy has no reason to look.</div>
+<div class="warn"><strong>❌ Do not close out a non-transfer pickup order until the patient actually picks it up.</strong> Keep it in your queue so you don't forget it's waiting on the shelf. Use the Mark Picked Up button + signature capture when the patient walks in.</div>
 </section>
 
 <hr>
@@ -167,9 +237,9 @@ section { page-break-inside: avoid; }
 <section>
 <h2>Who to Ask for Help</h2>
 <ul>
-  <li><strong>App issue / question / feature request:</strong> Ashley Brown — <code>abrown@pharmacyinnovations.net</code></li>
+  <li><strong>App issue / bug / feature request:</strong> Ashley Brown — <code>abrown@pharmacyinnovations.net</code></li>
   <li><strong>Can't sign in / wrong location assigned:</strong> Ashley Brown</li>
-  <li><strong>Question about a specific transfer:</strong> use the <strong>❓ Ask question</strong> button on the transfer — routes to the right pharmacy's Teams chat</li>
+  <li><strong>Question about a specific transfer:</strong> use the <strong>❓ Ask question</strong> button on the transfer — routes to the right pharmacy's Teams chat automatically</li>
 </ul>
 </section>
 
@@ -178,9 +248,9 @@ section { page-break-inside: avoid; }
 <section>
 <h2>What to Read Next</h2>
 <ul>
-  <li>Click <strong>📖 Help</strong> in the app navbar — the full guide has step-by-step for every feature, printable as PDF</li>
-  <li>Skim the <strong>🆕 What's New (August 2026)</strong> section at the top — it covers the newest changes so you're not surprised by button changes</li>
-  <li>Check the <strong>📦 USP Overnight Shipping Policy</strong> section if you handle sterile compounds (Tacrolimus/Cyclosporine ophth, oil-based injections, etc.)</li>
+  <li>Click <strong>📖 Help</strong> in the app navbar — full step-by-step for every feature, printable as PDF</li>
+  <li>The <strong>🆕 What's New (August 2026)</strong> section at the top of Help covers the newest changes, including the partial-receive flow and the × Reship missing button</li>
+  <li>The <strong>❄ USP Overnight Shipping Policy</strong> section is worth a read if [LOCATION] handles any sterile compounds (Tacrolimus/Cyclosporine ophth, oil-based injections, etc.)</li>
 </ul>
 </section>
 
