@@ -57,7 +57,7 @@ section { page-break-inside: avoid; }
 <div class="toc">
   <h3>Contents</h3>
   <ul>
-    <li><a href="#whatsnew"><strong>🆕 What's New (July 2026)</strong></a></li>
+    <li><a href="#whatsnew"><strong>🆕 What's New (August 2026)</strong></a></li>
     <li><a href="#usp-overnight"><strong>❄ USP Overnight Shipping Policy</strong></a> <em>(Tacrolimus / Cyclosporine ophth, oil-based injections, etc.)</em></li>
     <li><a href="#signin">Signing In (365 or Local Account)</a></li>
     <li><a href="#new">Creating a New Transfer</a> (Single + Bulk Upload with OCR)</li>
@@ -83,8 +83,85 @@ section { page-break-inside: avoid; }
 <hr>
 
 <section id="whatsnew">
-<h2>🆕 What's New (July 2026)</h2>
-<p>Quick rundown of recent updates so the team isn't surprised by changed behavior.</p>
+<h2>🆕 What's New (August 2026)</h2>
+<p>Quick rundown of the latest updates so the team isn't surprised by changed behavior.</p>
+
+<h3>Partial-receive for bulk shipments (mark what's missing)</h3>
+<ul>
+  <li>When you receive a bulk shipment and some prescriptions <strong>didn't actually make the box</strong>, you no longer have to check every Rx or nothing. Use <strong>Receive Partial</strong> and check off only what you have — anything unchecked gets flagged as missing so the fill pharmacy knows to look.</li>
+  <li>The fill pharmacy sees the missing items highlighted on the shipment and gets a Teams notification.</li>
+  <li>Transfers where the <em>entire</em> shipment for that patient was missing are automatically pulled off the bulk box, reverted to <strong>In Progress</strong>, and put back on the fill queue for the next shipment.</li>
+</ul>
+
+<h3>× Reship missing (fill pharmacy pulls flagged Rx off a Received bulk)</h3>
+<ul>
+  <li>Once the receiving pharmacy flags a prescription as missing (via Receive Partial), the fill pharmacy can open the shipment and click <strong>× Reship missing</strong> next to that transfer.</li>
+  <li>That transfer comes off the bulk shipment/packing slip and goes back to <strong>In Progress</strong> so it lands on the next box out.</li>
+  <li>Available only for transfers that were flagged as missing — if the receiver marked the whole shipment as fully received, the button doesn't appear.</li>
+</ul>
+
+<h3>× Remove / × Not in box (before a shipment is received)</h3>
+<ul>
+  <li><strong>Pending bulk</strong> — the origin pharmacy sees a <strong>× Remove</strong> button on each transfer in the shipment to correct an over-packed manifest before the box goes out.</li>
+  <li><strong>In Transit / Delivered</strong> — same button, labeled <strong>× Not in box</strong>. Use it if you realize a script was added to the packing slip but didn't physically ship. The transfer is pulled off the shipment and reverted to In Progress.</li>
+</ul>
+
+<h3>Intake Location field</h3>
+<ul>
+  <li>New Transfer / Edit Transfer now has an <strong>Intake Location</strong> field — where the call or fax was originally received (may be different from the Origin/dispensing pharmacy).</li>
+  <li>Useful for cross-store call routing: the person who took the intake can be traced back even if a different location becomes the origin.</li>
+</ul>
+
+<h3>Urgent / High-Priority flag + same-store warning</h3>
+<ul>
+  <li>Mark any transfer as <strong>🚨 Urgent</strong> on the New/Edit form — it gets a red badge on all lists and sorts to the top so the fill team sees it first.</li>
+  <li>If you accidentally set the Origin and Fill to the <strong>same store</strong>, a yellow warning appears at submit-time so you can catch the mis-route before saving.</li>
+</ul>
+
+<h3>Mark as Duplicate of #___</h3>
+<ul>
+  <li>Found two transfers for the same patient/Rx? Open the duplicate → click <strong>Mark as duplicate of #___</strong> → type the ID of the canonical transfer. The dupe closes with a link pointing to the original so the history stays clean.</li>
+</ul>
+
+<h3>Per-transfer History (audit trail)</h3>
+<ul>
+  <li>Every transfer detail modal now has a <strong>History</strong> section showing every status change, edit, shipment add/remove, question, and comment with a timestamp and the user who did it.</li>
+  <li>Use it when investigating "how did this get to X status?" or "who changed the ship-to address?"</li>
+</ul>
+
+<h3>Search by Transfer ID</h3>
+<ul>
+  <li>The top search box now matches Transfer IDs (e.g., <code>21680</code>) in addition to patient names, Rx#s, and drug names. Faster jump to a specific transfer.</li>
+</ul>
+
+<h3>Teams routing improvements</h3>
+<ul>
+  <li>Questions and status alerts now route to the correct pharmacy chat based on the <strong>effective origin</strong> — for non-transfer pickup orders, that's the pickup pharmacy, not the fill pharmacy. So if Erie is compounding but Jamestown is doing the pickup, the alert lands in the Jamestown chat.</li>
+  <li>Erie (the hub) is excluded from routing — an Erie-only transfer notifies whoever's on the other side.</li>
+</ul>
+
+<h3>Admin: view/edit stored Teams webhook URLs</h3>
+<ul>
+  <li>Admins can now audit + edit the raw Teams webhook URLs on the Admin page instead of hunting through Azure Storage Explorer. Fixed a bug where the password-manager autofill duplicated the same URL across every location.</li>
+</ul>
+
+<h3>Drug name required on every Rx line</h3>
+<ul>
+  <li>The Rx items table now requires a drug name on every populated line. Catches the case where someone tabbed past the datalist without picking a value — no more transfers submitted with a blank drug field.</li>
+</ul>
+
+<h3>Refill fix: no more ghost file metadata</h3>
+<ul>
+  <li>Fixed a bug where creating a refill sometimes carried over stale file metadata from the source transfer (making it look like a file was attached when it wasn't). Refills now start clean and inherit only real, uploadable files.</li>
+</ul>
+
+<h3>Printing no longer changes status</h3>
+<ul>
+  <li>Printing a transfer / summary sheet used to auto-advance the status to <em>In Progress</em>. That's gone — print freely without touching status.</li>
+</ul>
+
+<hr style="margin-top:32px">
+<h2 style="color:var(--gray-500);font-size:16px;margin-top:24px">July 2026 (previous month)</h2>
 
 <h3>Active / Complete / All view toggle on Transfers</h3>
 <ul>
