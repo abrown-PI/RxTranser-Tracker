@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PI Transfer Tracker — Getting Started</title>
+<style>
+@page { size: letter; margin: 0.6in; }
+:root {
+  --primary: #2a6ebb; --primary-dark: #233f76;
+  --gray-100: #f1f5f9; --gray-200: #e2e8f0; --gray-300: #cbd5e1;
+  --gray-500: #64748b; --gray-700: #334155; --gray-900: #0f172a;
+  --primary-bg: #cfdbed;
+}
+* { box-sizing: border-box; }
+body { font-family: 'Segoe UI', -apple-system, sans-serif; color: var(--gray-900); font-size: 14px; line-height: 1.6; max-width: 8.5in; margin: 0 auto; padding: 24px 32px; }
+h1 { color: var(--primary); border-bottom: 3px solid var(--primary); padding-bottom: 8px; margin-bottom: 4px; font-size: 28px; }
+h1 + p { color: var(--gray-500); margin-top: 0; margin-bottom: 18px; }
+h2 { color: var(--primary-dark); border-bottom: 1px solid var(--gray-300); padding-bottom: 4px; margin-top: 32px; margin-bottom: 12px; font-size: 20px; page-break-after: avoid; }
+h3 { color: var(--primary-dark); margin-top: 20px; margin-bottom: 8px; font-size: 16px; page-break-after: avoid; }
+p { margin: 8px 0; }
+ol, ul { margin: 8px 0; padding-left: 26px; }
+ol li, ul li { margin: 4px 0; }
+code { background: var(--gray-100); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 12px; color: var(--primary-dark); }
+pre { background: var(--gray-100); padding: 10px 14px; border-radius: 4px; font-size: 12px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+th { background: var(--primary); color: white; padding: 8px 10px; text-align: left; font-weight: 600; }
+td { padding: 6px 10px; border-bottom: 1px solid var(--gray-200); vertical-align: top; }
+tr:nth-child(even) td { background: var(--gray-100); }
+hr { border: none; border-top: 1px solid var(--gray-300); margin: 24px 0; }
+.tip { background: #ecfeff; border-left: 4px solid #0891b2; padding: 8px 12px; margin: 10px 0; font-size: 13px; border-radius: 0 4px 4px 0; }
+.tip strong { color: #0891b2; }
+.note { background: #fffbeb; border-left: 4px solid #d97706; padding: 8px 12px; margin: 10px 0; font-size: 13px; border-radius: 0 4px 4px 0; }
+.note strong { color: #d97706; }
+.warn { background: #fef2f2; border-left: 4px solid #dc2626; padding: 8px 12px; margin: 10px 0; font-size: 13px; border-radius: 0 4px 4px 0; }
+.warn strong { color: #dc2626; }
+strong { color: var(--gray-900); }
+.url { font-family: 'Consolas', monospace; font-size: 13px; word-break: break-all; }
+section { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<h1>PI Transfer Tracker — Getting Started</h1>
+<p>A day-one guide for your new pharmacy location.</p>
+
+<p><strong>Welcome to the PI Transfer Tracker!</strong> This is the portal we use across all 11 PI pharmacies to send prescriptions from one pharmacy to another (or ship compounds from Erie to a patient or a satellite location). It replaces the emails, spreadsheets, and paper packing slips we used to juggle.</p>
+
+<p><strong>Website:</strong> <span class="url">https://red-island-0bb34e510.7.azurestaticapps.net</span><br>
+<strong>Full help:</strong> click <strong>📖 Help</strong> in the top navbar</p>
+
+<hr>
+
+<section>
+<h2>Day-One Setup (5 minutes)</h2>
+<ol>
+  <li><strong>Open the site</strong> in Microsoft Edge (our standard browser).</li>
+  <li>Click <strong>Sign in with Microsoft 365</strong> — use your <code>@pharmacyinnovations.net</code> account (same one you use for Outlook and Teams).</li>
+  <li>Your location should default to <strong>[LOCATION]</strong>. If it says something else, look at the location dropdown in the navbar to switch — or ping Ashley to fix your assignment.</li>
+  <li>Bookmark the site.</li>
+  <li>Click <strong>📖 Help</strong> in the navbar and skim the <strong>🆕 What's New</strong> section at the top so you know the current button labels.</li>
+</ol>
+</section>
+
+<hr>
+
+<h2>The Three Things You'll Do Most Often</h2>
+
+<section>
+<h3>1. Create a new transfer <em>(sending an Rx to another pharmacy for them to fill/dispense)</em></h3>
+<ol>
+  <li>Click <strong>+ New Transfer</strong></li>
+  <li>Fill in:
+    <ul>
+      <li><strong>Patient Name</strong> (required)</li>
+      <li><strong>Origin Location</strong> — where the Rx originated (usually your pharmacy)</li>
+      <li><strong>Fill Location</strong> — the pharmacy that will actually compound/dispense (Erie for compounds, another PI store for commercial products)</li>
+      <li><strong>Ship To</strong> — Pharmacy (defaults to origin address) or Patient</li>
+      <li><strong>PK Transfer Sheet</strong> — drop the PDF; the app auto-fills patient/DOB/drug/Rx# from the sheet</li>
+      <li><strong>Items</strong> — one row per Rx: Origin Rx#, Drug, Qty (Receiving Rx# gets filled in later by the fill pharmacy)</li>
+    </ul>
+  </li>
+  <li>Click <strong>Submit transfer</strong></li>
+</ol>
+<div class="tip"><strong>Bulk stack of transfers?</strong> Click <strong>+ New Transfer</strong> → toggle to <strong>Bulk Upload</strong> → drop a multi-page PDF. The app splits each PK sheet into its own draft, OCRs scanned pages, and lets you approve them in one shot.</div>
+<div class="tip"><strong>Prepared script coming for pickup at your pharmacy (not a real transfer)?</strong> Check the blue <strong>📍 Prescriptions will be picked up at another pharmacy (Non-transfer)</strong> box at the top of the form. Skips the PK sheet requirement.</div>
+</section>
+
+<section>
+<h3>2. Receive a shipment <em>(a box arrives from another pharmacy)</em></h3>
+<ol>
+  <li>Go to the <strong>Shipments</strong> tab</li>
+  <li>Focus the <strong>📷 Scan tracking barcode</strong> field at the top of the page</li>
+  <li>Scan either the FedEx barcode OR the barcode on the bulk packing slip inside the box</li>
+  <li>The shipment opens → click <strong>📦 Arrived at my pharmacy</strong></li>
+  <li>Check off each Rx as you unpack it</li>
+  <li>Click <strong>Mark Package Received</strong></li>
+</ol>
+<div class="note"><strong>Some scripts didn't make the box?</strong> Click <strong>Receive Partial</strong> instead of Mark Received, check off ONLY what you actually have, and leave the missing ones unchecked. Anything unchecked gets flagged as missing and the fill pharmacy is notified. If a whole patient's shipment is missing, that transfer is automatically pulled off the box and put back on the fill queue for next shipment.</div>
+</section>
+
+<section>
+<h3>3. Ask a question about a transfer <em>(need info from another pharmacy)</em></h3>
+<ol>
+  <li>From the Transfers list, find the patient → click <strong>❓ Ask question</strong></li>
+  <li>Type your question → <strong>Send Question</strong></li>
+  <li>A card lands in that pharmacy's Teams chat. They reply in the transfer's Discussion section.</li>
+  <li>Your unanswered questions show on the <strong>Alerts</strong> tab</li>
+</ol>
+</section>
+
+<hr>
+
+<section>
+<h2>Statuses You'll See</h2>
+<table>
+<thead><tr><th>Status</th><th>What it means</th></tr></thead>
+<tbody>
+<tr><td><strong>New</strong></td><td>Just created, hasn't been worked yet</td></tr>
+<tr><td><strong>In Progress</strong></td><td>Fill pharmacy is working on it (compounding, gathering docs, etc.)</td></tr>
+<tr><td><strong>Pending Clarification</strong></td><td>Waiting on info — check the Discussion tab</td></tr>
+<tr><td><strong>Needs Formula</strong></td><td>Compound formula not on file yet</td></tr>
+<tr><td><strong>Shipped</strong></td><td>Left the fill pharmacy</td></tr>
+<tr><td><strong>Delivered</strong></td><td>FedEx marked it delivered (patient direct ships)</td></tr>
+<tr><td><strong>Received</strong></td><td>Receiving pharmacy checked it in</td></tr>
+<tr><td><strong>Canceled</strong></td><td>Killed before it was completed</td></tr>
+</tbody>
+</table>
+<p>The <strong>Active</strong> view (default) hides anything that's complete for YOUR pharmacy. Flip to <strong>Complete</strong> or <strong>All</strong> if you're hunting for something you thought closed out.</p>
+</section>
+
+<hr>
+
+<section>
+<h2>Shipping Basics</h2>
+<ul>
+  <li><strong>You do NOT type FedEx tracking numbers into the app.</strong> Instead: when you generate the FedEx label in WorldShip, type either the <strong>Transfer ID</strong> (patient direct ship) or the <strong>BULK Shipment ID</strong> (pharmacy-to-pharmacy box) into WorldShip's <strong>Customer Reference</strong> field. A daily cron matches FedEx shipments to transfers by reference — the tracking, ship date, and status update automatically.</li>
+  <li><strong>Patient-direct ship:</strong> use the Transfer ID (shown at the top of the transfer detail modal)</li>
+  <li><strong>Bulk pharmacy shipment:</strong> create the shipment in the app first (Shipments → + Create Shipment), then use the BULK ID it generates (e.g., <code>BULK-2026-0142</code>) as the WorldShip reference</li>
+</ul>
+</section>
+
+<hr>
+
+<section>
+<h2>The Packing Checklist (shipping team)</h2>
+<p>If you're on the shipping side, this is your daily worksheet.</p>
+<ol>
+  <li><strong>Shipments</strong> tab → click <strong>📋 Packing Checklist</strong> (top-right)</li>
+  <li>All destinations for today's ship are listed, grouped by pharmacy</li>
+  <li>Check each Rx as you pack — teammates see your checks live</li>
+  <li>When a destination's box is fully packed, click <strong>📦 Create Shipment &amp; Print Slip (N)</strong> on that group's header — the packing slip prints automatically with a barcode you can scan into WorldShip</li>
+</ol>
+</section>
+
+<hr>
+
+<section>
+<h2>Things NOT To Do</h2>
+<div class="warn"><strong>Do not enter a refill as a new transfer.</strong> If you're refilling something already in the app, click <strong>+ Refill</strong> and search for the original — this keeps the Rx History chained together. Only use + New Transfer for brand-new orders.</div>
+<div class="warn"><strong>Do not skip the WorldShip Customer Reference.</strong> If you forget to type the Transfer or BULK ID into WorldShip, the tracking won't auto-match and someone has to hunt it down manually.</div>
+<div class="warn"><strong>Do not "check everything" on a bulk receive if some scripts are missing.</strong> Use Receive Partial and only check what you actually have — otherwise the missing ones get lost in the shuffle.</div>
+</section>
+
+<hr>
+
+<section>
+<h2>Who to Ask for Help</h2>
+<ul>
+  <li><strong>App issue / question / feature request:</strong> Ashley Brown — <code>abrown@pharmacyinnovations.net</code></li>
+  <li><strong>Can't sign in / wrong location assigned:</strong> Ashley Brown</li>
+  <li><strong>Question about a specific transfer:</strong> use the <strong>❓ Ask question</strong> button on the transfer — routes to the right pharmacy's Teams chat</li>
+</ul>
+</section>
+
+<hr>
+
+<section>
+<h2>What to Read Next</h2>
+<ul>
+  <li>Click <strong>📖 Help</strong> in the app navbar — the full guide has step-by-step for every feature, printable as PDF</li>
+  <li>Skim the <strong>🆕 What's New (August 2026)</strong> section at the top — it covers the newest changes so you're not surprised by button changes</li>
+  <li>Check the <strong>📦 USP Overnight Shipping Policy</strong> section if you handle sterile compounds (Tacrolimus/Cyclosporine ophth, oil-based injections, etc.)</li>
+</ul>
+</section>
+
+</body>
+</html>
