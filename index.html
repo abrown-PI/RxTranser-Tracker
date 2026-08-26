@@ -7695,7 +7695,7 @@ function renderRefillTab() {
   const q = r.query.trim().toLowerCase();
   let matches = [];
   if (q.length >= 2) {
-    const raw = visibleTransfers().filter(t => {
+    matches = visibleTransfers().filter(t => {
       if (r.searchBy === 'patient') {
         const hay = ((t.patientName||'') + ' ' + (t.patientFirstName||'') + ' ' + (t.patientLastName||'') + ' ' + (t.patientFirstName||'') + ' ' + (t.patientLastName||'')).toLowerCase();
         return hay.includes(q);
@@ -7703,19 +7703,7 @@ function renderRefillTab() {
       if (r.searchBy === 'originRx') return t.items.some(i => (i.rxNumber||'').toLowerCase().includes(q));
       if (r.searchBy === 'receivingRx') return t.items.some(i => (i.receivingRxNumber||'').toLowerCase().includes(q));
       return false;
-    });
-    // Dedupe by Rx chain: for each chain, keep only the most recent transfer.
-    // Refilling the latest one carries forward the whole chain, so the older
-    // entries just clutter the picker (Betsy Englander appeared 3x, Leonard 2x, etc).
-    const chainMap = new Map();
-    for (const t of raw) {
-      const chainKey = t.refillOfId || t.id;
-      const existing = chainMap.get(chainKey);
-      if (!existing || new Date(t.createdAt) > new Date(existing.createdAt)) {
-        chainMap.set(chainKey, t);
-      }
-    }
-    matches = Array.from(chainMap.values())
+    })
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 50);
   }
