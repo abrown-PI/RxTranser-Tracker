@@ -2996,6 +2996,14 @@ function renderAdmin() {
     </div></div>
 
 
+    <div class="card"><div class="card-header">Data Exports</div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:12px">One-click CSV downloads for follow-up conversations with store teams.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-secondary btn-sm" id="exportMissingPatientTracking">📥 Missing Patient Tracking (CSV)</button>
+        <span class="item-sub" style="text-transform:none;font-weight:400">Patient-direct shipments marked Shipped / Delivered / Received with no tracking # entered. Grouped by fill location.</span>
+      </div>
+    </div></div>
+
     <div class="card"><div class="card-header">Drug Warnings <button class="btn btn-primary btn-sm" id="addDrugWarningBtn">+ Add Warning</button></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:12px">When a team member types a drug name on a New or Edit Transfer that matches one of these patterns, a yellow warning box pops up under the Items section with whatever message + charge guidance you set here. Useful for policy callouts like the USP overnight-shipping rule.</p>
       <p class="item-sub" style="margin-bottom:14px"><strong>Match pattern syntax:</strong> one pattern per line. Each line is space-separated terms — <em>all</em> terms must appear in the drug name (case-insensitive). Examples: <code>tacrolimus ophth</code> matches any drug containing both "tacrolimus" and "ophth". Multiple lines work as OR.</p>
@@ -3171,6 +3179,41 @@ function renderAdmin() {
       <div id="audit-table" style="font-size:13px"><div class="item-sub">Loading…</div></div>
     </div></div>
   `;
+  // Missing Patient Tracking export — for the Megan/Ops conversation. Any patient-direct
+  // transfer that's past ship without a tracking # is a receipt problem: the patient can't
+  // track, the store manager has no visibility, and the receiving pharmacy ends up marking
+  // it themselves. Grouped by fill location so Ops can walk store-by-store.
+  const exportBtn = document.getElementById('exportMissingPatientTracking');
+  if (exportBtn) exportBtn.onclick = () => {
+    const POST_SHIP = ['Shipped', 'Delivered', 'Received'];
+    const missing = TRANSFERS
+      .filter(t => t.shipTo === 'Patient' && !t.trackingNumber && POST_SHIP.includes(t.status))
+      .sort((a, b) => {
+        if (a.fillLocation !== b.fillLocation) return String(a.fillLocation||'').localeCompare(String(b.fillLocation||''));
+        return String(b.dateShipped||b.createdAt||'').localeCompare(String(a.dateShipped||a.createdAt||''));
+      });
+    if (missing.length === 0) {
+      alert('No patient-direct transfers are missing tracking. Nothing to export.');
+      return;
+    }
+    const rows = [['Transfer ID','Fill Location','Patient','Status','Date Shipped','Date Created','Drugs','Submitted By']];
+    missing.forEach(t => rows.push([
+      t.id,
+      t.fillLocation || '',
+      t.patientName || '',
+      t.status,
+      t.dateShipped || '',
+      (t.createdAt||'').slice(0,10),
+      (t.items||[]).map(i => i.drug).filter(Boolean).join('; '),
+      t.submittedBy || ''
+    ]));
+    const csv = rows.map(r => r.map(c => `"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `missing-patient-tracking-${todayLocal()}.csv`;
+    a.click();
+  };
+
   // Unified Users & Access — combines 365 users (/api/users), local accounts (/api/local-users),
   // and admin email list (/api/settings.adminEmails) into one table.
   let _users365 = [];
