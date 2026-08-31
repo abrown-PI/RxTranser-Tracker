@@ -97,6 +97,17 @@ tbody tr:hover { background: var(--primary-bg); }
 .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .checkbox-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--primary); }
 
+/* Wide typeahead dropdown — replaces <datalist> so long drug names aren't clipped
+   to the input's width. Menu grows to fit content up to a sane cap. */
+.typeahead-wrap { position: relative; }
+.typeahead-menu { position: absolute; top: calc(100% + 2px); left: 0; min-width: 100%; width: max-content; max-width: min(640px, 90vw); max-height: 280px; overflow-y: auto; background: white; border: 1px solid var(--gray-300); border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0,0,0,.14); z-index: 1000; }
+.typeahead-menu[hidden] { display: none; }
+.typeahead-menu .opt { padding: 8px 12px; font-size: 14px; white-space: nowrap; cursor: pointer; border-bottom: 1px solid var(--gray-100); }
+.typeahead-menu .opt:last-child { border-bottom: none; }
+.typeahead-menu .opt:hover, .typeahead-menu .opt.active { background: var(--primary-bg); }
+.typeahead-menu .opt mark { background: rgba(42,110,187,.22); color: inherit; padding: 0 1px; border-radius: 2px; }
+.typeahead-menu .empty { padding: 8px 12px; font-size: 13px; color: var(--gray-500); font-style: italic; }
+
 /* Modal */
 .modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.5); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; }
 .modal { background: white; border-radius: 12px; max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 40px rgba(0,0,0,.2); }
@@ -746,6 +757,74 @@ function bindGlobalSearch() {
 // Render functions
 // =====================================================================
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Wide typeahead attached to a plain text input. Replaces <datalist>, which
+// clipped drug names to the input's width — Ashley couldn't tell
+// "METHYLCOBALAMIN/TIRZEPATIDE 0.5MG/2.5MG…" from its neighbors and kept
+// picking the wrong one. The input still accepts free text, so new drug names
+// aren't blocked.
+function attachTypeahead(input, options) {
+  const menu = input.nextElementSibling;
+  if (!menu || !menu.classList.contains('typeahead-menu')) return;
+  let matches = [];
+  let activeIdx = -1;
+
+  const render = () => {
+    const q = (input.value || '').trim().toLowerCase();
+    matches = (q ? options.filter(o => o.toLowerCase().includes(q)) : options.slice()).slice(0, 100);
+    if (matches.length === 0) {
+      if (!options.length) { menu.hidden = true; return; }
+      menu.innerHTML = '<div class="empty">No match — will save as typed</div>';
+      menu.hidden = false;
+      activeIdx = -1;
+      return;
+    }
+    menu.innerHTML = matches.map((o, i) => {
+      let display = escapeHtml(o);
+      if (q) {
+        const at = o.toLowerCase().indexOf(q);
+        if (at >= 0) display = escapeHtml(o.slice(0, at)) + '<mark>' + escapeHtml(o.slice(at, at + q.length)) + '</mark>' + escapeHtml(o.slice(at + q.length));
+      }
+      return `<div class="opt" data-i="${i}">${display}</div>`;
+    }).join('');
+    menu.hidden = false;
+    activeIdx = -1;
+  };
+
+  const setActive = (i) => {
+    activeIdx = i;
+    menu.querySelectorAll('.opt').forEach((el, j) => {
+      el.classList.toggle('active', j === activeIdx);
+      if (j === activeIdx) el.scrollIntoView({ block: 'nearest' });
+    });
+  };
+
+  const pick = (val) => {
+    input.value = val;
+    menu.hidden = true;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  input.addEventListener('focus', render);
+  input.addEventListener('input', render);
+  input.addEventListener('blur', () => { setTimeout(() => { menu.hidden = true; }, 150); });
+  input.addEventListener('keydown', (e) => {
+    if (menu.hidden || matches.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(activeIdx + 1, matches.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(activeIdx - 1, 0)); }
+    else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); pick(matches[activeIdx]); }
+    else if (e.key === 'Escape') { menu.hidden = true; }
+  });
+  // mousedown fires before input blur, so the pick lands.
+  menu.addEventListener('mousedown', (e) => {
+    const opt = e.target.closest('.opt');
+    if (!opt) return;
+    e.preventDefault();
+    pick(matches[+opt.dataset.i]);
+  });
+}
+
 function fmtDate(s) {
   if (!s) return '—';
   const d = parseDateLocal(s);
@@ -4436,8 +4515,7 @@ function renderDraftItems() {
   // input plus dropdown suggestions with zero JS — the browser auto-filters as the
   // user types and accepts anything not in the list.
   const knownDrugs = getKnownDrugs();
-  const drugDatalist = `<datalist id="known-drugs">${knownDrugs.map(d => `<option value="${escapeHtml(d)}"></option>`).join('')}</datalist>`;
-  wrap.innerHTML = drugDatalist + state.draft.items.map((it, idx) => `
+  wrap.innerHTML = state.draft.items.map((it, idx) => `
     <div class="item-row">
       <div class="item-head">
         <div class="item-title">Rx ${idx+1}</div>
@@ -4446,11 +4524,17 @@ function renderDraftItems() {
       <div class="form-grid">
         <div class="form-group"><label>Origin Rx #</label><input data-k="rxNumber" data-idx="${idx}" value="${escapeHtml(it.rxNumber)}" placeholder="From sending pharmacy" /></div>
         <div class="form-group"><label>Receiving Rx # <span class="hint" style="text-transform:none;font-weight:400">(fill location)</span></label><input data-k="receivingRxNumber" data-idx="${idx}" value="${escapeHtml(it.receivingRxNumber||'')}" placeholder="Assigned at Erie" /></div>
-        <div class="form-group"><label>Drug / Strength</label><input data-k="drug" data-idx="${idx}" list="known-drugs" value="${escapeHtml(it.drug)}" placeholder="${knownDrugs.length ? 'Start typing or pick from list' : 'Auto-filled from transfer sheet if PDF'}" autocomplete="off" /></div>
+        <div class="form-group"><label>Drug / Strength</label>
+          <div class="typeahead-wrap">
+            <input data-k="drug" data-idx="${idx}" data-drug-typeahead value="${escapeHtml(it.drug)}" placeholder="${knownDrugs.length ? 'Start typing or pick from list' : 'Auto-filled from transfer sheet if PDF'}" autocomplete="off" />
+            <div class="typeahead-menu" hidden></div>
+          </div>
+        </div>
         <div class="form-group"><label>Qty / Days Supply</label><input data-k="qty" data-idx="${idx}" value="${escapeHtml(it.qty)}" /></div>
       </div>
     </div>
   `).join('');
+  wrap.querySelectorAll('[data-drug-typeahead]').forEach(inp => attachTypeahead(inp, knownDrugs));
   wrap.querySelectorAll('[data-k]').forEach(el => {
     // Listen to BOTH input and change. The Drug field is a <input list=…> datalist —
     // when the user picks an option by clicking or hits Tab/Enter to accept the
