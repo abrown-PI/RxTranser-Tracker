@@ -100,6 +100,7 @@ tbody tr:hover { background: var(--primary-bg); }
 /* Wide typeahead dropdown — replaces <datalist> so long drug names aren't clipped
    to the input's width. Menu grows to fit content up to a sane cap. */
 .typeahead-wrap { position: relative; }
+.typeahead-wrap > input { width: 100%; box-sizing: border-box; }
 .typeahead-menu { position: absolute; top: calc(100% + 2px); left: 0; min-width: 100%; width: max-content; max-width: min(640px, 90vw); max-height: 280px; overflow-y: auto; background: white; border: 1px solid var(--gray-300); border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0,0,0,.14); z-index: 1000; }
 .typeahead-menu[hidden] { display: none; }
 .typeahead-menu .opt { padding: 8px 12px; font-size: 14px; white-space: nowrap; cursor: pointer; border-bottom: 1px solid var(--gray-100); }
