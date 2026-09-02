@@ -3078,9 +3078,13 @@ function renderAdmin() {
 
     <div class="card"><div class="card-header">Data Exports</div><div class="card-body">
       <p class="item-sub" style="margin-bottom:12px">One-click CSV downloads for follow-up conversations with store teams.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
         <button class="btn btn-secondary btn-sm" id="exportMissingPatientTracking">📥 Missing Patient Tracking (CSV)</button>
         <span class="item-sub" style="text-transform:none;font-weight:400">Patient-direct shipments marked Shipped / Delivered / Received with no tracking # entered. Grouped by fill location.</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-secondary btn-sm" id="exportShortDrugNames">🩺 Suspicious Drug Names (CSV)</button>
+        <span class="item-sub" style="text-transform:none;font-weight:400">Transfers where an item's drug name is under 6 characters — surfaces truncated / partial names to repair (e.g. the "inje" cascade). Includes transfer ID, patient, fill location, and last-edited-by.</span>
       </div>
     </div></div>
 
@@ -3291,6 +3295,36 @@ function renderAdmin() {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     a.download = `missing-patient-tracking-${todayLocal()}.csv`;
+    a.click();
+  };
+
+  // Suspicious Drug Names export — surfaces transfers whose drug field is under 6 chars.
+  // Real drug names are always long; short ones are either partial-typed leftovers or the
+  // fallout from the "inje" canonicalize cascade. Points at the audit trail so we know who
+  // last touched each — often that's who to ask for the correct drug name.
+  const shortDrugBtn = document.getElementById('exportShortDrugNames');
+  if (shortDrugBtn) shortDrugBtn.onclick = () => {
+    const rows = [['Transfer ID','Patient','Fill Location','Bad Drug Value','Status','Last Edited By','Last Edited At','Created At','Submitted By']];
+    TRANSFERS.forEach(t => {
+      (t.items || []).forEach(it => {
+        const d = String(it.drug || '').trim();
+        if (d && d.length < 6) {
+          rows.push([
+            t.id, t.patientName || '', t.fillLocation || '',
+            d, t.status,
+            t.lastEditedBy || '', (t.lastEditedAt || '').slice(0,19).replace('T',' '),
+            (t.createdAt || '').slice(0,10),
+            t.submittedBy || ''
+          ]);
+        }
+      });
+    });
+    if (rows.length === 1) { alert('No transfers found with a suspiciously short drug name.'); return; }
+    rows.sort((a, b) => a[2].localeCompare(b[2]) || String(a[0]).localeCompare(String(b[0])));
+    const csv = rows.map(r => r.map(c => `"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `suspicious-drug-names-${todayLocal()}.csv`;
     a.click();
   };
 
@@ -4369,21 +4403,29 @@ function canonicalizeDrugName(raw) {
   if (k) {
     return /^tirz/i.test(k[1]) ? 'Injection Kit - Tirzepatide' : 'Injection Kit - Semaglutide';
   }
-  // Step 4: try to match against the known drugs list (PRELOADED + previously used). If the
-  // cleaned OCR text contains a known drug name as a substring, snap to the canonical form.
-  // This catches cases like ", METHYLCOBALAMIN/TIRZEPATIDE..." after the leading-garbage strip.
+  // Step 4: try to match against the known drugs list (PRELOADED + previously used).
+  // Snap when the cleaned text is essentially the canonical name (differing only by
+  // case, spacing, or a small amount of leading/trailing garbage the OCR left behind).
+  //
+  // Guardrails learned the hard way (Sept 2 2026):
+  //   • Original logic accepted ANY substring match. When a user once saved "inje" as
+  //     a drug name, "inje" entered getKnownDrugs(); the very next re-load rewrote
+  //     every transfer whose drug contained "INJE" (i.e. anything "INJECTABLE") down
+  //     to "inje" and pushed that back to the API — a cascading corruption.
+  //   • Now: forward match (candidate is inside input) requires candidate ≥ 20 chars
+  //     AND covering ≥ 70% of input, so short entries can't clobber long real names.
+  //   • Reverse match (input is inside candidate — user typed abbreviated form)
+  //     requires input ≥ 20 chars so generic words like "TIRZEPATIDE" don't get
+  //     silently promoted to a specific month/vial variant.
   try {
     const sUp = s.toUpperCase();
     const known = (typeof getKnownDrugs === 'function') ? getKnownDrugs() : PRELOADED_DRUGS;
-    // Sort by length descending so the most-specific match (e.g. "TIRZEPATIDE/B12 MDV (MONTH #3) INJECTABLE 11.2/0.5MG/ML")
-    // wins over a generic substring (e.g. "TIRZEPATIDE").
     const sorted = known.slice().sort((a, b) => b.length - a.length);
     for (const candidate of sorted) {
       const cUp = candidate.toUpperCase();
-      if (sUp.includes(cUp)) return candidate;
-      // Also try the reverse — if the candidate contains our cleaned text (e.g. user typed a
-      // partial drug name and the canonical is longer), use the canonical.
-      if (cUp.includes(sUp) && sUp.length > 8) return candidate;
+      if (sUp === cUp) return candidate; // pure case/whitespace normalize
+      if (cUp.length >= 20 && sUp.includes(cUp) && cUp.length >= sUp.length * 0.7) return candidate;
+      if (cUp.includes(sUp) && sUp.length >= 20) return candidate;
     }
   } catch {}
   return s || raw; // return cleaned version even when no canonical match — drops the garbage prefix
