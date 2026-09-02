@@ -4407,25 +4407,24 @@ function canonicalizeDrugName(raw) {
   // Snap when the cleaned text is essentially the canonical name (differing only by
   // case, spacing, or a small amount of leading/trailing garbage the OCR left behind).
   //
-  // Guardrails learned the hard way (Sept 2 2026):
-  //   • Original logic accepted ANY substring match. When a user once saved "inje" as
-  //     a drug name, "inje" entered getKnownDrugs(); the very next re-load rewrote
-  //     every transfer whose drug contained "INJE" (i.e. anything "INJECTABLE") down
-  //     to "inje" and pushed that back to the API — a cascading corruption.
-  //   • Now: forward match (candidate is inside input) requires candidate ≥ 20 chars
-  //     AND covering ≥ 70% of input, so short entries can't clobber long real names.
-  //   • Reverse match (input is inside candidate — user typed abbreviated form)
-  //     requires input ≥ 20 chars so generic words like "TIRZEPATIDE" don't get
-  //     silently promoted to a specific month/vial variant.
+  // Root-cause fix (Sept 2 2026 — Amy Black / Will Russell / Ashley Dennis incident):
+  // When a user saved "inje" as a drug name once, it entered getKnownDrugs(); the very
+  // next apiGetTransfers rewrote every drug whose name contained "INJE" (i.e. anything
+  // INJECTABLE) down to "inje" and pushed that back to the API — cascading corruption
+  // across users. Fix relies on getKnownDrugs() filtering out sub-5-char entries so junk
+  // like "inje" never becomes a canonical candidate; the loop below matches original
+  // behavior otherwise so legit short drug names still work.
   try {
     const sUp = s.toUpperCase();
     const known = (typeof getKnownDrugs === 'function') ? getKnownDrugs() : PRELOADED_DRUGS;
     const sorted = known.slice().sort((a, b) => b.length - a.length);
     for (const candidate of sorted) {
       const cUp = candidate.toUpperCase();
-      if (sUp === cUp) return candidate; // pure case/whitespace normalize
-      if (cUp.length >= 20 && sUp.includes(cUp) && cUp.length >= sUp.length * 0.7) return candidate;
-      if (cUp.includes(sUp) && sUp.length >= 20) return candidate;
+      if (sUp.includes(cUp)) return candidate;
+      // Reverse — user typed a shorter form (e.g. missing the INJECTABLE + strength
+      // suffix); require input >= 8 chars so a plain "TIRZEPATIDE" doesn't get
+      // silently promoted to a specific month/vial variant.
+      if (cUp.includes(sUp) && sUp.length > 8) return candidate;
     }
   } catch {}
   return s || raw; // return cleaned version even when no canonical match — drops the garbage prefix
@@ -4508,6 +4507,13 @@ function getKnownDrugs() {
       .replace(/\s+/g, ' ')
       .trim();
     if (!cleaned) return;
+    // Skip junk: anything under 5 chars is either partial-typed ("inje") or a
+    // units-only fragment ("5MG"). Real drug names are always longer. Keeping
+    // these out matters because canonicalizeDrugName does substring matching
+    // against this list — a 4-char entry poisons every longer drug name that
+    // contains those letters (see Sept 2 2026 "inje" cascade that clobbered
+    // Amy Black, Will Russell, Ashley Dennis TIRZEPATIDE names).
+    if (cleaned.length < 5) return;
     const key = cleaned.toLowerCase();
     if (!seen.has(key)) seen.set(key, cleaned);
   }));
