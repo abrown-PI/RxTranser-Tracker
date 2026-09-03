@@ -4403,28 +4403,22 @@ function canonicalizeDrugName(raw) {
   if (k) {
     return /^tirz/i.test(k[1]) ? 'Injection Kit - Tirzepatide' : 'Injection Kit - Semaglutide';
   }
-  // Step 4: try to match against the known drugs list (PRELOADED + previously used).
-  // Snap when the cleaned text is essentially the canonical name (differing only by
-  // case, spacing, or a small amount of leading/trailing garbage the OCR left behind).
+  // Step 4: exact case/whitespace normalize against the known-drugs list.
   //
-  // Root-cause fix (Sept 2 2026 — Amy Black / Will Russell / Ashley Dennis incident):
-  // When a user saved "inje" as a drug name once, it entered getKnownDrugs(); the very
-  // next apiGetTransfers rewrote every drug whose name contained "INJE" (i.e. anything
-  // INJECTABLE) down to "inje" and pushed that back to the API — cascading corruption
-  // across users. Fix relies on getKnownDrugs() filtering out sub-5-char entries so junk
-  // like "inje" never becomes a canonical candidate; the loop below matches original
-  // behavior otherwise so legit short drug names still work.
+  // Sept 2 2026 incident (repeated Sept 3): the original substring-based matcher
+  // cascaded — a short partial like "inje" saved on ONE transfer became a canonical
+  // candidate for every other transfer whose drug name contained those letters
+  // (e.g. any "INJECTABLE" drug), then apiGetTransfers wrote the corruption back to
+  // the DB. The first fix filtered getKnownDrugs to length >= 5, but that only moved
+  // the poison threshold — any 5+ char partial like "injec" or "inject" or "tirze"
+  // could still fire the same cascade. Removing the substring loop entirely is the
+  // only safe answer: match ONLY on exact case/whitespace normalization. Users can
+  // fix rare OCR-garbage cases by hand; silent data corruption is worse.
   try {
     const sUp = s.toUpperCase();
     const known = (typeof getKnownDrugs === 'function') ? getKnownDrugs() : PRELOADED_DRUGS;
-    const sorted = known.slice().sort((a, b) => b.length - a.length);
-    for (const candidate of sorted) {
-      const cUp = candidate.toUpperCase();
-      if (sUp.includes(cUp)) return candidate;
-      // Reverse — user typed a shorter form (e.g. missing the INJECTABLE + strength
-      // suffix); require input >= 8 chars so a plain "TIRZEPATIDE" doesn't get
-      // silently promoted to a specific month/vial variant.
-      if (cUp.includes(sUp) && sUp.length > 8) return candidate;
+    for (const candidate of known) {
+      if (candidate.toUpperCase() === sUp) return candidate;
     }
   } catch {}
   return s || raw; // return cleaned version even when no canonical match — drops the garbage prefix
@@ -5058,6 +5052,19 @@ function submitDraft() {
     if (brokenFileNames.length) parts.push('These uploads failed and will not be saved:\n  • ' + brokenFileNames.join('\n  • '));
     if (brokenPageCount) parts.push(`${brokenPageCount} bulk page image${brokenPageCount>1?'s':''} could not be uploaded to blob storage.`);
     alert('⚠ Cannot submit — one or more attachments did not upload:\n\n' + parts.join('\n\n') + '\n\nRe-select the file(s) and wait for the ✓ upload confirmation before submitting.');
+    return;
+  }
+
+  // Guard against saving a drug name that's clearly a partial-typed word —
+  // "inje", "tirz", "sem", etc. Real drug names are always longer. Not letting
+  // these through in the first place is what breaks the corruption at the
+  // source (Sept 2-3 2026 "inje" cascade).
+  const shortDrugs = (d.items || [])
+    .map((it, i) => ({ i, drug: (it.drug || '').trim() }))
+    .filter(x => x.drug && x.drug.length < 5);
+  if (shortDrugs.length) {
+    const list = shortDrugs.map(x => `  • Rx ${x.i+1}: "${x.drug}"`).join('\n');
+    alert(`⚠ Cannot submit — drug name looks incomplete:\n\n${list}\n\nType the full drug name (or pick one from the dropdown) before saving.`);
     return;
   }
 
