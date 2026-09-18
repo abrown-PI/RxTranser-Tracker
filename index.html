@@ -423,6 +423,11 @@ function latestShippingDayAtOrBefore(addr, endDate) {
 // location without scrolling past 10 other pharmacies' work.
 const ALL_LOCATIONS = 'All locations';
 function canSeeTransfer(t) {
+  // Soft-deleted transfers are invisible everywhere — main worklist, refills search,
+  // dashboards, everything. Only the Admin > Recently Deleted panel surfaces them,
+  // and only for restore. Anna's 5-deletes-in-2-weeks pattern (Sept 2026) made hard
+  // delete too dangerous to keep.
+  if (t.deletedAt) return false;
   const loc = CURRENT_USER.location;
   if (CURRENT_USER.role === 'admin' && loc === ALL_LOCATIONS) return true;
   if (t.originLocation === loc) return true;
@@ -3088,6 +3093,11 @@ function renderAdmin() {
       </div>
     </div></div>
 
+    <div class="card"><div class="card-header">Recently Deleted <span class="item-sub" id="deleted-count-hdr" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:12px">Transfers deleted in the last 30 days. Click <strong>Restore</strong> to bring one back to its previous state; it will re-appear on the fill/origin worklists. After 30 days, deleted transfers may be purged permanently.</p>
+      <div id="deletedTransfersList"><div class="item-sub">Loading…</div></div>
+    </div></div>
+
     <div class="card"><div class="card-header">Drug Warnings <button class="btn btn-primary btn-sm" id="addDrugWarningBtn">+ Add Warning</button></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:12px">When a team member types a drug name on a New or Edit Transfer that matches one of these patterns, a yellow warning box pops up under the Items section with whatever message + charge guidance you set here. Useful for policy callouts like the USP overnight-shipping rule.</p>
       <p class="item-sub" style="margin-bottom:14px"><strong>Match pattern syntax:</strong> one pattern per line. Each line is space-separated terms — <em>all</em> terms must appear in the drug name (case-insensitive). Examples: <code>tacrolimus ophth</code> matches any drug containing both "tacrolimus" and "ophth". Multiple lines work as OR.</p>
@@ -3327,6 +3337,52 @@ function renderAdmin() {
     a.download = `suspicious-drug-names-${todayLocal()}.csv`;
     a.click();
   };
+
+  // Recently Deleted panel — soft-deleted transfers within 30 days, with a
+  // Restore button. Solves the "user accidentally deleted a real transfer" case
+  // that used to require pulling from a backup or manual recreation.
+  const renderDeletedList = () => {
+    const listEl = document.getElementById('deletedTransfersList');
+    const hdr = document.getElementById('deleted-count-hdr');
+    if (!listEl) return;
+    const cutoff = Date.now() - 30 * 86400000;
+    const deleted = TRANSFERS
+      .filter(t => t.deletedAt && (new Date(t.deletedAt).getTime() >= cutoff))
+      .sort((a, b) => String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
+    if (hdr) hdr.textContent = deleted.length ? ` — ${deleted.length} transfer${deleted.length===1?'':'s'}` : ' — none in the last 30 days';
+    if (deleted.length === 0) {
+      listEl.innerHTML = '<div class="empty" style="padding:20px"><h3>Nothing to restore</h3><p>No transfers have been deleted in the last 30 days.</p></div>';
+      return;
+    }
+    listEl.innerHTML = `<table style="box-shadow:none;font-size:13px">
+      <thead><tr><th>Deleted</th><th>By</th><th>Transfer</th><th>Patient</th><th>Route</th><th>Drug(s)</th><th></th></tr></thead>
+      <tbody>${deleted.map(t => {
+        const drugs = (t.items || []).map(i => i.drug || i.rxNumber || '').filter(Boolean).join(', ');
+        return `<tr>
+          <td>${escapeHtml((t.deletedAt || '').slice(0,19).replace('T',' '))}</td>
+          <td>${escapeHtml(t.deletedBy || '')}</td>
+          <td>#${escapeHtml(String(t.id))}</td>
+          <td>${escapeHtml(t.patientName || '')}</td>
+          <td>${escapeHtml((t.originLocation||'') + ' → ' + (t.fillLocation||''))}</td>
+          <td>${escapeHtml(drugs)}</td>
+          <td><button class="btn btn-primary btn-sm" data-restore="${t.id}">↩ Restore</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+    listEl.querySelectorAll('[data-restore]').forEach(b => b.addEventListener('click', async () => {
+      const id = +b.dataset.restore;
+      const t = TRANSFERS.find(x => x.id === id);
+      if (!t) return;
+      if (!confirm(`Restore transfer #${id} for ${t.patientName || '(no patient)'}?\n\nIt will re-appear on the fill/origin worklists at its previous status.`)) return;
+      delete t.deletedAt;
+      delete t.deletedBy;
+      await apiUpdateTransfer(t);
+      logAudit('restore_transfer', 'transfer', t.id);
+      renderDeletedList();
+      render();
+    }));
+  };
+  renderDeletedList();
 
   // Unified Users & Access — combines 365 users (/api/users), local accounts (/api/local-users),
   // and admin email list (/api/settings.adminEmails) into one table.
@@ -5374,6 +5430,57 @@ function closeModal() {
   document.getElementById('modalRoot').innerHTML = '';
 }
 
+// Custom delete-confirm dialog. Returns a Promise<boolean>. Replaces the native
+// confirm() which OS-styled dialogs users click through by reflex (Anna Smith's
+// 5-accidental-deletes-in-2-weeks in Sept 2026). Two visible pieces of friction:
+// (1) the patient name and Rx list rendered as body copy, not a squished dialog
+// string, so the user actually reads what's being deleted; (2) the destructive
+// button is on the RIGHT (default is close/cancel on left), so muscle-memory
+// Enter goes to Cancel, not Delete.
+function confirmDelete({ patient, rx, transferId }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '9999';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:520px">
+        <div class="modal-header" style="border-bottom:1px solid var(--danger-bg);background:var(--danger-bg)">
+          <div class="modal-title" style="color:var(--danger);display:flex;align-items:center;gap:10px">
+            <span style="font-size:24px">⚠</span>
+            <span>You are about to delete this transfer</span>
+          </div>
+        </div>
+        <div class="modal-body" style="line-height:1.6">
+          <p style="margin:0 0 12px 0"><strong>Transfer #${escapeHtml(String(transferId))}</strong></p>
+          <p style="margin:0 0 8px 0"><strong>Patient:</strong> ${escapeHtml(patient)}</p>
+          <p style="margin:0 0 16px 0"><strong>Rx:</strong> ${escapeHtml(rx || '(none)')}</p>
+          <p style="margin:0;padding:10px 12px;background:var(--warning-bg);border-left:3px solid var(--warning);border-radius:4px;font-size:13px">
+            The transfer will be hidden from all worklists. An admin can restore it from <strong>Admin &rarr; Recently Deleted</strong> within 30 days. After 30 days it may be purged permanently.
+          </p>
+          <p style="margin:14px 0 0 0;color:var(--gray-700)">Would you like to continue?</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-act="cancel">Cancel</button>
+          <button class="btn btn-danger" data-act="ok">🗑 Yes, Delete Transfer</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const done = (val) => { overlay.remove(); resolve(val); };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) return done(false); // clicked backdrop
+      const btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      done(btn.dataset.act === 'ok');
+    });
+    // Escape key cancels. Cancel button has focus by default so Enter cancels too.
+    const keyHandler = (e) => {
+      if (e.key === 'Escape') { document.removeEventListener('keydown', keyHandler); done(false); }
+    };
+    document.addEventListener('keydown', keyHandler);
+    setTimeout(() => overlay.querySelector('[data-act=cancel]').focus(), 0);
+  });
+}
+
 function renderModal() {
   const t = TRANSFERS.find(x => x.id === state.openTransferId);
   if (!t) return;
@@ -5773,12 +5880,24 @@ function renderModal() {
       alert(`This transfer is in shipment ${inShipment.bulkShipmentId || ('#' + inShipment.id)} (${inShipment.status}).\n\nOpen that shipment and click × Remove on this row first, then try deleting again.`);
       return;
     }
-    const confirmed = confirm(`Delete this transfer permanently?\n\nPatient: ${t.patientName}\nRx: ${t.items.map(i => i.drug || i.rxNumber || 'item').filter(Boolean).join(', ')}\n\nThis cannot be undone.`);
-    if (!confirmed) return;
-    // Remove from in-memory + delete from backend
-    const idx = TRANSFERS.findIndex(x => x.id === t.id);
-    if (idx !== -1) TRANSFERS.splice(idx, 1);
-    await apiDeleteTransfer(t.id);
+    // Custom in-app confirm modal — replaces native confirm() which users click
+    // through by reflex. Anna Smith deleted 5 transfers accidentally in Sept 2026
+    // (Sarah Kesler + 4 others) because the native OS dialog is too easy to dismiss.
+    // The Restore path below rescues legitimate mistakes; the modal makes the
+    // action feel like a decision, not a click-through.
+    const drugList = t.items.map(i => i.drug || i.rxNumber || 'item').filter(Boolean).join(', ');
+    const proceed = await confirmDelete({
+      patient: t.patientName || '(no patient)',
+      rx: drugList,
+      transferId: t.id
+    });
+    if (!proceed) return;
+    // Soft delete — set deletedAt / deletedBy and PUT. The row stays in the DB
+    // so an admin can restore it from Admin > Recently Deleted. The client
+    // filter in canSeeTransfer hides it everywhere else.
+    t.deletedAt = new Date().toISOString();
+    t.deletedBy = CURRENT_USER.name;
+    await apiUpdateTransfer(t);
     logAudit('delete_transfer', 'transfer', t.id);
     closeModal();
     render();
