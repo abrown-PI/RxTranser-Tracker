@@ -1687,6 +1687,7 @@ function renderTransfers() {
     t.paidAt = new Date().toISOString();
     apiUpdateTransfer(t);
     logAudit('mark_paid', 'transfer', t.id);
+    notifyTeamsPaidInStore(t);
     renderTransfers();
   }));
   // Inline status change from the Transfers table — no need to open the detail modal
@@ -5730,6 +5731,7 @@ function renderModal() {
     t.paidAt = new Date().toISOString();
     apiUpdateTransfer(t);
     logAudit('mark_paid', 'transfer', t.id);
+    notifyTeamsPaidInStore(t);
     renderModal();
   });
   const unpaidBtnEl = document.getElementById('unpaidBtn');
@@ -9475,6 +9477,32 @@ async function notifyTeamsAntShipChange(transfer, oldDate, newDate) {
       })
     });
   } catch (e) { console.warn('Teams ant-ship-change notification failed', e); }
+}
+
+// Teams notification: patient paid in store. Posts into the satellite-Erie chat so
+// the fill side sees the payment cleared and knows the box can go out. Added after
+// Melissa flagged a case where Seminole took cash from the patient but Erie didn't
+// know to ship (Sept 18 2026, Chris↔Ruben thread). Fires from the manual "Mark
+// Paid in Store" button only — Tabz auto-payments go through a different path.
+async function notifyTeamsPaidInStore(transfer) {
+  const chatLoc = chatWebhookKey(transfer);
+  if (!chatLoc) return;
+  const portalUrl = window.location.origin + window.location.pathname + '?transfer=' + encodeURIComponent(transfer.id);
+  try {
+    await fetch('/api/notify-teams', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'paid_in_store',
+        locations: [chatLoc],
+        transferId: transfer.id,
+        patientName: transfer.patientName,
+        drug: (transfer.items[0] && transfer.items[0].drug) || '',
+        askedBy: CURRENT_USER.name,
+        askedLocation: CURRENT_USER.location,
+        portalUrl
+      })
+    });
+  } catch (e) { console.warn('Teams paid-in-store notification failed', e); }
 }
 
 // Teams notification: routes a question into the satellite-Erie chat. Both Erie and

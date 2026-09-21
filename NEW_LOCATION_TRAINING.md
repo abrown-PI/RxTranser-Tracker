@@ -4,6 +4,7 @@
 
 **Website:** https://red-island-0bb34e510.7.azurestaticapps.net
 **Full help:** click 📖 Help in the top navbar (or open [help.html](https://red-island-0bb34e510.7.azurestaticapps.net/help.html))
+**📹 Training video:** [Watch the PI Transfer Tracker training video](https://pharmacyinnovationsnet-my.sharepoint.com/:v:/g/personal/abrown_pharmacyinnovations_net/IQA6K8ip3Nb4RY_wDcr6xUseARyBqqddL3X1hHSt98geshE?e=YfQb55) — ~10 min screen-recorded walkthrough of the most common tasks. Watch this first before your day-one setup.
 
 ---
 

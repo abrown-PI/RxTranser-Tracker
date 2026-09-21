@@ -38,6 +38,9 @@ function buildCard(payload) {
   } else if (kind === 'ant_ship_change') {
     title = `📅 Anticipated ship date updated: ${payload.patientName || '(unnamed)'}`;
     bodyExtra = [{ type: 'TextBlock', wrap: true, text: `Changed from **${payload.oldDate || '?'}** to **${payload.newDate || '?'}**.`, spacing: 'Medium' }];
+  } else if (kind === 'paid_in_store') {
+    title = `💲 Paid in store: ${payload.patientName || '(unnamed)'}`;
+    bodyExtra = [{ type: 'TextBlock', wrap: true, text: `Payment collected in store — this transfer is cleared to ship.`, spacing: 'Medium' }];
   } else {
     title = `❓ Question on transfer: ${payload.patientName || '(unnamed)'}`;
     bodyExtra = [{ type: 'TextBlock', wrap: true, text: payload.question || '(no question text)', spacing: 'Medium' }];
