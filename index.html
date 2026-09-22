@@ -1691,17 +1691,22 @@ function renderTransfers() {
     renderTransfers();
   }));
   // Inline status change from the Transfers table — no need to open the detail modal
-  root.querySelectorAll('[data-status-id]').forEach(sel => sel.addEventListener('change', e => {
+  root.querySelectorAll('[data-status-id]').forEach(sel => sel.addEventListener('change', async e => {
     e.stopPropagation();
     const id = +sel.dataset.statusId;
     const t = TRANSFERS.find(x => x.id === id);
     if (!t) return;
     const newStatus = sel.value;
     const oldStatus = t.status;
-    if (newStatus === 'Canceled' && t.status !== 'Canceled') onTransferCanceled(t);
+    if (newStatus === 'Canceled' && t.status !== 'Canceled') {
+      const { proceed, reason } = await handleCancelIntent(t);
+      if (!proceed) { sel.value = oldStatus; return; }
+      onTransferCanceled(t);
+      notifyTeamsCanceled(t, reason);
+    }
     t.status = newStatus;
     apiUpdateTransfer(t);
-    logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: newStatus });
+    logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: newStatus, reason: t.cancelReason || undefined });
     if (DELAY_STATUSES.includes(newStatus) && !DELAY_STATUSES.includes(oldStatus)) {
       notifyTeamsStatusDelay(t, oldStatus, newStatus);
     }
@@ -5704,15 +5709,18 @@ function renderModal() {
   document.getElementById('modalOverlay').addEventListener('click', e => { if (e.target.id === 'modalOverlay') closeModal(); });
   document.getElementById('modalClose').addEventListener('click', closeModal);
   document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
-  document.getElementById('statusSelect').addEventListener('change', e => {
+  document.getElementById('statusSelect').addEventListener('change', async e => {
     const newStatus = e.target.value;
     const oldStatus = t.status;
     if (newStatus === 'Canceled' && oldStatus !== 'Canceled') {
+      const { proceed, reason } = await handleCancelIntent(t);
+      if (!proceed) { e.target.value = oldStatus; return; }
       onTransferCanceled(t);
+      notifyTeamsCanceled(t, reason);
     }
     t.status = newStatus;
     apiUpdateTransfer(t);
-    logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: newStatus });
+    logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: newStatus, reason: t.cancelReason || undefined });
     if (DELAY_STATUSES.includes(newStatus) && !DELAY_STATUSES.includes(oldStatus)) {
       notifyTeamsStatusDelay(t, oldStatus, newStatus);
     }
@@ -5814,8 +5822,15 @@ function renderModal() {
     const oldStatus = t.status;
     if (t.status !== 'Canceled') {
       t.status = 'Canceled';
+      const dupReason = `Duplicate of #${masterId} — ${displayPatientName(master)}`;
+      t.cancelReason = dupReason;
       onTransferCanceled(t);
       logAudit('status_change', 'transfer', t.id, { from: oldStatus, to: 'Canceled', reason: `duplicate of #${masterId}` });
+      // Notify origin about the cancel — same rule as any other cancel, only ping
+      // if the marker isn't at the origin (they already know).
+      const atOrigin = t.originLocation === CURRENT_USER.location
+        || t.intakeLocation === CURRENT_USER.location;
+      if (!atOrigin) notifyTeamsCanceled(t, dupReason);
     }
     t.comments = t.comments || [];
     t.comments.push({ id: nextId(), itemId: null, author, ts: now, body: `🔗 Marked as duplicate of #${masterId} (${displayPatientName(master)}).` });
@@ -9477,6 +9492,104 @@ async function notifyTeamsAntShipChange(transfer, oldDate, newDate) {
       })
     });
   } catch (e) { console.warn('Teams ant-ship-change notification failed', e); }
+}
+
+// Teams notification: fill pharmacy canceled an origin's refill transfer. Sept
+// 21 2026 audit: Erie users canceled 11 satellite refills over 2 weeks with no
+// notification back to the origin — Anna and Melissa kept seeing transfers
+// "disappear" because Active hides Canceled. Now every fill-side cancel pings
+// the shared satellite-Erie chat with the reason so the origin knows and can
+// act (re-enter, call patient, whatever).
+async function notifyTeamsCanceled(transfer, reason) {
+  const chatLoc = chatWebhookKey(transfer);
+  if (!chatLoc) return;
+  const portalUrl = window.location.origin + window.location.pathname + '?transfer=' + encodeURIComponent(transfer.id);
+  try {
+    await fetch('/api/notify-teams', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'canceled',
+        locations: [chatLoc],
+        transferId: transfer.id,
+        patientName: transfer.patientName,
+        drug: (transfer.items[0] && transfer.items[0].drug) || '',
+        askedBy: CURRENT_USER.name,
+        askedLocation: CURRENT_USER.location,
+        reason: reason || '',
+        portalUrl
+      })
+    });
+  } catch (e) { console.warn('Teams cancel notification failed', e); }
+}
+
+// Modal that prompts a fill-side user for the reason they're canceling a transfer.
+// Returns Promise<string|null> — string with the reason (may be empty if they didn't
+// type but confirmed), null if they backed out (cancel the cancel). Only shown when
+// the current user isn't at the origin — origin canceling their own doesn't need to
+// notify anyone.
+function promptCancelReason({ patient, transferId }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '9999';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:520px">
+        <div class="modal-header" style="border-bottom:1px solid var(--warning-bg);background:var(--warning-bg)">
+          <div class="modal-title" style="color:var(--warning-dark, #92400e);display:flex;align-items:center;gap:10px">
+            <span style="font-size:24px">🚫</span>
+            <span>Cancel this transfer?</span>
+          </div>
+        </div>
+        <div class="modal-body" style="line-height:1.6">
+          <p style="margin:0 0 8px 0"><strong>Transfer #${escapeHtml(String(transferId))}</strong></p>
+          <p style="margin:0 0 16px 0"><strong>Patient:</strong> ${escapeHtml(patient)}</p>
+          <p style="margin:0 0 6px 0;font-weight:600">Why are you canceling? <span class="hint" style="text-transform:none;font-weight:400">(e.g. patient already picked up, insurance, duplicate)</span></p>
+          <textarea id="cancelReasonInput" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;font-size:14px" placeholder="Reason (will be sent to the origin pharmacy in Teams)"></textarea>
+          <p style="margin:12px 0 0 0;padding:10px 12px;background:var(--primary-bg);border-left:3px solid var(--primary);border-radius:4px;font-size:13px">
+            The origin pharmacy will receive a Teams message with this reason so they know why the transfer was canceled.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-act="cancel">Never mind</button>
+          <button class="btn btn-danger" data-act="ok">🚫 Cancel Transfer</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const done = (val) => { overlay.remove(); resolve(val); };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) return done(null);
+      const btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      if (btn.dataset.act === 'ok') {
+        const reason = (document.getElementById('cancelReasonInput').value || '').trim();
+        done(reason);
+      } else {
+        done(null);
+      }
+    });
+    const keyHandler = (e) => {
+      if (e.key === 'Escape') { document.removeEventListener('keydown', keyHandler); done(null); }
+    };
+    document.addEventListener('keydown', keyHandler);
+    setTimeout(() => overlay.querySelector('#cancelReasonInput').focus(), 0);
+  });
+}
+
+// Called before any status→Canceled change. If the current user is NOT at the
+// transfer's origin, prompt for a reason and notify the origin via Teams. Returns
+// { proceed: bool, reason: string } — caller aborts the status change if
+// proceed is false. Origin canceling their own transfer skips the prompt.
+async function handleCancelIntent(t) {
+  const atOrigin = t.originLocation === CURRENT_USER.location
+    || t.intakeLocation === CURRENT_USER.location;
+  if (atOrigin) return { proceed: true, reason: '' };
+  const reason = await promptCancelReason({
+    patient: t.patientName || '(no patient)',
+    transferId: t.id
+  });
+  if (reason === null) return { proceed: false, reason: '' };
+  t.cancelReason = reason;
+  return { proceed: true, reason };
 }
 
 // Teams notification: patient paid in store. Posts into the satellite-Erie chat so

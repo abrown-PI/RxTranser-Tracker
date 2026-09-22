@@ -41,6 +41,13 @@ function buildCard(payload) {
   } else if (kind === 'paid_in_store') {
     title = `💲 Paid in store: ${payload.patientName || '(unnamed)'}`;
     bodyExtra = [{ type: 'TextBlock', wrap: true, text: `Payment collected in store — this transfer is cleared to ship.`, spacing: 'Medium' }];
+  } else if (kind === 'canceled') {
+    title = `🚫 Transfer canceled: ${payload.patientName || '(unnamed)'}`;
+    const reasonText = payload.reason && payload.reason.trim() ? `**Reason:** ${payload.reason.trim()}` : `**Reason:** _(no reason given)_`;
+    bodyExtra = [
+      { type: 'TextBlock', wrap: true, text: `Canceled by **${payload.askedBy || '(unknown)'}** at **${payload.askedLocation || '(unknown location)'}**. This transfer will not be filled — the origin pharmacy should re-enter if the patient still needs it.`, spacing: 'Medium' },
+      { type: 'TextBlock', wrap: true, text: reasonText, spacing: 'Small' }
+    ];
   } else {
     title = `❓ Question on transfer: ${payload.patientName || '(unnamed)'}`;
     bodyExtra = [{ type: 'TextBlock', wrap: true, text: payload.question || '(no question text)', spacing: 'Medium' }];
