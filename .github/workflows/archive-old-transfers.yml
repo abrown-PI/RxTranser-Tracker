@@ -1,0 +1,49 @@
+name: Archive old transfers (nightly)
+
+# Moves Received / Delivered / Canceled transfers older than 90 days out of the
+# active `transfers` table into `transfersArchive`. Keeps the active-table poll
+# payload small as the DB grows, which is what caused the Sept 2026 slow-portal /
+# misclick issue in the first place. Idempotent — copy-verify-then-delete, so a
+# failed run just leaves the row in both tables and the next run cleans up.
+#
+# GET /api/transfers/{id} falls back to the archive table, so old records stay
+# accessible via direct link. Refill picker also fetches ?include=archive so
+# lookup for old originals still works.
+on:
+  schedule:
+    # 00:00 UTC = 7pm CDT (Ashley's local, DST) / 6pm CST (winter). After
+    # business hours in both DST configurations. Ashley's on Central Time per
+    # user memory.
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      olderThanDays:
+        description: 'Move rows older than N days (default 90, min 30)'
+        required: false
+        default: '90'
+      dryRun:
+        description: 'Dry run (report only, no writes)'
+        required: false
+        default: 'false'
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call archive endpoint
+        run: |
+          OLDER=${{ github.event.inputs.olderThanDays || '90' }}
+          DRY=${{ github.event.inputs.dryRun || 'false' }}
+          echo "Archiving transfers older than $OLDER days (dryRun=$DRY)"
+          response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
+            "https://red-island-0bb34e510.7.azurestaticapps.net/api/archive-old-transfers" \
+            -H "Content-Type: application/json" \
+            -d "{\"olderThanDays\":$OLDER,\"dryRun\":$DRY}")
+          body=$(echo "$response" | sed '$d')
+          status=$(echo "$response" | tail -n1 | sed 's/HTTP_STATUS://')
+          echo "HTTP $status"
+          echo "$body" | head -80
+          if [ "$status" != "200" ]; then
+            echo "::error::Archive endpoint returned $status"
+            exit 1
+          fi

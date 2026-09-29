@@ -546,6 +546,35 @@ let TRANSFERS = (typeof IMPORT_DATA !== 'undefined' ? IMPORT_DATA : []).map(d =>
   comments: []
 }));
 
+// Archived transfers — Received/Delivered/Canceled rows older than 90 days that
+// the nightly job moved to transfersArchive. Loaded on demand (Refill tab, or
+// admin "Include archive" toggle) so the default poll stays small. Empty until
+// something asks for them.
+let ARCHIVED_TRANSFERS = [];
+let _archivedLoaded = false;
+let _archivedLoadingPromise = null;
+async function loadArchivedTransfersOnce() {
+  if (_archivedLoaded) return ARCHIVED_TRANSFERS;
+  if (_archivedLoadingPromise) return _archivedLoadingPromise;
+  _archivedLoadingPromise = (async () => {
+    try {
+      const r = await fetch('/api/transfers?include=archive');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const list = data.transfers || [];
+      // Only keep the archived subset. Active rows are already in TRANSFERS.
+      ARCHIVED_TRANSFERS = list.filter(t => t._archived);
+      _archivedLoaded = true;
+    } catch (e) {
+      console.warn('Failed to load archived transfers:', e.message);
+    } finally {
+      _archivedLoadingPromise = null;
+    }
+    return ARCHIVED_TRANSFERS;
+  })();
+  return _archivedLoadingPromise;
+}
+
 // Auto-generate shipments from unique tracking numbers in transfer data
 let SHIPMENTS = (() => {
   const trackMap = {};
@@ -8025,15 +8054,22 @@ function renderRefillTab() {
   if (!state.refill) state.refill = { query: '', searchBy: 'patient', pickedId: null, includedItems: {}, editingDefaults: false };
   const root = document.getElementById('view-refill');
   const r = state.refill;
-  const picked = r.pickedId ? TRANSFERS.find(t => t.id === r.pickedId) : null;
+  const picked = r.pickedId ? (TRANSFERS.find(t => t.id === r.pickedId) || ARCHIVED_TRANSFERS.find(t => t.id === r.pickedId)) : null;
 
   if (picked) return renderRefillReview(picked);
 
-  // Search phase
+  // Kick off archive load (once per session) so old refills are findable.
+  // Non-blocking — first render shows only active-table matches, archived
+  // rows appear on the next keystroke after the fetch completes (~1s typical).
+  if (!_archivedLoaded) loadArchivedTransfersOnce().then(() => { if (state.tab === 'refill') renderRefillTab(); });
+
+  // Search phase — includes archived transfers (patient may have last filled
+  // 6+ months ago; that transfer lives in the archive now).
   const q = r.query.trim().toLowerCase();
   let matches = [];
   if (q.length >= 2) {
-    matches = visibleTransfers().filter(t => {
+    const searchPool = TRANSFERS.concat(ARCHIVED_TRANSFERS).filter(canSeeTransfer);
+    matches = searchPool.filter(t => {
       if (r.searchBy === 'patient') {
         const hay = ((t.patientName||'') + ' ' + (t.patientFirstName||'') + ' ' + (t.patientLastName||'') + ' ' + (t.patientFirstName||'') + ' ' + (t.patientLastName||'')).toLowerCase();
         return hay.includes(q);
