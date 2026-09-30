@@ -182,10 +182,21 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 .dashboard-view .dash-hero p { margin: 4px 0 0 0; font-size: 13px; opacity: .85; }
 .dashboard-view .dash-hero .dash-hero-meta { text-align: right; font-size: 12px; opacity: .9; }
 .dashboard-view .dash-grid { display: grid; gap: 16px; margin-bottom: 20px; }
+.dashboard-view .dash-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
 .dashboard-view .dash-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
 .dashboard-view .dash-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .dashboard-view .dash-grid.cols-2 { grid-template-columns: 2fr 1fr; }
-@media (max-width: 1000px) { .dashboard-view .dash-grid.cols-4 { grid-template-columns: repeat(2, 1fr); } .dashboard-view .dash-grid.cols-3 { grid-template-columns: 1fr; } .dashboard-view .dash-grid.cols-2 { grid-template-columns: 1fr; } }
+@media (max-width: 1300px) { .dashboard-view .dash-grid.cols-5 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 1000px) { .dashboard-view .dash-grid.cols-5 { grid-template-columns: repeat(2, 1fr); } .dashboard-view .dash-grid.cols-4 { grid-template-columns: repeat(2, 1fr); } .dashboard-view .dash-grid.cols-3 { grid-template-columns: 1fr; } .dashboard-view .dash-grid.cols-2 { grid-template-columns: 1fr; } }
+.dashboard-view .dash-range-bar { display: flex; align-items: center; gap: 4px; background: white; border: 1px solid var(--gray-200); border-radius: 10px; padding: 4px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.dashboard-view .dash-range-btn { background: transparent; border: 0; padding: 8px 16px; font-size: 13px; font-weight: 600; color: var(--gray-600); border-radius: 6px; cursor: pointer; transition: background .12s ease, color .12s ease; font-family: inherit; }
+.dashboard-view .dash-range-btn:hover:not(.active) { background: var(--gray-50); color: var(--gray-800); }
+.dashboard-view .dash-range-btn.active { background: var(--primary); color: white; }
+.dashboard-view .dash-range-hint { margin-left: auto; padding: 0 12px; font-size: 11px; color: var(--gray-500); text-transform: uppercase; letter-spacing: .04em; }
+.dashboard-view .delta-chip { display: inline-block; margin-left: 8px; padding: 2px 8px; font-size: 12px; font-weight: 600; border-radius: 12px; letter-spacing: .01em; vertical-align: middle; }
+.dashboard-view .delta-chip.delta-good { background: var(--success-bg); color: var(--success); }
+.dashboard-view .delta-chip.delta-bad  { background: var(--danger-bg);  color: var(--danger); }
+.dashboard-view .delta-chip.delta-none { background: var(--gray-100);   color: var(--gray-500); }
 .dashboard-view .dash-kpi { background: white; border: 1px solid var(--gray-200); border-radius: 10px; padding: 18px 20px; box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: transform .12s ease, box-shadow .12s ease; }
 .dashboard-view .dash-kpi[data-clickable] { cursor: pointer; }
 .dashboard-view .dash-kpi[data-clickable]:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,23,42,.09); border-color: var(--primary-light); }
@@ -668,8 +679,9 @@ const nextId = () => ++_nextId;
 // Persist the active tab across refreshes — staff hate being kicked back to Transfers when
 // they were halfway through the Shipments page. Falls back to 'transfers' if nothing saved.
 const _savedTab = (() => { try { return localStorage.getItem('lastTab') || 'transfers'; } catch { return 'transfers'; } })();
+const _savedHomeRange = (() => { try { const v = localStorage.getItem('homeRange'); return ['today','week','month','year'].includes(v) ? v : 'today'; } catch { return 'today'; } })();
 const VALID_TABS = ['home','transfers','new','refill','actions','shipments','sla','stats','admin'];
-const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'home', filterStatus: '', completedView: 'active', filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterWeightLoss: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
+const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'home', homeRange: _savedHomeRange, filterStatus: '', completedView: 'active', filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterWeightLoss: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
 
 // Default-view persistence: stores a snapshot of the transfer-list filters in
 // localStorage so a user's preferred view survives reloads + sessions on the
@@ -1500,8 +1512,9 @@ function updateSLABadge() {
 }
 
 // Home dashboard — "at a glance" landing view. Focused on THIS user's location
-// and today's operational reality: what happened today, what's waiting on them,
-// how the week is trending. Deep analysis stays on the Reports tab.
+// and their operational reality: what happened in the selected window, what's
+// waiting on them right now, how the trend is going. Deep analysis stays on
+// the Reports tab.
 function renderHome() {
   const root = document.getElementById('view-home');
   if (!root) return;
@@ -1512,13 +1525,60 @@ function renderHome() {
   const scopeLabel = isAdminAll ? 'All locations' : myLoc;
   const visible = visibleTransfers();
 
-  // Today's activity — anchored on relevant date fields for each event.
-  const today = todayLocal();
-  const isToday = (d) => (d || '').slice(0,10) === today;
-  const createdToday = visible.filter(t => isToday(t.createdAt));
-  const shippedToday = visible.filter(t => isToday(t.dateShipped));
-  const receivedToday = visible.filter(t => t.status === 'Received' && isToday(t.lastEditedAt));
-  const canceledToday = visible.filter(t => t.status === 'Canceled' && isToday(t.canceledAt || t.lastEditedAt));
+  // Time-range toggle: today / week (rolling 7d) / month (rolling 30d) /
+  // year (rolling 365d). Rolling windows match how ops teams actually think
+  // ('what happened this month' = last 30 days, not 'since the 1st').
+  if (!state.homeRange) state.homeRange = 'today';
+  const range = state.homeRange;
+  const rangeDays = { today: 1, week: 7, month: 30, year: 365 }[range] || 1;
+  const rangeLabel = { today: 'Today', week: 'This Week', month: 'This Month', year: 'This Year' }[range];
+  const trendDaysBack = { today: 7, week: 7, month: 30, year: 365 }[range];
+  const trendGranularity = range === 'year' ? 'month' : 'day';
+
+  const now = new Date();
+  const dayStart = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+  const currentStart = new Date(dayStart(now).getTime() - (rangeDays - 1) * 86400000);
+  const currentEnd = new Date(dayStart(now).getTime() + 86400000 - 1); // end of today
+  const prevEnd = new Date(currentStart.getTime() - 1);
+  const prevStart = new Date(prevEnd.getTime() - rangeDays * 86400000 + 1);
+  const inRange = (isoDate, start, end) => {
+    if (!isoDate) return false;
+    const t = Date.parse(isoDate);
+    return Number.isFinite(t) && t >= start.getTime() && t <= end.getTime();
+  };
+
+  // Activity in current window.
+  const created = visible.filter(t => inRange(t.createdAt, currentStart, currentEnd));
+  const shipped = visible.filter(t => inRange(t.dateShipped, currentStart, currentEnd));
+  const received = visible.filter(t => t.status === 'Received' && inRange(t.lastEditedAt || t.createdAt, currentStart, currentEnd));
+  const canceled = visible.filter(t => t.status === 'Canceled' && inRange(t.canceledAt || t.lastEditedAt || t.createdAt, currentStart, currentEnd));
+  // Same metrics for the previous window — used to compute delta chips.
+  const prevCreated = visible.filter(t => inRange(t.createdAt, prevStart, prevEnd)).length;
+  const prevShipped = visible.filter(t => inRange(t.dateShipped, prevStart, prevEnd)).length;
+  const prevReceived = visible.filter(t => t.status === 'Received' && inRange(t.lastEditedAt || t.createdAt, prevStart, prevEnd)).length;
+  const prevCanceled = visible.filter(t => t.status === 'Canceled' && inRange(t.canceledAt || t.lastEditedAt || t.createdAt, prevStart, prevEnd)).length;
+  // On-time ship rate for the current window — how many shipped transfers went
+  // out on or before their anticipated ship date.
+  const shippedWithAnt = shipped.filter(t => t.anticipatedShipDate);
+  const onTime = shippedWithAnt.filter(t => new Date(t.dateShipped) <= new Date(t.anticipatedShipDate + 'T23:59:59')).length;
+  const onTimePct = shippedWithAnt.length ? Math.round(100 * onTime / shippedWithAnt.length) : null;
+  const prevShippedWithAnt = visible.filter(t => inRange(t.dateShipped, prevStart, prevEnd) && t.anticipatedShipDate);
+  const prevOnTime = prevShippedWithAnt.filter(t => new Date(t.dateShipped) <= new Date(t.anticipatedShipDate + 'T23:59:59')).length;
+  const prevOnTimePct = prevShippedWithAnt.length ? Math.round(100 * prevOnTime / prevShippedWithAnt.length) : null;
+
+  // Delta chip HTML — colored arrow + magnitude. Compared to the previous
+  // same-length window. `higherIsBetter=false` for canceled (fewer is better).
+  const deltaChip = (curr, prev, { higherIsBetter = true, suffix = '', showAbs = true } = {}) => {
+    if (prev == null && curr == null) return '';
+    if (prev == null) return `<span class="delta-chip delta-none" title="No comparison data">new</span>`;
+    const diff = (curr ?? 0) - prev;
+    if (diff === 0) return `<span class="delta-chip delta-none">— same</span>`;
+    const up = diff > 0;
+    const good = higherIsBetter ? up : !up;
+    const arrow = up ? '↑' : '↓';
+    const shown = showAbs ? Math.abs(diff) : `${up?'+':''}${diff}`;
+    return `<span class="delta-chip ${good?'delta-good':'delta-bad'}" title="Previous period: ${prev}${suffix}">${arrow}${shown}${suffix}</span>`;
+  };
 
   // Attention needed — click-through to filtered Transfers views.
   const pending = visible.filter(t => t.status === 'Pending Clarification').length;
@@ -1526,19 +1586,31 @@ function renderHome() {
   const pastAntShip = visible.filter(t => t.anticipatedShipDate && !['Shipped','Delivered','Received','Canceled'].includes(t.status) && t.anticipatedShipDate < today).length;
   const unackCanceled = visible.filter(t => t.status === 'Canceled' && !t.cancelAcknowledged).length;
 
-  // 7-day volume trend — created + shipped + received per day, most recent day last.
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const iso = d.toISOString().slice(0,10);
-    days.push({ iso, label: d.toLocaleDateString(undefined, { weekday: 'short' }) });
+  // Trend chart buckets — daily for today/week/month, monthly for year.
+  const buckets = [];
+  if (trendGranularity === 'day') {
+    for (let i = trendDaysBack - 1; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const iso = d.toISOString().slice(0,10);
+      const label = trendDaysBack <= 7
+        ? d.toLocaleDateString(undefined, { weekday: 'short' })
+        : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      buckets.push({ iso, label, matches: (ymd) => ymd === iso });
+    }
+  } else {
+    // Monthly buckets, most recent last.
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
+      const ym = d.toISOString().slice(0,7);
+      buckets.push({ iso: ym, label: d.toLocaleDateString(undefined, { month: 'short' }), matches: (ymd) => ymd.slice(0,7) === ym });
+    }
   }
-  const dailyCreated = days.map(d => visible.filter(t => (t.createdAt||'').slice(0,10) === d.iso).length);
-  const dailyShipped = days.map(d => visible.filter(t => (t.dateShipped||'').slice(0,10) === d.iso).length);
-  const dailyReceived = days.map(d => visible.filter(t => t.status === 'Received' && (t.lastEditedAt||'').slice(0,10) === d.iso).length);
+  const dailyCreated = buckets.map(b => visible.filter(t => b.matches((t.createdAt||'').slice(0,10))).length);
+  const dailyShipped = buckets.map(b => visible.filter(t => b.matches((t.dateShipped||'').slice(0,10))).length);
+  const dailyReceived = buckets.map(b => visible.filter(t => t.status === 'Received' && b.matches((t.lastEditedAt||'').slice(0,10))).length);
 
-  // Ship-to mix for last 7 days.
-  const weekWindow = visible.filter(t => (t.createdAt||'').slice(0,10) >= days[0].iso);
+  // Ship-to mix for the current window.
+  const weekWindow = visible.filter(t => inRange(t.createdAt, currentStart, currentEnd));
   const shipMix = { Patient: 0, Pharmacy: 0, 'Delivery-Lancaster': 0 };
   weekWindow.forEach(t => { if (shipMix[t.shipTo] !== undefined) shipMix[t.shipTo]++; });
 
@@ -1560,33 +1632,42 @@ function renderHome() {
       </div>
     </div>
 
-    <div class="dash-grid cols-4">
-      <div class="dash-kpi" data-clickable data-goto-transfers="created" title="See transfers created today">
-        <div class="dash-kpi-label">Created Today</div>
-        <div class="dash-kpi-value">${createdToday.length}</div>
-        <div class="dash-kpi-sub">${createdToday.filter(t=>t.transferType==='Refill').length} refills · ${createdToday.filter(t=>t.transferType!=='Refill').length} new</div>
+    <div class="dash-range-bar">
+      ${['today','week','month','year'].map(r => `<button class="dash-range-btn ${range===r?'active':''}" data-range="${r}">${ {today:'Today', week:'This Week', month:'This Month', year:'This Year'}[r] }</button>`).join('')}
+      <span class="dash-range-hint">${range==='today' ? 'vs. yesterday' : `vs. previous ${rangeDays} days`}</span>
+    </div>
+    <div class="dash-grid cols-5">
+      <div class="dash-kpi" data-clickable data-goto-transfers="created" title="See transfers in this range">
+        <div class="dash-kpi-label">Created ${rangeLabel}</div>
+        <div class="dash-kpi-value">${created.length} ${deltaChip(created.length, prevCreated)}</div>
+        <div class="dash-kpi-sub">${created.filter(t=>t.transferType==='Refill').length} refills · ${created.filter(t=>t.transferType!=='Refill').length} new</div>
       </div>
-      <div class="dash-kpi" data-clickable data-goto-transfers="shipped" title="See transfers shipped today">
-        <div class="dash-kpi-label">Shipped Today</div>
-        <div class="dash-kpi-value success">${shippedToday.length}</div>
-        <div class="dash-kpi-sub">${shippedToday.filter(t=>t.shipTo==='Patient').length} direct-to-patient</div>
+      <div class="dash-kpi" data-clickable data-goto-transfers="shipped" title="See transfers shipped in this range">
+        <div class="dash-kpi-label">Shipped ${rangeLabel}</div>
+        <div class="dash-kpi-value success">${shipped.length} ${deltaChip(shipped.length, prevShipped)}</div>
+        <div class="dash-kpi-sub">${shipped.filter(t=>t.shipTo==='Patient').length} direct-to-patient</div>
       </div>
-      <div class="dash-kpi" data-clickable data-goto-transfers="received" title="See transfers received today">
-        <div class="dash-kpi-label">Received Today</div>
-        <div class="dash-kpi-value">${receivedToday.length}</div>
+      <div class="dash-kpi" data-clickable data-goto-transfers="received" title="See transfers received in this range">
+        <div class="dash-kpi-label">Received ${rangeLabel}</div>
+        <div class="dash-kpi-value">${received.length} ${deltaChip(received.length, prevReceived)}</div>
         <div class="dash-kpi-sub">delivered & checked in</div>
       </div>
-      <div class="dash-kpi" data-clickable data-goto-transfers="canceled" title="See transfers canceled today">
-        <div class="dash-kpi-label">Canceled Today</div>
-        <div class="dash-kpi-value ${canceledToday.length?'warn':''}">${canceledToday.length}</div>
-        <div class="dash-kpi-sub">${canceledToday.filter(t=>t.cancelReason).length} with reason recorded</div>
+      <div class="dash-kpi" data-clickable data-goto-transfers="canceled" title="See transfers canceled in this range">
+        <div class="dash-kpi-label">Canceled ${rangeLabel}</div>
+        <div class="dash-kpi-value ${canceled.length?'warn':''}">${canceled.length} ${deltaChip(canceled.length, prevCanceled, { higherIsBetter:false })}</div>
+        <div class="dash-kpi-sub">${canceled.filter(t=>t.cancelReason).length} with reason recorded</div>
+      </div>
+      <div class="dash-kpi" title="Percent of shipped transfers that went out on or before their anticipated ship date">
+        <div class="dash-kpi-label">On-Time Ship Rate</div>
+        <div class="dash-kpi-value ${onTimePct==null?'':(onTimePct>=90?'success':(onTimePct>=75?'warn':'danger'))}">${onTimePct==null?'—':onTimePct+'%'} ${onTimePct!=null?deltaChip(onTimePct, prevOnTimePct, { suffix: '%' }):''}</div>
+        <div class="dash-kpi-sub">${shippedWithAnt.length? `${onTime}/${shippedWithAnt.length} shipped on time` : 'no shipments to score'}</div>
       </div>
     </div>
 
     <div class="dash-grid cols-2">
       <div class="dash-panel">
         <div class="dash-panel-header">
-          <span class="dash-panel-title">7-Day Trend</span>
+          <span class="dash-panel-title">${trendGranularity==='month' ? '12-Month Trend' : `${trendDaysBack}-Day Trend`}</span>
           <span class="item-sub" style="text-transform:none;font-weight:400">${scopeLabel}</span>
         </div>
         <div class="dash-panel-body">
@@ -1607,7 +1688,7 @@ function renderHome() {
     <div class="dash-grid cols-2">
       <div class="dash-panel">
         <div class="dash-panel-header">
-          <span class="dash-panel-title">Ship-To Mix (Last 7 Days)</span>
+          <span class="dash-panel-title">Ship-To Mix (${rangeLabel})</span>
           <span class="item-sub" style="text-transform:none;font-weight:400">${weekWindow.length} transfer${weekWindow.length===1?'':'s'}</span>
         </div>
         <div class="dash-panel-body">
@@ -1642,7 +1723,7 @@ function renderHome() {
       window._dashTrend = new Chart(trendCtx, {
         type: 'line',
         data: {
-          labels: days.map(d => d.label),
+          labels: buckets.map(b => b.label),
           datasets: [
             { label: 'Created', data: dailyCreated, borderColor: '#2a6ebb', backgroundColor: 'rgba(42,110,187,.15)', tension: .3, fill: true },
             { label: 'Shipped', data: dailyShipped, borderColor: '#10916f', backgroundColor: 'rgba(16,145,111,.12)', tension: .3, fill: true },
@@ -1663,6 +1744,14 @@ function renderHome() {
       });
     }
   }
+
+  // Range toggle — switch state and re-render the Home tab. Persisted in localStorage
+  // so the user's preferred window survives reloads.
+  root.querySelectorAll('.dash-range-btn').forEach(btn => btn.addEventListener('click', () => {
+    state.homeRange = btn.dataset.range;
+    try { localStorage.setItem('homeRange', state.homeRange); } catch {}
+    renderHome();
+  }));
 
   // Wire click-through — set filter state on the Transfers tab then switch.
   root.querySelectorAll('[data-goto-transfers]').forEach(el => el.addEventListener('click', () => {
