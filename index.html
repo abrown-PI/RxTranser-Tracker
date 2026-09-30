@@ -173,6 +173,50 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 .kpi-value { font-size: 26px; font-weight: 700; color: var(--primary-dark); }
 .kpi-sub { font-size: 11px; color: var(--gray-500); margin-top: 4px; }
 
+/* Home dashboard — inspired by pharmacy-dashboard palette (navy accents, muted
+   card grid) but reusing Transfer Portal's existing tokens so the visual
+   language stays coherent with the rest of the tabs. Everything scoped inside
+   .dashboard-view so we don't affect other tabs. */
+.dashboard-view .dash-hero { background: linear-gradient(135deg, var(--primary-darker), var(--primary-dark)); color: white; padding: 20px 24px; border-radius: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; box-shadow: 0 4px 14px rgba(15,32,72,.12); }
+.dashboard-view .dash-hero h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .01em; }
+.dashboard-view .dash-hero p { margin: 4px 0 0 0; font-size: 13px; opacity: .85; }
+.dashboard-view .dash-hero .dash-hero-meta { text-align: right; font-size: 12px; opacity: .9; }
+.dashboard-view .dash-grid { display: grid; gap: 16px; margin-bottom: 20px; }
+.dashboard-view .dash-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.dashboard-view .dash-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.dashboard-view .dash-grid.cols-2 { grid-template-columns: 2fr 1fr; }
+@media (max-width: 1000px) { .dashboard-view .dash-grid.cols-4 { grid-template-columns: repeat(2, 1fr); } .dashboard-view .dash-grid.cols-3 { grid-template-columns: 1fr; } .dashboard-view .dash-grid.cols-2 { grid-template-columns: 1fr; } }
+.dashboard-view .dash-kpi { background: white; border: 1px solid var(--gray-200); border-radius: 10px; padding: 18px 20px; box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: transform .12s ease, box-shadow .12s ease; }
+.dashboard-view .dash-kpi[data-clickable] { cursor: pointer; }
+.dashboard-view .dash-kpi[data-clickable]:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,23,42,.09); border-color: var(--primary-light); }
+.dashboard-view .dash-kpi-label { font-size: 11px; color: var(--gray-500); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.dashboard-view .dash-kpi-value { font-size: 30px; font-weight: 700; color: var(--primary-darker); margin-top: 6px; line-height: 1.1; }
+.dashboard-view .dash-kpi-value.warn { color: var(--warning); }
+.dashboard-view .dash-kpi-value.danger { color: var(--danger); }
+.dashboard-view .dash-kpi-value.success { color: var(--success); }
+.dashboard-view .dash-kpi-sub { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+.dashboard-view .dash-panel { background: white; border: 1px solid var(--gray-200); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.dashboard-view .dash-panel-header { padding: 14px 18px; border-bottom: 1px solid var(--gray-100); background: var(--gray-50); display: flex; justify-content: space-between; align-items: center; }
+.dashboard-view .dash-panel-title { font-size: 13px; font-weight: 600; color: var(--gray-700); text-transform: uppercase; letter-spacing: .04em; }
+.dashboard-view .dash-panel-body { padding: 16px 18px; }
+.dashboard-view .dash-chart-wrap { position: relative; height: 260px; }
+.dashboard-view .dash-list { list-style: none; padding: 0; margin: 0; }
+.dashboard-view .dash-list li { padding: 10px 0; border-bottom: 1px solid var(--gray-100); font-size: 13px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.dashboard-view .dash-list li:last-child { border-bottom: none; }
+.dashboard-view .dash-list .dash-list-title { color: var(--gray-800); font-weight: 500; flex: 1; }
+.dashboard-view .dash-list .dash-list-meta { color: var(--gray-500); font-size: 12px; white-space: nowrap; }
+.dashboard-view .dash-attention { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; background: var(--gray-50); border: 1px solid var(--gray-200); cursor: pointer; transition: background .12s ease; margin-bottom: 8px; }
+.dashboard-view .dash-attention:hover { background: var(--primary-bg); border-color: var(--primary-light); }
+.dashboard-view .dash-attention .badge-count { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 700; font-size: 15px; color: white; padding: 0 8px; }
+.dashboard-view .dash-attention .badge-count.zero { background: var(--gray-300); color: var(--gray-600); }
+.dashboard-view .dash-attention .badge-count.warn { background: var(--warning); }
+.dashboard-view .dash-attention .badge-count.danger { background: var(--danger); }
+.dashboard-view .dash-attention .badge-count.info { background: var(--primary); }
+.dashboard-view .dash-attention-text { flex: 1; font-size: 13px; }
+.dashboard-view .dash-attention-text strong { color: var(--gray-800); font-weight: 600; display: block; }
+.dashboard-view .dash-attention-text span { color: var(--gray-500); font-size: 12px; }
+.dashboard-view .dash-attention-arrow { color: var(--gray-400); font-size: 18px; }
+
 /* Photo thumbnails */
 .photo-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .photo-thumb { width: 72px; height: 72px; border-radius: 6px; border: 1px solid var(--gray-300); background-size: cover; background-position: center; position: relative; }
@@ -240,7 +284,8 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 <div id="nextShipmentBanner" style="display:none;background:linear-gradient(90deg,#cfdbed,#dde7f4);border-bottom:1px solid var(--primary-light);padding:8px 24px;font-size:13px;color:var(--primary-darker);text-align:center"></div>
 
 <div class="tabs">
-  <button class="tab active" data-tab="transfers">Transfers</button>
+  <button class="tab active" data-tab="home">🏠 Home</button>
+  <button class="tab" data-tab="transfers">Transfers</button>
   <button class="tab" data-tab="new">+ New Transfer</button>
   <button class="tab" data-tab="refill">+ Refill</button>
   <button class="tab" data-tab="actions">Action Items <span id="actionsBadge" style="background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px;display:none"></span></button>
@@ -251,7 +296,8 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 </div>
 
 <div class="container">
-  <div id="view-transfers"></div>
+  <div id="view-home"></div>
+  <div id="view-transfers" style="display:none"></div>
   <div id="view-new" style="display:none"></div>
   <div id="view-refill" style="display:none"></div>
   <div id="view-actions" style="display:none"></div>
@@ -294,6 +340,7 @@ if (window.pdfjsLib) {
 }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="signature_pad.min.js"></script>
 <script src="data.js"></script>
 <script>
@@ -621,8 +668,8 @@ const nextId = () => ++_nextId;
 // Persist the active tab across refreshes — staff hate being kicked back to Transfers when
 // they were halfway through the Shipments page. Falls back to 'transfers' if nothing saved.
 const _savedTab = (() => { try { return localStorage.getItem('lastTab') || 'transfers'; } catch { return 'transfers'; } })();
-const VALID_TABS = ['transfers','new','refill','actions','shipments','sla','stats','admin'];
-const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'transfers', filterStatus: '', completedView: 'active', filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterWeightLoss: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
+const VALID_TABS = ['home','transfers','new','refill','actions','shipments','sla','stats','admin'];
+const state = { tab: VALID_TABS.includes(_savedTab) ? _savedTab : 'home', filterStatus: '', completedView: 'active', filterOrigin: '', filterFill: '', filterType: '', filterPaid: '', filterMed: '', filterShipToType: '', filterWeightLoss: '', filterAntShipFrom: '', filterAntShipTo: '', filterShipFrom: '', filterShipTo: '', search: '', openTransferId: null };
 
 // Default-view persistence: stores a snapshot of the transfer-list filters in
 // localStorage so a user's preferred view survives reloads + sessions on the
@@ -1402,7 +1449,8 @@ function printDocs(items) {
 }
 
 function render() {
-  if (state.tab === 'transfers') renderTransfers();
+  if (state.tab === 'home') renderHome();
+  else if (state.tab === 'transfers') renderTransfers();
   else if (state.tab === 'new') renderNewForm();
   else if (state.tab === 'refill') renderRefillTab();
   else if (state.tab === 'actions') renderActionItems();
@@ -1449,6 +1497,210 @@ function updateSLABadge() {
   const b = document.getElementById('slaBadge');
   if (!b) return;
   if (count > 0) { b.textContent = count; b.style.display = 'inline-block'; } else { b.style.display = 'none'; }
+}
+
+// Home dashboard — "at a glance" landing view. Focused on THIS user's location
+// and today's operational reality: what happened today, what's waiting on them,
+// how the week is trending. Deep analysis stays on the Reports tab.
+function renderHome() {
+  const root = document.getElementById('view-home');
+  if (!root) return;
+  root.classList.add('dashboard-view');
+
+  const myLoc = CURRENT_USER.location;
+  const isAdminAll = CURRENT_USER.role === 'admin' && myLoc === ALL_LOCATIONS;
+  const scopeLabel = isAdminAll ? 'All locations' : myLoc;
+  const visible = visibleTransfers();
+
+  // Today's activity — anchored on relevant date fields for each event.
+  const today = todayLocal();
+  const isToday = (d) => (d || '').slice(0,10) === today;
+  const createdToday = visible.filter(t => isToday(t.createdAt));
+  const shippedToday = visible.filter(t => isToday(t.dateShipped));
+  const receivedToday = visible.filter(t => t.status === 'Received' && isToday(t.lastEditedAt));
+  const canceledToday = visible.filter(t => t.status === 'Canceled' && isToday(t.canceledAt || t.lastEditedAt));
+
+  // Attention needed — click-through to filtered Transfers views.
+  const pending = visible.filter(t => t.status === 'Pending Clarification').length;
+  const needsFormula = visible.filter(t => t.status === 'Needs Formula').length;
+  const pastAntShip = visible.filter(t => t.anticipatedShipDate && !['Shipped','Delivered','Received','Canceled'].includes(t.status) && t.anticipatedShipDate < today).length;
+  const unackCanceled = visible.filter(t => t.status === 'Canceled' && !t.cancelAcknowledged).length;
+
+  // 7-day volume trend — created + shipped + received per day, most recent day last.
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const iso = d.toISOString().slice(0,10);
+    days.push({ iso, label: d.toLocaleDateString(undefined, { weekday: 'short' }) });
+  }
+  const dailyCreated = days.map(d => visible.filter(t => (t.createdAt||'').slice(0,10) === d.iso).length);
+  const dailyShipped = days.map(d => visible.filter(t => (t.dateShipped||'').slice(0,10) === d.iso).length);
+  const dailyReceived = days.map(d => visible.filter(t => t.status === 'Received' && (t.lastEditedAt||'').slice(0,10) === d.iso).length);
+
+  // Ship-to mix for last 7 days.
+  const weekWindow = visible.filter(t => (t.createdAt||'').slice(0,10) >= days[0].iso);
+  const shipMix = { Patient: 0, Pharmacy: 0, 'Delivery-Lancaster': 0 };
+  weekWindow.forEach(t => { if (shipMix[t.shipTo] !== undefined) shipMix[t.shipTo]++; });
+
+  // Recent activity — last 8 transfers touched (any status change), scoped to visible.
+  const recent = visible.slice()
+    .filter(t => t.lastEditedAt || t.createdAt)
+    .sort((a,b) => new Date(b.lastEditedAt || b.createdAt) - new Date(a.lastEditedAt || a.createdAt))
+    .slice(0, 8);
+
+  root.innerHTML = `
+    <div class="dash-hero">
+      <div>
+        <h1>Welcome back, ${escapeHtml((CURRENT_USER.name||'').split(' ')[0] || 'there')}</h1>
+        <p>${escapeHtml(scopeLabel)} · ${new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' })}</p>
+      </div>
+      <div class="dash-hero-meta">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.8">Active in your queue</div>
+        <div style="font-size:28px;font-weight:700;line-height:1.1;margin-top:2px">${visible.filter(t => !FILL_COMPLETE_STATUSES.includes(t.status) && !RECEIVING_COMPLETE_STATUSES.includes(t.status)).length}</div>
+      </div>
+    </div>
+
+    <div class="dash-grid cols-4">
+      <div class="dash-kpi" data-clickable data-goto-transfers="created" title="See transfers created today">
+        <div class="dash-kpi-label">Created Today</div>
+        <div class="dash-kpi-value">${createdToday.length}</div>
+        <div class="dash-kpi-sub">${createdToday.filter(t=>t.transferType==='Refill').length} refills · ${createdToday.filter(t=>t.transferType!=='Refill').length} new</div>
+      </div>
+      <div class="dash-kpi" data-clickable data-goto-transfers="shipped" title="See transfers shipped today">
+        <div class="dash-kpi-label">Shipped Today</div>
+        <div class="dash-kpi-value success">${shippedToday.length}</div>
+        <div class="dash-kpi-sub">${shippedToday.filter(t=>t.shipTo==='Patient').length} direct-to-patient</div>
+      </div>
+      <div class="dash-kpi" data-clickable data-goto-transfers="received" title="See transfers received today">
+        <div class="dash-kpi-label">Received Today</div>
+        <div class="dash-kpi-value">${receivedToday.length}</div>
+        <div class="dash-kpi-sub">delivered & checked in</div>
+      </div>
+      <div class="dash-kpi" data-clickable data-goto-transfers="canceled" title="See transfers canceled today">
+        <div class="dash-kpi-label">Canceled Today</div>
+        <div class="dash-kpi-value ${canceledToday.length?'warn':''}">${canceledToday.length}</div>
+        <div class="dash-kpi-sub">${canceledToday.filter(t=>t.cancelReason).length} with reason recorded</div>
+      </div>
+    </div>
+
+    <div class="dash-grid cols-2">
+      <div class="dash-panel">
+        <div class="dash-panel-header">
+          <span class="dash-panel-title">7-Day Trend</span>
+          <span class="item-sub" style="text-transform:none;font-weight:400">${scopeLabel}</span>
+        </div>
+        <div class="dash-panel-body">
+          <div class="dash-chart-wrap"><canvas id="dashTrendChart"></canvas></div>
+        </div>
+      </div>
+      <div class="dash-panel">
+        <div class="dash-panel-header"><span class="dash-panel-title">Attention Needed</span></div>
+        <div class="dash-panel-body">
+          <div class="dash-attention" data-goto-transfers="pending"><span class="badge-count ${pending?'warn':'zero'}">${pending}</span><div class="dash-attention-text"><strong>Pending Clarification</strong><span>Waiting on info from the origin pharmacy</span></div><span class="dash-attention-arrow">›</span></div>
+          <div class="dash-attention" data-goto-transfers="formula"><span class="badge-count ${needsFormula?'warn':'zero'}">${needsFormula}</span><div class="dash-attention-text"><strong>Needs Formula</strong><span>PK Sheet or compound formula still required</span></div><span class="dash-attention-arrow">›</span></div>
+          <div class="dash-attention" data-goto-transfers="late"><span class="badge-count ${pastAntShip?'danger':'zero'}">${pastAntShip}</span><div class="dash-attention-text"><strong>Past Anticipated Ship</strong><span>Open and past the anticipated ship date</span></div><span class="dash-attention-arrow">›</span></div>
+          <div class="dash-attention" data-goto-actions><span class="badge-count ${unackCanceled?'info':'zero'}">${unackCanceled}</span><div class="dash-attention-text"><strong>Canceled Awaiting Ack</strong><span>Someone canceled a transfer that touches your location</span></div><span class="dash-attention-arrow">›</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-grid cols-2">
+      <div class="dash-panel">
+        <div class="dash-panel-header">
+          <span class="dash-panel-title">Ship-To Mix (Last 7 Days)</span>
+          <span class="item-sub" style="text-transform:none;font-weight:400">${weekWindow.length} transfer${weekWindow.length===1?'':'s'}</span>
+        </div>
+        <div class="dash-panel-body">
+          <div class="dash-chart-wrap"><canvas id="dashMixChart"></canvas></div>
+        </div>
+      </div>
+      <div class="dash-panel">
+        <div class="dash-panel-header"><span class="dash-panel-title">Recent Activity</span></div>
+        <div class="dash-panel-body" style="max-height:280px;overflow-y:auto">
+          ${recent.length === 0 ? '<div class="item-sub">Nothing recent.</div>' :
+            `<ul class="dash-list">${recent.map(t => {
+              const when = t.lastEditedAt || t.createdAt;
+              const rel = _relTime(when);
+              return `<li data-goto-transfer="${t.id}" style="cursor:pointer">
+                <span class="dash-list-title">${escapeHtml(t.patientName || '(unnamed)')} <span class="item-sub" style="text-transform:none;font-weight:400">· ${escapeHtml(t.status)}</span></span>
+                <span class="dash-list-meta">${escapeHtml(rel)}</span>
+              </li>`;
+            }).join('')}</ul>`
+          }
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Charts — render after DOM insertion. Chart.js is loaded from CDN in <head>.
+  if (typeof Chart !== 'undefined') {
+    // Destroy any prior instances so re-render doesn't leak canvases.
+    if (window._dashTrend) window._dashTrend.destroy();
+    if (window._dashMix) window._dashMix.destroy();
+    const trendCtx = document.getElementById('dashTrendChart');
+    if (trendCtx) {
+      window._dashTrend = new Chart(trendCtx, {
+        type: 'line',
+        data: {
+          labels: days.map(d => d.label),
+          datasets: [
+            { label: 'Created', data: dailyCreated, borderColor: '#2a6ebb', backgroundColor: 'rgba(42,110,187,.15)', tension: .3, fill: true },
+            { label: 'Shipped', data: dailyShipped, borderColor: '#10916f', backgroundColor: 'rgba(16,145,111,.12)', tension: .3, fill: true },
+            { label: 'Received', data: dailyReceived, borderColor: '#7556d9', backgroundColor: 'rgba(117,86,217,.10)', tension: .3, fill: true }
+          ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+      });
+    }
+    const mixCtx = document.getElementById('dashMixChart');
+    if (mixCtx) {
+      const labels = Object.keys(shipMix);
+      const values = labels.map(k => shipMix[k]);
+      window._dashMix = new Chart(mixCtx, {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data: values, backgroundColor: ['#2a6ebb','#10916f','#d98b0b'], borderWidth: 0 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }, cutout: '62%' }
+      });
+    }
+  }
+
+  // Wire click-through — set filter state on the Transfers tab then switch.
+  root.querySelectorAll('[data-goto-transfers]').forEach(el => el.addEventListener('click', () => {
+    const kind = el.dataset.gotoTransfers;
+    state.filterStatus = ''; state.filterType = ''; state.search = '';
+    if (kind === 'pending') state.filterStatus = 'Pending Clarification';
+    else if (kind === 'formula') state.filterStatus = 'Needs Formula';
+    else if (kind === 'late') { state.filterStatus = ''; /* handled via table sort */ }
+    else if (kind === 'canceled') state.filterStatus = 'Canceled';
+    else if (kind === 'shipped') state.filterStatus = 'Shipped';
+    else if (kind === 'received') state.filterStatus = 'Received';
+    else if (kind === 'created') { /* default view is fine */ }
+    document.querySelector('.tab[data-tab=transfers]').click();
+  }));
+  root.querySelectorAll('[data-goto-actions]').forEach(el => el.addEventListener('click', () => {
+    document.querySelector('.tab[data-tab=actions]').click();
+  }));
+  root.querySelectorAll('[data-goto-transfer]').forEach(el => el.addEventListener('click', () => {
+    const id = +el.dataset.gotoTransfer;
+    openTransfer(id);
+  }));
+}
+
+// Tiny relative-time formatter — "5m ago", "3h ago", "yesterday", "3d ago"
+function _relTime(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const diffMs = Date.now() - t;
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 function renderTransfers() {
