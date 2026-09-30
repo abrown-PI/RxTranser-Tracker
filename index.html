@@ -1525,6 +1525,29 @@ function renderHome() {
   const scopeLabel = isAdminAll ? 'All locations' : myLoc;
   const visible = visibleTransfers();
 
+  // Loading state — TRANSFERS gets populated by apiLoadTransfers after page load.
+  // Without this guard, the first render (before the async load resolves) painted
+  // zeros everywhere and looked like the dashboard was broken. Now the user sees
+  // an obvious "loading" state until data arrives; the async block calls render()
+  // when it's done, which re-fires renderHome with real numbers.
+  if (TRANSFERS.length === 0) {
+    root.innerHTML = `
+      <div class="dash-hero">
+        <div>
+          <h1>Welcome back, ${escapeHtml((CURRENT_USER.name||'').split(' ')[0] || 'there')}</h1>
+          <p>${escapeHtml(scopeLabel)} · ${new Date().toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' })}</p>
+        </div>
+      </div>
+      <div class="dash-panel">
+        <div class="dash-panel-body" style="text-align:center;padding:60px 20px;color:var(--gray-500);font-size:14px">
+          <div style="font-size:32px;margin-bottom:10px">⏳</div>
+          Loading transfer data from the server…<br>
+          <span class="item-sub" style="text-transform:none;font-weight:400">If this stays here for more than 20 seconds, try a hard-refresh (Ctrl+Shift+R) or check DevTools console for errors.</span>
+        </div>
+      </div>`;
+    return;
+  }
+
   // Time-range toggle: today / week (rolling 7d) / month (rolling 30d) /
   // year (rolling 365d). Rolling windows match how ops teams actually think
   // ('what happened this month' = last 30 days, not 'since the 1st').
