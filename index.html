@@ -9673,17 +9673,57 @@ async function doIdleSignOut() {
   location.replace(location.origin + location.pathname);
 }
 
-async function doSignIn(m) {
+// Clear MSAL's stale "interaction_in_progress" lock from sessionStorage. Users hit
+// this error (reported by Amanda via Ashley, Oct 1 2026) when a prior login flow
+// was abandoned mid-redirect — a browser crash, closed tab, back button, or any
+// other way of leaving the page while MSAL thought a redirect was in flight. The
+// lock stays set in sessionStorage forever (sessionStorage persists across tab
+// reloads in the same browsing context), so every subsequent sign-in attempt
+// errors out until the user manually clears site data.
+//
+// Safe to call anytime there's NO legitimate interaction in progress — the only
+// risk would be clobbering a login happening in another tab, which is extremely
+// rare for this app's single-session use pattern.
+function clearStaleMsalInteraction() {
   try {
+    const keysToRemove = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (!key) continue;
+      if (key.startsWith('msal.') && (key.includes('interaction.status') || key.endsWith('.interaction'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(k => sessionStorage.removeItem(k));
+    if (keysToRemove.length) console.info('Cleared stale MSAL interaction lock(s):', keysToRemove);
+  } catch (e) { console.warn('clearStaleMsalInteraction failed', e); }
+}
+
+async function doSignIn(m) {
+  const tryLogin = async () => {
     const res = await m.loginPopup({ scopes: ['User.Read'], prompt: 'select_account' });
     if (res && res.account) {
       await applyMsalAccount(res.account);
       hideAuthGate();
     }
+  };
+  try {
+    await tryLogin();
   } catch (e) {
+    // If the only thing wrong is a stale interaction lock from a prior abandoned
+    // login, clear it and retry — users shouldn't need to manually clear site
+    // data to recover from this.
+    const isStaleLock = e && (e.errorCode === 'interaction_in_progress' || (e.message || '').includes('interaction_in_progress'));
+    if (isStaleLock) {
+      clearStaleMsalInteraction();
+      try { await tryLogin(); return; }
+      catch (retryErr) { e = retryErr; /* fall through to redirect */ }
+    }
     console.warn('loginPopup failed, trying redirect', e);
-    try { await m.loginRedirect({ scopes: ['User.Read'] }); }
-    catch (e2) { alert('Sign-in failed: ' + e2.message); }
+    try {
+      clearStaleMsalInteraction(); // belt-and-suspenders before redirect
+      await m.loginRedirect({ scopes: ['User.Read'] });
+    } catch (e2) { alert('Sign-in failed: ' + e2.message); }
   }
 }
 
@@ -9785,7 +9825,14 @@ async function initAuth() {
   const _gateFallback = setTimeout(() => { if (!CURRENT_USER || !CURRENT_USER.email) showAuthGate(); }, 5000);
 
   try { await m.initialize(); } catch (e) { console.warn('msal initialize failed', e); }
-  try { await m.handleRedirectPromise(); } catch (e) { console.warn('handleRedirectPromise', e); }
+  // Resolve any pending redirect first. If there's no response to handle, any
+  // lingering interaction_in_progress lock in sessionStorage is stale — probably
+  // left over from a prior login that was abandoned mid-redirect. Clear it so
+  // the user's next Sign In click doesn't fail with "interaction_in_progress".
+  try {
+    const resp = await m.handleRedirectPromise();
+    if (!resp) clearStaleMsalInteraction();
+  } catch (e) { console.warn('handleRedirectPromise', e); clearStaleMsalInteraction(); }
   try { await loadAdminEmails(); } catch (e) { console.warn('loadAdminEmails failed', e); }
   const accounts = m.getAllAccounts();
   if (accounts.length > 0) {
