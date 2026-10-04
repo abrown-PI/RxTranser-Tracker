@@ -258,6 +258,84 @@ tr.row-sla-warn { background: var(--warning-bg) !important; }
 </style>
 </head>
 <body>
+<!--
+  Compass bar — shared cross-app launcher.
+  Source of truth: ~/pi-brand/compass-bar/snippet.html
+  Inject right after <body> on every page of every Compass app.
+  Set data-current on the <nav> to one of:
+    recomrx | careconnect | dscsa | licensing | rxtransfers
+  so the matching pill highlights.
+-->
+<style>
+  .compass-bar {
+    --compass-highlight: #2a6ebb;       /* override per app with its primary color */
+    background: #061a3a;
+    color: #c7d6ee;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    position: sticky; top: 0; z-index: 1000;
+  }
+  .compass-bar a { text-decoration: none; }
+  .compass-bar .cb-home {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: #ffffff; padding: 0 12px 0 0; margin-right: 10px;
+    border-right: 1px solid rgba(255,255,255,.12); height: 36px;
+  }
+  .compass-bar .cb-home svg { display: block; }
+  .compass-bar .cb-home-label { font-weight: 600; letter-spacing: .2px; }
+  .compass-bar .cb-apps { display: flex; gap: 2px; align-items: center; overflow-x: auto; }
+  .compass-bar .cb-apps::-webkit-scrollbar { display: none; }
+  .compass-bar .cb-label {
+    color: #8ea8cf; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .6px; margin-right: 8px; white-space: nowrap;
+  }
+  .compass-bar .cb-apps a {
+    color: #c7d6ee; padding: 6px 10px; border-radius: 6px;
+    font-size: 13px; white-space: nowrap; transition: background .15s, color .15s;
+  }
+  .compass-bar .cb-apps a:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .compass-bar .cb-apps a.cb-current {
+    background: var(--compass-highlight); color: #fff; font-weight: 600;
+  }
+  .compass-bar .cb-spacer { flex: 1; }
+  @media (max-width: 720px) {
+    .compass-bar { padding: 0 10px; }
+    .compass-bar .cb-label { display: none; }
+    .compass-bar .cb-home-label { display: none; }
+    .compass-bar .cb-home { padding-right: 8px; margin-right: 6px; }
+  }
+  /* Auto-highlight based on data-current */
+  .compass-bar[data-current="recomrx"]     a[data-app="recomrx"],
+  .compass-bar[data-current="careconnect"] a[data-app="careconnect"],
+  .compass-bar[data-current="dscsa"]       a[data-app="dscsa"],
+  .compass-bar[data-current="licensing"]   a[data-app="licensing"],
+  .compass-bar[data-current="rxtransfers"] a[data-app="rxtransfers"] {
+    background: var(--compass-highlight); color: #fff; font-weight: 600;
+  }
+</style>
+<nav class="compass-bar" data-current="rxtransfers" aria-label="Compass apps">
+  <a class="cb-home" href="https://pharmacyinnovationsnet.sharepoint.com/sites/Pixe" title="Pixie — PI intranet home">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 10.5 12 3l9 7.5"/>
+      <path d="M5 9.5V21h14V9.5"/>
+      <path d="M10 21v-6h4v6"/>
+    </svg>
+    <span class="cb-home-label">Pixie</span>
+  </a>
+  <div class="cb-apps">
+    <span class="cb-label">Apps</span>
+    <a data-app="recomrx"     href="https://d3ikv97hzv1pb2.cloudfront.net/">ReComRx</a>
+    <a data-app="careconnect" href="https://careconnect.pharmacyinnovations.net/">CareConnect</a>
+    <a data-app="dscsa"       href="https://dscsa.apps.pharmacyinnovations.net/">DSCSA</a>
+    <a data-app="licensing"   href="https://licensing.apps.pharmacyinnovations.net/">License Tracker</a>
+    <a data-app="rxtransfers" href="https://rxtransfer.apps.pharmacyinnovations.net/">Rx Transfers</a>
+  </div>
+  <div class="cb-spacer"></div>
+</nav>
 <nav class="navbar" style="position:relative">
   <img src="logo.png" alt="PI" class="logo" />
   <div class="brand">
@@ -9701,7 +9779,7 @@ function clearStaleMsalInteraction() {
 
 async function doSignIn(m) {
   const tryLogin = async () => {
-    const res = await m.loginPopup({ scopes: ['User.Read'], prompt: 'select_account' });
+    const res = await m.loginPopup({ scopes: ['User.Read'] });
     if (res && res.account) {
       await applyMsalAccount(res.account);
       hideAuthGate();
@@ -9839,8 +9917,16 @@ async function initAuth() {
     try { await applyMsalAccount(accounts[0]); clearTimeout(_gateFallback); hideAuthGate(); }
     catch (e) { console.warn('applyMsalAccount failed during auto sign-in — staying on auth gate', e); clearTimeout(_gateFallback); showAuthGate(); }
   } else if (!localHint) {
-    clearTimeout(_gateFallback);
-    showAuthGate();
+    // Try silent SSO using the Entra session established in a sibling Compass app.
+    try {
+      const r = await m.ssoSilent({ scopes: ['User.Read'] });
+      await applyMsalAccount(r.account);
+      clearTimeout(_gateFallback);
+      hideAuthGate();
+    } catch (ssoErr) {
+      clearTimeout(_gateFallback);
+      showAuthGate();
+    }
   } else {
     clearTimeout(_gateFallback); // local sign-in path will handle this on its own
   }
