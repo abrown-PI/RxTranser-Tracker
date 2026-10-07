@@ -10,17 +10,37 @@
 // Key handling (Oct 7 2026 — Mike-reported bulk-upload outage + Key Vault migration):
 // The Doc Intelligence API key is fetched from Key Vault at cold start using the SWA's
 // system-assigned managed identity. Native SWA app-setting Key Vault references don't
-// work with Managed Functions, so we do the fetch ourselves. Cached in-memory for 10
-// minutes per Function instance to avoid Key Vault round-trips on every request.
+// work with Managed Functions, so we do the fetch ourselves. Raw REST (no @azure/*
+// SDK) because SWA content distribution has an ~85MB bundle cap and the identity +
+// keyvault-secrets SDKs blow past that. Cached in-memory per Function instance to
+// avoid round-trips on every request.
+//
 // Falls back to the raw AZURE_DOC_INTEL_KEY env var if AZURE_DOC_INTEL_VAULT_URI is
-// unset — useful during migration or as a break-glass path.
-
-const { DefaultAzureCredential } = require('@azure/identity');
-const { SecretClient } = require('@azure/keyvault-secrets');
+// unset or set to a KV-reference string (break-glass path).
 
 let _cachedKey = null;
 let _cacheExpiresAt = 0;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+// Managed-identity token endpoint on Azure Functions / App Service / SWA Managed
+// Functions. The IDENTITY_ENDPOINT + IDENTITY_HEADER env vars are injected by the
+// runtime when system-assigned identity is enabled.
+async function getManagedIdentityToken(resource) {
+  const endpoint = process.env.IDENTITY_ENDPOINT;
+  const header = process.env.IDENTITY_HEADER;
+  if (!endpoint || !header) {
+    throw new Error('Managed identity not available (IDENTITY_ENDPOINT/IDENTITY_HEADER not set) — enable system-assigned identity on the SWA');
+  }
+  const url = `${endpoint}?api-version=2019-08-01&resource=${encodeURIComponent(resource)}`;
+  const resp = await fetch(url, { headers: { 'X-IDENTITY-HEADER': header } });
+  if (!resp.ok) {
+    const detail = await resp.text();
+    throw new Error(`IMDS token request failed: ${resp.status} ${detail.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  if (!data.access_token) throw new Error('IMDS returned no access_token');
+  return data.access_token;
+}
 
 async function getDocIntelKey(context) {
   // Short-circuit: raw key env var still wins if set to a usable value. A Key Vault
@@ -39,21 +59,29 @@ async function getDocIntelKey(context) {
     throw Object.assign(new Error('Document Intelligence key not available (set AZURE_DOC_INTEL_KEY or AZURE_DOC_INTEL_VAULT_URI)'), { statusCode: 503 });
   }
   // vaultUri format: https://<vault-name>.vault.azure.net/secrets/<secret-name>[/<version>]
-  const match = vaultUri.match(/^(https:\/\/[^\/]+)\/secrets\/([^\/\?]+)/i);
+  const match = vaultUri.match(/^(https:\/\/[^\/]+)\/secrets\/([^\/\?]+)(?:\/([^\/\?]+))?/i);
   if (!match) {
     throw Object.assign(new Error('AZURE_DOC_INTEL_VAULT_URI format invalid — expected https://<vault>.vault.azure.net/secrets/<name>'), { statusCode: 503 });
   }
   const vaultUrl = match[1];
   const secretName = match[2];
-  const credential = new DefaultAzureCredential();
-  const client = new SecretClient(vaultUrl, credential);
-  const secret = await client.getSecret(secretName);
-  if (!secret || !secret.value) {
+  const secretVersion = match[3] || '';
+  const token = await getManagedIdentityToken('https://vault.azure.net');
+  const kvUrl = secretVersion
+    ? `${vaultUrl}/secrets/${encodeURIComponent(secretName)}/${encodeURIComponent(secretVersion)}?api-version=7.4`
+    : `${vaultUrl}/secrets/${encodeURIComponent(secretName)}?api-version=7.4`;
+  const kvResp = await fetch(kvUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  if (!kvResp.ok) {
+    const detail = await kvResp.text();
+    throw Object.assign(new Error(`Key Vault secret fetch failed: ${kvResp.status} ${detail.slice(0, 200)}`), { statusCode: 503 });
+  }
+  const kvData = await kvResp.json();
+  if (!kvData.value) {
     throw Object.assign(new Error('Key Vault secret returned empty value'), { statusCode: 503 });
   }
-  _cachedKey = secret.value;
+  _cachedKey = kvData.value;
   _cacheExpiresAt = Date.now() + CACHE_TTL_MS;
-  context.log(`Fetched Doc Intelligence key from Key Vault; cached for ${CACHE_TTL_MS/60000}min`);
+  context.log(`Fetched Doc Intelligence key from Key Vault via managed identity; cached for ${CACHE_TTL_MS/60000}min`);
   return _cachedKey;
 }
 

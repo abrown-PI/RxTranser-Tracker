@@ -4,8 +4,6 @@
   "description": "Azure Functions backend for RxTransfer Tracker",
   "dependencies": {
     "@azure/data-tables": "^13.2.2",
-    "@azure/identity": "^4.5.0",
-    "@azure/keyvault-secrets": "^4.9.0",
     "@azure/storage-blob": "^12.18.0"
   }
 }
