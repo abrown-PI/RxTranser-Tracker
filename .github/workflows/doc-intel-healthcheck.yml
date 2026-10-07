@@ -1,0 +1,60 @@
+name: Doc Intelligence healthcheck
+
+# Daily probe to catch stale Azure Document Intelligence API keys early.
+# Context: Oct 7 2026 Mike-reported bulk-upload outage — the Doc Intelligence
+# key had been rotated weeks earlier on the Cognitive Services resource but
+# the SWA app setting was never synced. No way to detect it until a user hit
+# the broken flow. This workflow hits /api/parse-transfer-vision with a tiny
+# test image once a day; if Microsoft returns 401, the key is stale and this
+# job fails, which emails whoever is watching this repo (Ashley).
+#
+# Expected successful response: HTTP 502 with body.status==400 and detail
+# containing "InvalidContentDimensions". That means the key authenticates
+# fine and Microsoft rejected the probe image only because it's 1x1 pixels.
+# Any other response (especially 401) means the key is bad or the service
+# is down.
+on:
+  schedule:
+    # 13:00 UTC = 8am CDT / 7am CST (Ashley is Central Time per user memory).
+    # Catches drift before the pharmacy day starts.
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe parse-transfer-vision
+        run: |
+          # 1x1 white PNG as base64 — valid PNG, intentionally too small so
+          # Doc Intelligence rejects it with InvalidContentDimensions after
+          # authenticating the key. If auth fails first, response is 401.
+          IMG='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+          BODY=$(curl -sS -X POST \
+            "https://red-island-0bb34e510.7.azurestaticapps.net/api/parse-transfer-vision" \
+            -H "Content-Type: application/json" \
+            -d "{\"image\":\"$IMG\",\"mediaType\":\"image/png\"}" \
+            -w "\nHTTP_STATUS:%{http_code}")
+          STATUS=$(echo "$BODY" | tail -n1 | sed 's/HTTP_STATUS://')
+          RESPONSE=$(echo "$BODY" | sed '$d')
+          echo "HTTP $STATUS"
+          echo "$RESPONSE"
+          # Healthy: HTTP 502 with status":400 and InvalidContentDimensions
+          # (Doc Intel accepted the key, rejected the image for being 1x1).
+          if echo "$RESPONSE" | grep -q 'InvalidContentDimensions'; then
+            echo "::notice::Doc Intelligence healthy — key authenticates, image rejected as expected (1x1 probe)"
+            exit 0
+          fi
+          # Stale key: 401 from upstream Doc Intel.
+          if echo "$RESPONSE" | grep -q '"status":401' || echo "$RESPONSE" | grep -q 'invalid subscription key'; then
+            echo "::error::Doc Intelligence key is STALE (HTTP 401 from Microsoft). Fix: Portal → Cognitive services → PIRxDocIntel → Keys and Endpoint → copy KEY 1. Then Portal → Static Web Apps → RxTransfer-Tracker → Environment variables → AZURE_DOC_INTEL_KEY → paste → Save. Bulk upload is broken until this is fixed."
+            exit 1
+          fi
+          # Not configured: our Function returned 503.
+          if [ "$STATUS" = "503" ]; then
+            echo "::error::Doc Intelligence not configured — AZURE_DOC_INTEL_KEY env var is empty on the SWA. Portal → Static Web Apps → RxTransfer-Tracker → Environment variables → verify AZURE_DOC_INTEL_KEY is set."
+            exit 1
+          fi
+          # Unknown failure — surface the response for debugging.
+          echo "::error::Doc Intelligence healthcheck failed with unexpected response (HTTP $STATUS). See logs above."
+          exit 1
