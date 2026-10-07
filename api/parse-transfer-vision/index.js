@@ -6,13 +6,70 @@
 // Free tier covers 500 pages/month with 2-page-per-document limit; each call here is exactly
 // one page so we stay within the limit. We do our own field interpretation from the OCR text +
 // extracted key-value pairs (the prescription transfer label set isn't a pre-trained doc type).
+//
+// Key handling (Oct 7 2026 — Mike-reported bulk-upload outage + Key Vault migration):
+// The Doc Intelligence API key is fetched from Key Vault at cold start using the SWA's
+// system-assigned managed identity. Native SWA app-setting Key Vault references don't
+// work with Managed Functions, so we do the fetch ourselves. Cached in-memory for 10
+// minutes per Function instance to avoid Key Vault round-trips on every request.
+// Falls back to the raw AZURE_DOC_INTEL_KEY env var if AZURE_DOC_INTEL_VAULT_URI is
+// unset — useful during migration or as a break-glass path.
+
+const { DefaultAzureCredential } = require('@azure/identity');
+const { SecretClient } = require('@azure/keyvault-secrets');
+
+let _cachedKey = null;
+let _cacheExpiresAt = 0;
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+async function getDocIntelKey(context) {
+  // Short-circuit: raw key env var still wins if set to a usable value. A Key Vault
+  // reference string (@Microsoft.KeyVault(...)) counts as "not usable" since SWA
+  // Managed Functions don't resolve those — fall through to the vault fetch instead.
+  const rawKey = process.env.AZURE_DOC_INTEL_KEY || '';
+  if (rawKey && !rawKey.startsWith('@Microsoft.KeyVault')) {
+    return rawKey;
+  }
+  // In-memory cache so we don't call Key Vault on every request.
+  if (_cachedKey && Date.now() < _cacheExpiresAt) {
+    return _cachedKey;
+  }
+  const vaultUri = process.env.AZURE_DOC_INTEL_VAULT_URI;
+  if (!vaultUri) {
+    throw Object.assign(new Error('Document Intelligence key not available (set AZURE_DOC_INTEL_KEY or AZURE_DOC_INTEL_VAULT_URI)'), { statusCode: 503 });
+  }
+  // vaultUri format: https://<vault-name>.vault.azure.net/secrets/<secret-name>[/<version>]
+  const match = vaultUri.match(/^(https:\/\/[^\/]+)\/secrets\/([^\/\?]+)/i);
+  if (!match) {
+    throw Object.assign(new Error('AZURE_DOC_INTEL_VAULT_URI format invalid — expected https://<vault>.vault.azure.net/secrets/<name>'), { statusCode: 503 });
+  }
+  const vaultUrl = match[1];
+  const secretName = match[2];
+  const credential = new DefaultAzureCredential();
+  const client = new SecretClient(vaultUrl, credential);
+  const secret = await client.getSecret(secretName);
+  if (!secret || !secret.value) {
+    throw Object.assign(new Error('Key Vault secret returned empty value'), { statusCode: 503 });
+  }
+  _cachedKey = secret.value;
+  _cacheExpiresAt = Date.now() + CACHE_TTL_MS;
+  context.log(`Fetched Doc Intelligence key from Key Vault; cached for ${CACHE_TTL_MS/60000}min`);
+  return _cachedKey;
+}
 
 module.exports = async function (context, req) {
   try {
     const endpoint = (process.env.AZURE_DOC_INTEL_ENDPOINT || '').replace(/\/$/, '');
-    const key = process.env.AZURE_DOC_INTEL_KEY;
-    if (!endpoint || !key) {
-      context.res = { status: 503, body: { error: 'Document Intelligence not configured (AZURE_DOC_INTEL_ENDPOINT/KEY)' } };
+    if (!endpoint) {
+      context.res = { status: 503, body: { error: 'Document Intelligence endpoint not configured (AZURE_DOC_INTEL_ENDPOINT)' } };
+      return;
+    }
+    let key;
+    try {
+      key = await getDocIntelKey(context);
+    } catch (keyErr) {
+      context.log.error('getDocIntelKey failed:', keyErr.message);
+      context.res = { status: keyErr.statusCode || 500, body: { error: keyErr.message } };
       return;
     }
     const { image, mediaType } = req.body || {};
