@@ -4415,6 +4415,23 @@ function renderNewForm() {
   const root = document.getElementById('view-new');
   if (!state.newMode) state.newMode = 'single';
   if (state.newMode === 'bulk') return renderBulkUpload();
+  // Resume unsaved draft (recovered from localStorage after a session timeout
+  // or browser refresh). Only prompt when the user doesn't already have an
+  // in-memory draft, and only for new-mode (edit path never persists to local).
+  if (!state.draft && !state.editingTransferId) {
+    const saved = loadDraftFromStorage();
+    if (saved && saved.draft) {
+      const d = saved.draft;
+      const name = formatPatientName(d.patientFirstName || '', d.patientLastName || '') || '(no patient name entered yet)';
+      const when = saved.savedAt ? new Date(saved.savedAt).toLocaleString() : 'earlier';
+      const resume = confirm(`You have an unsaved transfer draft from ${when}:\n\n  ${name}\n\nResume editing it? (Cancel discards it and starts a fresh form.)`);
+      if (resume) {
+        state.draft = d;
+      } else {
+        clearDraftFromStorage();
+      }
+    }
+  }
   if (!state.draft) state.draft = freshDraft();
   const d = state.draft;
   const isEditing = !!state.editingTransferId;
@@ -5140,14 +5157,72 @@ function renderDraftItems() {
       const idx = +el.dataset.idx, k = el.dataset.k;
       state.draft.items[idx][k] = el.type === 'checkbox' ? el.checked : el.value;
       if (k === 'drug') renderDrugWarningBox();
+      scheduleDraftSave();
     };
     el.addEventListener('input', sync);
     el.addEventListener('change', sync);
   });
   wrap.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => {
-    state.draft.items.splice(+b.dataset.rm, 1); renderDraftItems();
+    state.draft.items.splice(+b.dataset.rm, 1); renderDraftItems(); scheduleDraftSave();
   }));
   renderDrugWarningBox();
+}
+
+// =====================================================================
+// Draft auto-save / resume (Oct 9 2026 — Amanda / Michelle Hornberg-Wilson)
+// =====================================================================
+// Users whose MSAL session expires mid-form hit this pattern: fill out a new
+// transfer, click Save, see "Transfer submitted" alert (optimistic), then the
+// POST silently 401s because the token's dead. The transfer "disappears"
+// because state.draft is already cleared and the local TRANSFERS array has
+// the row that was never persisted. On next poll the row vanishes from the
+// client too. Three incidents so far: Melissa / Kathy Mills, Anna / various,
+// Amanda / Michelle today.
+//
+// Fix: snapshot state.draft to localStorage on every change (debounced). On
+// submit, await the API call and only clear local state after confirmed
+// success. If the save fails, keep the draft in localStorage and show a
+// visible retry banner at the top of the New Transfer tab.
+//
+// Scope: only NEW transfers (state.editingTransferId == null). Edits are
+// already recoverable from the server-side row if the edit save fails.
+function _draftStorageKey() {
+  const email = (CURRENT_USER && CURRENT_USER.email) || 'anon';
+  return `tx-tracker-draft:${email}`;
+}
+function saveDraftToStorage() {
+  if (!state.draft) return;
+  if (state.editingTransferId) return; // only new drafts
+  try {
+    const payload = {
+      draft: state.draft,
+      savedAt: new Date().toISOString(),
+      user: (CURRENT_USER && CURRENT_USER.email) || ''
+    };
+    localStorage.setItem(_draftStorageKey(), JSON.stringify(payload));
+  } catch (e) { console.warn('saveDraftToStorage failed', e); }
+}
+function loadDraftFromStorage() {
+  try {
+    const raw = localStorage.getItem(_draftStorageKey());
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    // Stale: discard drafts older than 7 days — likely abandoned.
+    if (payload.savedAt && Date.now() - new Date(payload.savedAt).getTime() > 7 * 86400000) {
+      localStorage.removeItem(_draftStorageKey());
+      return null;
+    }
+    return payload;
+  } catch (e) { console.warn('loadDraftFromStorage failed', e); return null; }
+}
+function clearDraftFromStorage() {
+  try { localStorage.removeItem(_draftStorageKey()); } catch {}
+}
+// Debounced wrapper so a burst of keystrokes writes once, not twenty times.
+let _draftSaveTimer = null;
+function scheduleDraftSave() {
+  clearTimeout(_draftSaveTimer);
+  _draftSaveTimer = setTimeout(saveDraftToStorage, 400);
 }
 
 function bindDraftInputs() {
@@ -5163,6 +5238,7 @@ function bindDraftInputs() {
         state.draft.patientName = formatPatientName(state.draft.patientFirstName, state.draft.patientLastName);
         renderDrugWarningBox();
       }
+      scheduleDraftSave();
     };
     el.addEventListener('input', sync);
     el.addEventListener('change', sync);
@@ -5519,7 +5595,7 @@ function bindDraftInputs() {
   if (origSel) origSel.addEventListener('change', () => { state.draft.formula = null; renderNewForm(); });
 }
 
-function submitDraft() {
+async function submitDraft() {
   const d = state.draft;
   // Belt-and-suspenders DOM re-read for every item field. Same reason as the date
   // picker sync below — if the drug datalist picked a value but the 'input' event
@@ -5705,10 +5781,30 @@ function submitDraft() {
       FORMULAS.push({ id: nextId(), name: savedName, location: d.originLocation, link: '', fileName: d.formula.name, createdBy: CURRENT_USER.name, createdAt: new Date().toISOString() });
     }
   }
+  // Attempt the server save BEFORE clearing local state. If this throws (session
+  // expired → 401, network error, 5xx), we keep the draft in both memory and
+  // localStorage so the user can retry without re-typing. The draft was already
+  // being auto-saved to localStorage via bindDraftInputs — this just keeps the
+  // in-memory copy intact.
   TRANSFERS.unshift(t);
-  apiSaveTransfer(t);
+  try {
+    await apiSaveTransfer(t);
+  } catch (e) {
+    // Roll back the optimistic unshift so the UI doesn't show a ghost row.
+    const idx = TRANSFERS.indexOf(t);
+    if (idx !== -1) TRANSFERS.splice(idx, 1);
+    console.error('apiSaveTransfer failed', e);
+    const isAuth = e && (e.status === 401 || e.status === 403);
+    const msg = isAuth
+      ? 'Your sign-in session expired, so this transfer could not be saved to the server. Your draft is preserved — sign in again (refresh the page), then click + New Transfer and resume the draft when prompted.'
+      : 'Could not save transfer to the server: ' + (e.message || 'unknown error') + '\n\nYour draft is preserved. Try Save again, or refresh and resume the draft when prompted.';
+    alert(msg);
+    return;
+  }
   logAudit('create_transfer', 'transfer', t.id, { transferType: t.transferType, originLocation: t.originLocation, fillLocation: t.fillLocation });
+  // Confirmed persisted — safe to clear local draft.
   state.draft = null;
+  clearDraftFromStorage();
   alert('Transfer submitted.');
   document.querySelector('.tab[data-tab=transfers]').click();
 }
@@ -9285,13 +9381,16 @@ async function apiLoadTransfers() {
   } catch (e) { console.error('Failed to load transfers from API', e); return null; }
 }
 async function apiSaveTransfer(t) {
-  try {
-    const r = await fetch('/api/transfers', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(t)
-    });
-    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + await r.text());
-  } catch (e) { console.error('apiSaveTransfer failed', e); alert('Could not save to server: ' + e.message); }
+  const r = await fetch('/api/transfers', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(t)
+  });
+  if (!r.ok) {
+    const detail = await r.text().catch(() => '');
+    const err = new Error('HTTP ' + r.status + (detail ? ' ' + detail.slice(0,200) : ''));
+    err.status = r.status;
+    throw err;
+  }
 }
 async function apiUpdateTransfer(t) {
   try {
