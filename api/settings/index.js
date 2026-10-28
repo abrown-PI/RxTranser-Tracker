@@ -77,7 +77,12 @@ function redactWebhooks(settings) {
     pharmacyAddresses: settings.pharmacyAddresses || {},
     // Only return drugWarnings when explicitly stored — lets the frontend keep
     // its seed value on a fresh install (Array.isArray check on the client).
-    ...(Array.isArray(settings.drugWarnings) ? { drugWarnings: settings.drugWarnings } : {})
+    ...(Array.isArray(settings.drugWarnings) ? { drugWarnings: settings.drugWarnings } : {}),
+    // Hidden drugs — admin-maintained blocklist that getKnownDrugs() filters out of
+    // the autocomplete, without touching the actual transfer rows that reference them.
+    // Lets admins hide junk like "DAW: 0" that OCR leaked into the drug field without
+    // breaking the receiving pharmacy's search on existing historical transfers.
+    hiddenDrugs: Array.isArray(settings.hiddenDrugs) ? settings.hiddenDrugs : []
   };
 }
 
@@ -143,6 +148,12 @@ module.exports = async function (context, req) {
       if (Array.isArray(incoming.drugWarnings)) {
         drugWarnings = incoming.drugWarnings;
       }
+      // Hidden drugs — admin maintains the blocklist; full replace if provided
+      let hiddenDrugs = Array.isArray(current.hiddenDrugs) ? current.hiddenDrugs : [];
+      if (Array.isArray(incoming.hiddenDrugs)) {
+        // Dedupe + preserve exact-case so matching stays byte-exact against transfer items
+        hiddenDrugs = [...new Set(incoming.hiddenDrugs.map(x => String(x || '').trim()).filter(Boolean))];
+      }
       const merged = {
         ...current,
         teamsWebhooks,
@@ -151,6 +162,7 @@ module.exports = async function (context, req) {
         locationEmails,
         pharmacyAddresses,
         drugWarnings,
+        hiddenDrugs,
         askQuestionRouting: incoming.askQuestionRouting || current.askQuestionRouting || 'opposite-side'
       };
       await writeSettings(merged);

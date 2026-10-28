@@ -3590,6 +3590,15 @@ function renderAdmin() {
       <div id="deletedTransfersList"><div class="item-sub">Loading…</div></div>
     </div></div>
 
+    <div class="card"><div class="card-header">Drug Library <span class="item-sub" id="drug-lib-count" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div><div class="card-body">
+      <p class="item-sub" style="margin-bottom:10px">Every unique drug name used across active transfers. Use <strong>Hide</strong> to remove a drug from the autocomplete without touching the transfers that already use it (good for OCR junk like <code>DAW: 0</code>). Use <strong>Merge into…</strong> to consolidate a duplicate variant into another name — it updates every active transfer that references the source. Hidden drugs still show below with an <strong>Unhide</strong> option.</p>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+        <input id="drug-lib-search" placeholder="Search drug names…" style="flex:1;padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px" />
+        <label class="checkbox-row" style="font-size:12px;color:var(--gray-600);white-space:nowrap"><input type="checkbox" id="drug-lib-show-hidden" /> Show hidden</label>
+      </div>
+      <div id="drug-lib-list"><div class="item-sub">Loading…</div></div>
+    </div></div>
+
     <div class="card"><div class="card-header">Drug Warnings <button class="btn btn-primary btn-sm" id="addDrugWarningBtn">+ Add Warning</button></div><div class="card-body">
       <p class="item-sub" style="margin-bottom:12px">When a team member types a drug name on a New or Edit Transfer that matches one of these patterns, a yellow warning box pops up under the Items section with whatever message + charge guidance you set here. Useful for policy callouts like the USP overnight-shipping rule.</p>
       <p class="item-sub" style="margin-bottom:14px"><strong>Match pattern syntax:</strong> one pattern per line. Each line is space-separated terms — <em>all</em> terms must appear in the drug name (case-insensitive). Examples: <code>tacrolimus ophth</code> matches any drug containing both "tacrolimus" and "ophth". Multiple lines work as OR.</p>
@@ -3875,6 +3884,109 @@ function renderAdmin() {
     }));
   };
   renderDeletedList();
+
+  // Drug Library panel — audit view of every unique drug across active transfers
+  // with per-row Hide and Merge actions. Sept-Oct cleanup pass showed 166 unique
+  // strings (many near-duplicates from OCR spacing / colon-vs-period / word order
+  // drift). This gives admins a self-serve way to consolidate without a code change
+  // or DB access, matching the pattern of the Drug Warnings panel below.
+  const renderDrugLibrary = () => {
+    const listEl = document.getElementById('drug-lib-list');
+    const hdr = document.getElementById('drug-lib-count');
+    const searchEl = document.getElementById('drug-lib-search');
+    const showHiddenEl = document.getElementById('drug-lib-show-hidden');
+    if (!listEl) return;
+    // Build usage map from active transfers only. Archive isn't shown (its drug
+    // names are historical record and don't drive the autocomplete).
+    const usage = new Map();
+    TRANSFERS.forEach(t => (t.items || []).forEach(it => {
+      const d = (it.drug || '').trim();
+      if (!d) return;
+      usage.set(d, (usage.get(d) || 0) + 1);
+    }));
+    // Include hidden drugs that no longer appear in any transfer, so admin can still unhide them.
+    HIDDEN_DRUGS.forEach(d => { if (!usage.has(d)) usage.set(d, 0); });
+    const all = [...usage.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const query = (searchEl && searchEl.value || '').trim().toLowerCase();
+    const showHidden = !!(showHiddenEl && showHiddenEl.checked);
+    const rows = all.filter(([d]) => {
+      if (!showHidden && HIDDEN_DRUGS.has(d)) return false;
+      if (query && !d.toLowerCase().includes(query)) return false;
+      return true;
+    });
+    if (hdr) hdr.textContent = ` — ${all.length} unique drug name${all.length===1?'':'s'}, ${HIDDEN_DRUGS.size} hidden`;
+    if (rows.length === 0) {
+      listEl.innerHTML = '<div class="empty" style="padding:20px"><h3>No matches</h3><p>No drug names match the current filter.</p></div>';
+      return;
+    }
+    listEl.innerHTML = `<table style="box-shadow:none;font-size:13px">
+      <thead><tr><th>Drug</th><th style="width:70px;text-align:right">Uses</th><th style="width:260px"></th></tr></thead>
+      <tbody>${rows.map(([drug, count]) => {
+        const hidden = HIDDEN_DRUGS.has(drug);
+        return `<tr${hidden?' style="opacity:.55"':''}>
+          <td>${escapeHtml(drug)}${hidden?' <span class="badge" style="font-size:10px;background:var(--gray-100);color:var(--gray-600);margin-left:4px">Hidden</span>':''}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${count}</td>
+          <td style="text-align:right;white-space:nowrap">
+            ${hidden
+              ? `<button class="btn btn-secondary btn-sm" data-unhide="${escapeHtml(drug)}">Unhide</button>`
+              : `<button class="btn btn-secondary btn-sm" data-hide="${escapeHtml(drug)}" title="Remove from autocomplete suggestions (does not touch any transfer)">Hide</button>
+                 <button class="btn btn-primary btn-sm" data-merge="${escapeHtml(drug)}" title="Replace this drug name with another on every active transfer">Merge into…</button>`
+            }
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+    listEl.querySelectorAll('[data-hide]').forEach(b => b.addEventListener('click', async () => {
+      const drug = b.dataset.hide;
+      HIDDEN_DRUGS.add(drug);
+      try {
+        await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hiddenDrugs: [...HIDDEN_DRUGS] }) });
+      } catch (e) { console.warn('persist hiddenDrugs failed', e); }
+      renderDrugLibrary();
+    }));
+    listEl.querySelectorAll('[data-unhide]').forEach(b => b.addEventListener('click', async () => {
+      const drug = b.dataset.unhide;
+      HIDDEN_DRUGS.delete(drug);
+      try {
+        await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hiddenDrugs: [...HIDDEN_DRUGS] }) });
+      } catch (e) { console.warn('persist hiddenDrugs failed', e); }
+      renderDrugLibrary();
+    }));
+    listEl.querySelectorAll('[data-merge]').forEach(b => b.addEventListener('click', async () => {
+      const from = b.dataset.merge;
+      // Build the candidate list for the picker: every other drug currently in use
+      const choices = all.map(([d]) => d).filter(d => d !== from && !HIDDEN_DRUGS.has(d));
+      const to = prompt(`Merge "${from}" into which drug?\n\nType or paste the target drug name exactly as it should appear. Every active transfer currently using "${from}" will be updated to use the new name. This cannot be undone from the portal.\n\nTarget drug name:`, '');
+      if (to === null) return; // canceled
+      const target = (to || '').trim();
+      if (!target) return;
+      if (target === from) { alert('Target is the same as the source. Nothing to do.'); return; }
+      const email = (CURRENT_USER && CURRENT_USER.email) || '';
+      // Dry run first so the admin sees how many transfers will be touched
+      let dry;
+      try {
+        const r = await fetch('/api/drug-merge', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': email }, body: JSON.stringify({ from, to: target, dryRun: true }) });
+        dry = await r.json();
+        if (!r.ok) { alert('Preview failed: ' + (dry.error || r.status)); return; }
+      } catch (e) { alert('Preview failed: ' + e.message); return; }
+      const ok = confirm(`This will update ${dry.stats.transfersTouched} active transfer${dry.stats.transfersTouched===1?'':'s'} (${dry.stats.itemsReplaced} item${dry.stats.itemsReplaced===1?'':'s'}) from:\n\n  ${from}\n\nto:\n\n  ${target}\n\nProceed?`);
+      if (!ok) return;
+      try {
+        const r = await fetch('/api/drug-merge', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-email': email }, body: JSON.stringify({ from, to: target }) });
+        const data = await r.json();
+        if (!r.ok) { alert('Merge failed: ' + (data.error || r.status)); return; }
+        alert(`Merged.\n\nTransfers touched: ${data.stats.transfersTouched}\nItems replaced: ${data.stats.itemsReplaced}\nErrors: ${data.stats.errors}`);
+        // Refresh local TRANSFERS from server to pick up the renamed items
+        try { const fresh = await apiLoadTransfers(); if (fresh) { TRANSFERS.length = 0; fresh.forEach(t => TRANSFERS.push(t)); } } catch {}
+        renderDrugLibrary();
+      } catch (e) { alert('Merge failed: ' + e.message); }
+    }));
+  };
+  const _searchEl = document.getElementById('drug-lib-search');
+  const _showHiddenEl = document.getElementById('drug-lib-show-hidden');
+  if (_searchEl) _searchEl.oninput = debounce(renderDrugLibrary, 180);
+  if (_showHiddenEl) _showHiddenEl.onchange = renderDrugLibrary;
+  renderDrugLibrary();
 
   // Unified Users & Access — combines 365 users (/api/users), local accounts (/api/local-users),
   // and admin email list (/api/settings.adminEmails) into one table.
@@ -5053,17 +5165,25 @@ function lastFillForWarning(patientName, warning, excludeTransferId) {
   }
   return best;
 }
+// Admin-maintained blocklist of drug names to exclude from the autocomplete.
+// Loaded from /api/settings.hiddenDrugs on sign-in (see loadAdminEmails). Case-
+// sensitive match against the display string so an admin can hide one variant
+// while another legitimate variant stays visible.
+let HIDDEN_DRUGS = new Set();
+
 function getKnownDrugs() {
   const seen = new Map(); // normalized key -> cleaned display value
   // Seed with canonical names first so they always appear, and so a matching
   // transfer-derived entry won't add a near-duplicate with different casing.
   PRELOADED_DRUGS.forEach(d => {
+    if (HIDDEN_DRUGS.has(d)) return;
     const key = d.toLowerCase().replace(/\s+/g, ' ').trim();
     if (key && !seen.has(key)) seen.set(key, d);
   });
   TRANSFERS.forEach(t => (t.items || []).forEach(i => {
     const raw = (i.drug || '').trim();
     if (!raw) return;
+    if (HIDDEN_DRUGS.has(raw)) return;
     const cleaned = raw
       .replace(/[​-‍﻿]/g, '')
       .replace(/^\s*\d+\s*[\.\)\:\-]\s*/, '')
@@ -9620,6 +9740,8 @@ async function loadAdminEmails() {
     });
     // Replace the seed DRUG_WARNINGS with persisted values when present.
     if (Array.isArray(data.drugWarnings)) DRUG_WARNINGS = data.drugWarnings;
+    // Admin-maintained drug-name blocklist used by getKnownDrugs().
+    if (Array.isArray(data.hiddenDrugs)) HIDDEN_DRUGS = new Set(data.hiddenDrugs);
     return _adminEmails;
   } catch { return []; }
 }
