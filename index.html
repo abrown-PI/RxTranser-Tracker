@@ -5336,6 +5336,11 @@ function loadDraftFromStorage() {
   } catch (e) { console.warn('loadDraftFromStorage failed', e); return null; }
 }
 function clearDraftFromStorage() {
+  // Cancel any pending debounced save first — a timer that fires AFTER we
+  // remove from localStorage would silently re-save and the resume prompt
+  // comes back next visit (Nov 2 2026 report: Michael at Jamestown saved
+  // NICHOLS, JILLIAN successfully but the prompt kept re-appearing).
+  if (_draftSaveTimer) { clearTimeout(_draftSaveTimer); _draftSaveTimer = null; }
   try { localStorage.removeItem(_draftStorageKey()); } catch {}
 }
 // Debounced wrapper so a burst of keystrokes writes once, not twenty times.
@@ -5716,6 +5721,13 @@ function bindDraftInputs() {
 }
 
 async function submitDraft() {
+  // Cancel any pending debounced auto-save before we start. If one is scheduled
+  // and fires during the apiSaveTransfer await window, it would re-write the
+  // draft to localStorage AFTER clearDraftFromStorage runs on success — causing
+  // the resume prompt to re-appear on next visit despite a clean submit
+  // (Nov 2 2026 report: Jamestown saved NICHOLS, JILLIAN successfully but
+  // kept getting the resume prompt).
+  if (_draftSaveTimer) { clearTimeout(_draftSaveTimer); _draftSaveTimer = null; }
   const d = state.draft;
   // Belt-and-suspenders DOM re-read for every item field. Same reason as the date
   // picker sync below — if the drug datalist picked a value but the 'input' event
