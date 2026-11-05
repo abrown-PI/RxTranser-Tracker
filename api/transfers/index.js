@@ -58,6 +58,10 @@ function toEntity(transfer) {
     return obj;
   };
   const cleaned = stripDataUrls(transfer);
+  // updatedAt powers delta sync on the GET endpoint — clients fetch everything
+  // on first load, then poll with ?since=<lastSyncAt> and only get back what's
+  // actually changed. We prefer lastEditedAt > createdAt > now in that order.
+  const updatedAt = transfer.lastEditedAt || transfer.createdAt || new Date().toISOString();
   return {
     partitionKey: PARTITION,
     rowKey: String(transfer.id),
@@ -67,6 +71,7 @@ function toEntity(transfer) {
     originLocation: transfer.originLocation || '',
     fillLocation: transfer.fillLocation || '',
     createdAt: transfer.createdAt || new Date().toISOString(),
+    updatedAt: updatedAt,
     transferType: transfer.transferType || 'New'
   };
 }
@@ -128,19 +133,40 @@ module.exports = async function (context, req) {
         // Perf: the default load skips the archive so the poll payload stays
         // small as the DB grows. Refill picker + full-history search opt in
         // with the query param.
+        //
+        // Delta sync (?since=<ISO>): returns ONLY transfers whose updatedAt is
+        // after the provided timestamp. Clients cache the serverTs from the
+        // response and pass it back as `since` on the next poll. Reduces the
+        // typical 30-second poll from ~6.7 MB to ~a few KB. Entities without
+        // the updatedAt scalar (legacy rows written before this change) are
+        // excluded from a delta response — they can't have changed since any
+        // time this feature existed, so they shouldn't appear in a delta.
+        //
+        // Returns serverTs so clients use the SERVER's clock as the anchor for
+        // the next delta query (avoids client-side clock drift).
         const includeArchive = (req.query && (req.query.include || '').toLowerCase() === 'archive');
+        const since = (req.query && req.query.since) || '';
+        const serverTs = new Date().toISOString();
+        // Validate since — must look like an ISO timestamp. Fall back to full.
+        const sinceValid = /^\d{4}-\d{2}-\d{2}T/.test(since);
+        // Push the filter to the server when possible so we skip serializing
+        // unmatched rows. Azure Table Storage's filter runs row-by-row but it
+        // still saves on wire + JSON parse cost.
+        const queryOpts = sinceValid
+          ? { queryOptions: { filter: `updatedAt gt '${since.replace(/'/g, "''")}'` } }
+          : {};
         const items = [];
-        for await (const e of table.listEntities()) {
+        for await (const e of table.listEntities(queryOpts)) {
           const t = fromEntity(e);
           if (t) items.push(t);
         }
         if (includeArchive) {
-          for await (const e of archive.listEntities()) {
+          for await (const e of archive.listEntities(queryOpts)) {
             const t = fromEntity(e);
             if (t) { t._archived = true; items.push(t); }
           }
         }
-        context.res = { status: 200, body: { transfers: items } };
+        context.res = { status: 200, body: { transfers: items, serverTs, delta: sinceValid } };
       }
       return;
     }

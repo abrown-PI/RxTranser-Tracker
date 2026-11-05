@@ -9707,11 +9707,23 @@ async function refreshActiveTracking() {
 // All mutation calls go through these helpers so we keep the source of truth
 // in the backend. If the API is unreachable, we surface the error but don't
 // block the user (the in-memory copy continues to work for the session).
-async function apiLoadTransfers() {
+// Delta sync anchor. First successful fetch stores the server's timestamp
+// here; subsequent polls pass it back as ?since=X so the server only returns
+// what changed. Cleared on sign-in and on hard refresh.
+let _lastSyncAt = '';
+
+async function apiLoadTransfers(opts = {}) {
   try {
-    const r = await fetch('/api/transfers');
+    // Delta mode: pass ?since=<lastSyncAt> to get only changed rows. Without
+    // it, we do a full fetch (first page load, or explicit full-sync request).
+    const since = opts.since || '';
+    const url = since ? `/api/transfers?since=${encodeURIComponent(since)}` : '/api/transfers';
+    const r = await fetch(url);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
+    // Store the server-reported timestamp for the next delta poll (server
+    // clock is authoritative — avoids client clock drift).
+    if (data.serverTs) _lastSyncAt = data.serverTs;
     const list = data.transfers || [];
     // Advance _nextId past any existing transfer ID. Without this, after a page
     // reload _nextId resets to 20000 and new transfers (incl. refills) collide
@@ -9873,7 +9885,17 @@ function startTransferAutoRefresh() {
     if (document.visibilityState === 'visible') { pollRefreshTransfers(); pollRefreshShipments(); }
   }, TRANSFER_POLL_INTERVAL_MS);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { pollRefreshTransfers(); pollRefreshShipments(); }
+    if (document.visibilityState === 'visible') {
+      // Tab just became visible after being hidden. If delta sync has been
+      // on for a while we might have missed a hard delete (soft-deletes come
+      // through delta since they're an update). Force a full re-sync if it's
+      // been >5 min since last anchor update.
+      if (_lastSyncAt) {
+        const ageMs = Date.now() - new Date(_lastSyncAt).getTime();
+        if (ageMs > 5 * 60 * 1000) _lastSyncAt = '';
+      }
+      pollRefreshTransfers(); pollRefreshShipments();
+    }
   });
 }
 
@@ -9915,17 +9937,39 @@ async function pollRefreshTransfers() {
   if (state.tab === 'new') return;
   if (state.editingTransferId) return;
 
+  // Delta sync: pass the stored serverTs anchor so the server only returns rows
+  // modified since. Typical poll shrinks from ~6.7MB to a few KB (often zero
+  // rows if nothing's changed). Full-sync fallback if _lastSyncAt is empty.
   let loaded;
-  try { loaded = await apiLoadTransfers(); } catch { return; }
+  const isDelta = !!_lastSyncAt;
+  try { loaded = await apiLoadTransfers(isDelta ? { since: _lastSyncAt } : {}); } catch { return; }
   if (!loaded) return;
+
+  if (isDelta) {
+    // Delta mode: empty response means nothing changed. Common case.
+    if (loaded.length === 0) return;
+    // Merge each delta row in-place or push as new. Can't detect hard deletes
+    // here (they're absent from delta) — relies on soft-delete convention +
+    // periodic full-sync on tab-visibility-change.
+    const byId = new Map(TRANSFERS.map(t => [t.id, t]));
+    loaded.forEach(serverT => {
+      const localT = byId.get(serverT.id);
+      if (!localT) { TRANSFERS.unshift(serverT); return; }
+      Object.keys(localT).forEach(k => { if (!(k in serverT)) delete localT[k]; });
+      Object.assign(localT, serverT);
+    });
+    render();
+    if (state.openTransferId && TRANSFERS.some(t => t.id === state.openTransferId)) {
+      renderModal();
+    }
+    return;
+  }
+
+  // Full-sync path (first poll of a new session, or after cache clear).
   // Defensive: an empty response while we have local data is almost certainly
   // a server blip, not a real "all transfers deleted". Skip rather than wipe.
   if (loaded.length === 0 && TRANSFERS.length > 0) return;
 
-  // Cheap change-signature — length plus per-row id/status/lastEdit/paid/tracking.
-  // Old code JSON.stringify'd the whole TRANSFERS array (multi-MB on 1450 rich
-  // rows) TWICE per poll. On a shared plan that's a real main-thread hit every
-  // 30s per user, and it stacks under load.
   const signature = list => {
     let s = list.length + '|';
     for (const t of list) s += t.id + ':' + (t.lastEditedAt || t.createdAt || '') + ':' + t.status + ':' + (t.paid || '') + ':' + (t.trackingNumber || '') + ';';
@@ -9938,7 +9982,6 @@ async function pollRefreshTransfers() {
     seen.add(serverT.id);
     const localT = byId.get(serverT.id);
     if (!localT) { TRANSFERS.unshift(serverT); return; }
-    // Update in place so any references held elsewhere stay valid.
     Object.keys(localT).forEach(k => { if (!(k in serverT)) delete localT[k]; });
     Object.assign(localT, serverT);
   });
